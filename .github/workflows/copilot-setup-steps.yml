@@ -1,0 +1,89 @@
+name: "Copilot Setup Steps"
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        
+      # Frontend Setup (Node.js/React/TypeScript)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "apps/frontend/package-lock.json"
+          
+      - name: Install frontend dependencies
+        working-directory: apps/frontend
+        run: npm ci
+        
+      - name: Run frontend linter
+        working-directory: apps/frontend
+        run: npm run lint
+        
+      - name: Run frontend type checking
+        working-directory: apps/frontend
+        run: npm run type-check
+        
+      - name: Run frontend tests
+        working-directory: apps/frontend
+        run: npm test -- --coverage
+        
+      # Backend Setup (Python with uv)
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+        
+      - name: Install backend dependencies
+        working-directory: apps/backend
+        run: uv sync
+        
+      - name: Run backend linter
+        working-directory: apps/backend
+        run: uv run ruff check .
+        
+      - name: Run backend type checking
+        working-directory: apps/backend
+        run: uv run mypy .
+        
+      - name: Run backend tests
+        working-directory: apps/backend
+        run: uv run pytest --cov=app tests/
+        
+      # Database Setup
+      - name: Set up PostgreSQL
+        uses: harmon758/postgresql-action@v1
+        with:
+          postgresql version: '14'
+          postgresql db: trading_journal_test
+          postgresql user: test_user
+          postgresql password: test_password
+          
+      # Docker Setup Validation
+      - name: Validate Docker Compose
+        run: docker-compose config
+        
+      - name: Test Docker build
+        run: |
+          docker-compose build --no-cache
+          docker-compose up -d
+          sleep 10
+          docker-compose down

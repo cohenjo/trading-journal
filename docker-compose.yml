@@ -1,0 +1,121 @@
+
+services:
+  db:
+    image: postgres:13
+    container_name: trading_journal_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: trading_journal
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5432:5432"
+    networks:
+      - trading-journal-network
+
+  backend:
+    container_name: trading_journal_backend
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql://user:password@db:5432/trading_journal"
+      OTEL_SERVICE_NAME: "trading-journal-backend"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+    depends_on:
+      - db
+      - otel-collector
+    networks:
+      - trading-journal-network
+
+  frontend:
+    container_name: trading_journal_frontend
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/frontend:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:8000"
+    depends_on:
+      - backend
+    networks:
+      - trading-journal-network
+
+  ib-gateway:
+    platform: linux/amd64
+    image: ghcr.io/gnzsnz/ib-gateway:latest
+    restart: always
+    environment:
+      TWS_USERID: ${TWS_USERID}
+      TWS_PASSWORD: ${TWS_PASSWORD}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      READ_ONLY_API: ${READ_ONLY_API:-no}
+      TWOFA_TIMEOUT_ACTION: ${TWOFA_TIMEOUT_ACTION:-restart}
+      AUTO_RESTART_TIME: ${AUTO_RESTART_TIME:-"11:59 PM"}
+      RELOGIN_AFTER_TWOFA_TIMEOUT: ${RELOGIN_AFTER_TWOFA_TIMEOUT:-yes}
+      TIME_ZONE: ${TIME_ZONE:-Asia/Jerusalem}
+    ports:
+      - "127.0.0.1:4001:4003" # Map host 4001 to container's socat port 4003 (Live)
+      - "127.0.0.1:4002:4004" # Map host 4002 to container's socat port 4004 (Paper)
+    networks:
+      - trading-journal-network
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter
+    networks:
+      - trading-journal-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./observability/prometheus.yaml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - trading-journal-network
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686" # UI
+      - "14268:14268"
+      - "14250:14250"
+    networks:
+      - trading-journal-network
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./observability/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    networks:
+      - trading-journal-network
+
+volumes:
+  postgres_data:
+
+networks:
+  trading-journal-network:
+    driver: bridge

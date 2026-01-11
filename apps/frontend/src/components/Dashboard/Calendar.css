@@ -1,0 +1,46 @@
+.calendar-container {
+  width: 100%;
+  padding: 20px;
+  background-color: #1a1a1a; /* Dark background for the container */
+}
+
+.full-width-calendar {
+  width: 100%;
+  border: none;
+  background-color: #2b2b2b; /* Dark background for the calendar itself */
+  color: #ffffff; /* Light text color */
+}
+
+/* Override other react-calendar styles for a dark theme */
+.full-width-calendar .react-calendar__navigation button {
+  color: #ffffff;
+  background-color: #3c3c3c;
+}
+
+.full-width-calendar .react-calendar__navigation button:enabled:hover,
+.full-width-calendar .react-calendar__navigation button:enabled:focus {
+  background-color: #4c4c4c;
+}
+
+.full-width-calendar .react-calendar__month-view__weekdays__weekday {
+  color: #a0a0a0;
+}
+
+.full-width-calendar .react-calendar__tile {
+  background-color: #2b2b2b;
+  color: #ffffff;
+}
+
+.full-width-calendar .react-calendar__tile:enabled:hover,
+.full-width-calendar .react-calendar__tile:enabled:focus {
+  background-color: #4c4c4c;
+}
+
+.full-width-calendar .react-calendar__tile--now {
+  background: #3c3c3c;
+}
+
+.full-width-calendar .react-calendar__tile--active {
+  background: #007bff;
+  color: white;
+}
