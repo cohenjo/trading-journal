@@ -7,8 +7,8 @@ from app.dal.database import engine
 from app.schema.models import Trade
 
 # Your Flex credentials
-TOKEN = '734559856225134863841100'
-QUERY_ID = '1248225'
+TOKEN = ''
+QUERY_ID = ''
 
 util.logToConsole(logging.INFO)
 
