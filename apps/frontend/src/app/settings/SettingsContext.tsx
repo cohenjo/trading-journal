@@ -2,7 +2,19 @@
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
+export type PersonInfo = {
+  name: string;
+  birthYear: number;
+  birthMonth: number;
+};
+
 export type UserSettings = {
+  // Basic Info
+  planningMode: 'Individual' | 'Couple';
+  primaryUser: PersonInfo;
+  spouse: PersonInfo;
+
+  // Financial Parameters
   targetIncome: number;
   defaultRungTarget: number;
   dividendYieldRate: number;
@@ -15,6 +27,10 @@ export type UserSettings = {
 };
 
 const DEFAULT_SETTINGS: UserSettings = {
+  planningMode: 'Individual',
+  primaryUser: { name: 'You', birthYear: 1980, birthMonth: 1 },
+  spouse: { name: 'Spouse', birthYear: 1980, birthMonth: 1 },
+
   targetIncome: 20000,
   defaultRungTarget: 40000,
   dividendYieldRate: 0.028,
@@ -42,6 +58,10 @@ const loadSettings = (): UserSettings => {
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw) as Partial<UserSettings>;
     return {
+      planningMode: parsed.planningMode === 'Couple' ? 'Couple' : 'Individual',
+      primaryUser: parsed.primaryUser || DEFAULT_SETTINGS.primaryUser,
+      spouse: parsed.spouse || DEFAULT_SETTINGS.spouse,
+      
       targetIncome:
         typeof parsed.targetIncome === "number" && parsed.targetIncome >= 0
           ? parsed.targetIncome

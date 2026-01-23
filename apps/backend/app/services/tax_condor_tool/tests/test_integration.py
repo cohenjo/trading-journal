@@ -11,7 +11,7 @@ from app.services.tax_condor_tool.data.ibkr_provider import IBKRDataProvider
 from app.services.tax_condor_tool.service import TaxCondorService
 
 # Configure logging
-    logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 async def main():
     try:

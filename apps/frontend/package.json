@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@nivo/core": "^0.99.0",
+    "@nivo/sankey": "^0.99.0",
     "lightweight-charts": "^5.1.0",
     "next": "15.3.4",
     "react": "^19.0.0",

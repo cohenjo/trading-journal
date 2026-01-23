@@ -43,6 +43,50 @@ export default function RootLayout({
                       Summary
                     </Link>
                   </li>
+
+                  <li className="px-3 pt-3 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    Financial Planning
+                  </li>
+                  <li>
+                    <Link
+                      href="/plan"
+                      className="block px-3 py-2 hover:bg-slate-800"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Plan
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href="/cash-flow"
+                      className="block px-3 py-2 hover:bg-slate-800"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Cash Flow
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href="/current-finances"
+                      className="block px-3 py-2 hover:bg-slate-800"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Current Finances
+                    </Link>
+                  </li>
+                  <li>
+                    <Link
+                      href="/progress"
+                      className="block px-3 py-2 hover:bg-slate-800"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Progress
+                    </Link>
+                  </li>
+
+                  <li className="px-3 pt-3 pb-1 text-xs font-semibold text-slate-500 uppercase tracking-wider border-t border-slate-800 mt-1">
+                    Trading
+                  </li>
                   <li>
                     <Link
                       href="/options"

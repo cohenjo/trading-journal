@@ -15,6 +15,8 @@ from app.api import (
     options,
     tax_condor,
     backtest,
+    finances,
+    plans,
 )
 import os
 from opentelemetry import trace, metrics
@@ -91,6 +93,8 @@ app.include_router(dividends.router, prefix="/api", tags=["dividends"])
 app.include_router(options.router, prefix="/api", tags=["options"])
 app.include_router(tax_condor.router, prefix="/api/tax-condor", tags=["tax-condor"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
+app.include_router(finances.router)
+app.include_router(plans.router)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
