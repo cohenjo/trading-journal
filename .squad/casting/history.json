@@ -1,0 +1,18 @@
+{
+  "universe_usage_history": [
+    {
+      "assignment_id": "assignment-2026-02-23-01",
+      "universe": "The Usual Suspects",
+      "timestamp": "2026-02-23T22:46:19Z",
+      "team_size": 8
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "assignment-2026-02-23-01": {
+      "universe": "The Usual Suspects",
+      "assigned_at": "2026-02-23T22:46:19Z",
+      "members": ["Keaton", "Fenster", "Hockney", "McManus", "Kobayashi", "Kujan", "Rabin", "Redfoot"],
+      "exempt": ["Scribe", "Ralph"]
+    }
+  }
+}
