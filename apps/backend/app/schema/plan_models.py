@@ -11,6 +11,7 @@ class PlanItem(BaseModel):
     category: str # "Income", "Expense", "Asset" 
     sub_category: Optional[str] = None # "Salary", "Housing"
     owner: str # "You", "Spouse"
+    currency: str = "ILS" # "USD", "ILS", "EUR"
     
     # Financials
     value: float = 0.0 # Annual Amount or Current Value
@@ -29,6 +30,17 @@ class PlanItem(BaseModel):
     end_reference: Optional[str] = None
     recurrence: Optional[Dict] = None
     
+    # Priorities
+    inflow_priority: Optional[int] = 100
+    withdrawal_priority: Optional[int] = 100
+    
+    # Account Settings (Top Level)
+    # Commons keys: type, bond_allocation, dividend_yield, fees, withdrawal_priority
+    # Dividend Policy keys: dividend_policy ('Accumulate'|'Payout'), dividend_mode ('Percent'|'Fixed'), 
+    # dividend_fixed_amount, dividend_growth_rate, dividend_tax_rate
+    # Dividend Timing: dividend_payout_start_condition ('Immediate'|'Age'|'Milestone'|'Date'), dividend_payout_start_reference
+    account_settings: Optional[Dict] = {}
+    
     # Details
     details: Dict = {} # Flexible for other props like "tax_treatment", "financing"
 
@@ -37,7 +49,11 @@ class PlanMilestone(BaseModel):
     name: str
     date: Optional[Union[date_type, str]] = None
     year_offset: Optional[int] = None # e.g. 20 (years from now)
-    type: str = "Custom" # "Retirement", "Financial Independence"
+    type: str = "Custom" # "Retirement", "Financial Independence", "Debt Free", "Life Expectancy"
+    details: Dict = {}
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    owner: Optional[str] = "You"
 
 class PlanData(BaseModel):
     items: List[PlanItem] = []

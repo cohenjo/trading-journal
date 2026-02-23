@@ -36,12 +36,12 @@ async function fetchFinances() {
         return res.json();
     }
     // Return complete mock to satisfy backend validation
-    return { 
-        net_worth: 0, 
+    return {
+        net_worth: 0,
         total_assets: 0,
         total_liabilities: 0,
         date: new Date().toISOString().split('T')[0],
-        data: { items: [], total_investments: 0, total_savings: 0 } 
+        data: { items: [], total_investments: 0, total_savings: 0 }
     };
 }
 
@@ -74,7 +74,7 @@ export default function PlanPage() {
     // Save Handler (Debounced ideal, simple here)
     const handleUpdatePlanData = async (newData: PlanData) => {
         if (!plan) return;
-        
+
         const updatedPlan = { ...plan, data: newData };
         setPlan(updatedPlan); // Optimistic Update
 
@@ -100,30 +100,30 @@ export default function PlanPage() {
                     settings: settings // User Profile (Age, etc)
                 })
             })
-            .then(async res => {
-                if(!res.ok) {
-                    const txt = await res.text();
-                    console.error("Simulation failed response:", txt);
-                    throw new Error("Simulation failed: " + txt);
-                }
-                return res.json();
-            })
-            .then(data => {
-                const formatted = data.map((p: any) => ({
-                    time: `${p.year}-01-01`,
-                    value: p.net_worth, // Default view
-                    ...p
-                }));
-                setProjection(formatted);
-                // Set initial selected year if not set or out of range
-                if (formatted.length > 0) {
-                     setSelectedYear(prev => {
-                         const exists = formatted.find((p: any) => p.year === prev);
-                         return exists ? prev : formatted[0].year;
-                     });
-                }
-            })
-            .catch(err => console.error("Simulation error:", err));
+                .then(async res => {
+                    if (!res.ok) {
+                        const txt = await res.text();
+                        console.error("Simulation failed response:", txt);
+                        throw new Error("Simulation failed: " + txt);
+                    }
+                    return res.json();
+                })
+                .then(data => {
+                    const formatted = data.map((p: any) => ({
+                        time: `${p.year}-01-01`,
+                        value: p.net_worth, // Default view
+                        ...p
+                    }));
+                    setProjection(formatted);
+                    // Set initial selected year if not set or out of range
+                    if (formatted.length > 0) {
+                        setSelectedYear(prev => {
+                            const exists = formatted.find((p: any) => p.year === prev);
+                            return exists ? prev : formatted[0].year;
+                        });
+                    }
+                })
+                .catch(err => console.error("Simulation error:", err));
         }, 500); // 500ms debounce
 
         return () => clearTimeout(timer);
@@ -133,21 +133,108 @@ export default function PlanPage() {
     const markers = useMemo(() => {
         if (!plan || !plan.data) return [];
         const startYear = new Date().getFullYear();
-        
-        return plan.data.milestones.map(m => {
-            let year = startYear;
-            if (m.year_offset) year += m.year_offset;
-            else if (m.date) year = new Date(m.date).getFullYear();
-            
+        const primaryBirthYear = settings?.primaryUser?.birthYear || 1980;
+        const spouseBirthYear = settings?.spouse?.birthYear || primaryBirthYear; // Fallback
+
+        const planItems = plan.data.items || [];
+        const financeItems = finances?.data?.items || [];
+
+        // Helper to find account settings
+        const getPensionStartYear = (name: string): number | null => {
+            // Check Plan Item first (Override)
+            const pItem = planItems.find(i => i.name === name && i.category === 'Account');
+            if (pItem?.account_settings?.starting_age) {
+                const owner = pItem.owner === 'Spouse' ? 'Spouse' : 'You';
+                const birthYear = owner === 'Spouse' ? spouseBirthYear : primaryBirthYear;
+                return birthYear + pItem.account_settings.starting_age;
+            }
+
+            // Check Finance Item (Default)
+            const fItem = financeItems.find((i: any) => i.name === name);
+            if (fItem?.details?.starting_age) {
+                const owner = fItem.owner === 'Spouse' ? 'Spouse' : 'You'; // Assuming finance item has owner? or default to You
+                const birthYear = owner === 'Spouse' ? spouseBirthYear : primaryBirthYear;
+                return birthYear + Number(fItem.details.starting_age);
+            }
+            return null;
+        };
+
+        // Pension Markers
+        const pensionMarkers = financeItems
+            .filter((f: any) => (f.type || '').toLowerCase().includes('pension'))
+            .map((f: any) => {
+                const year = getPensionStartYear(f.name);
+                if (!year) return null;
+
+                const isSpouse = f.owner === 'Spouse'; // Check if finance item has owner
+                const label = isSpouse ? `${settings?.spouse?.name || 'Spouse'} Pension` : `${settings?.primaryUser?.name || 'You'} Pension`;
+
+                // Avoid duplicate markers if milestone exists with same name?
+                // But Milestones have unique IDs.
+
+                return {
+                    time: `${year}-01-01`,
+                    position: 'aboveBar',
+                    color: isSpouse ? '#8b5cf6' : '#3b82f6', // Violet vs Blue
+                    shape: 'arrowDown',
+                    text: label,
+                    id: `pension_marker_${f.id}`
+                };
+            })
+            .filter(Boolean);
+
+        const milestoneMarkers = plan.data.milestones.map(m => {
+            let year: number | undefined = undefined;
+            const type = m.type;
+
+            // 1. Dynamic Milestones (Check Projection)
+            if (type === 'Financial Independence' || type === 'Debt Free') {
+                const hitPoint = projection.find(p => p.milestones_hit?.includes(m.id));
+                if (hitPoint) {
+                    year = hitPoint.year;
+                }
+            }
+            // 2. Life Expectancy
+            else if (type === 'Life Expectancy') {
+                const birthYear = m.owner === 'Spouse' ? spouseBirthYear : primaryBirthYear;
+                const age = m.details?.age || 95;
+                year = birthYear + age;
+            }
+            // 3. Static / Custom
+            else {
+                if (m.date) {
+                    year = new Date(m.date).getFullYear();
+                } else if (m.year_offset !== undefined) {
+                    year = startYear + m.year_offset;
+                }
+            }
+
+            if (!year) return null;
+
             return {
                 time: `${year}-01-01`,
                 position: 'aboveBar',
-                color: '#e879f9',
+                color: (() => {
+                    const c = m.color || 'bg-violet-500';
+                    const map: Record<string, string> = {
+                        'bg-blue-500': '#3b82f6',
+                        'bg-green-500': '#22c55e',
+                        'bg-violet-500': '#8b5cf6',
+                        'bg-pink-500': '#ec4899',
+                        'bg-orange-500': '#f97316',
+                        'bg-red-500': '#ef4444',
+                        'bg-teal-500': '#14b8a6',
+                        'bg-slate-500': '#64748b'
+                    };
+                    return map[c] || '#8b5cf6';
+                })(),
                 shape: 'arrowDown',
                 text: m.name,
             };
-        });
-    }, [plan]);
+        }).filter(Boolean);
+
+        return [...milestoneMarkers, ...pensionMarkers];
+    }, [plan, projection, settings, finances]);
 
     // Derived Selection Data
     const selectedData = useMemo(() => {
@@ -160,6 +247,20 @@ export default function PlanPage() {
 
     const minYear = projection.length > 0 ? projection[0].year : new Date().getFullYear();
     const maxYear = projection.length > 0 ? projection[projection.length - 1].year : new Date().getFullYear() + 40;
+
+    const liquidData = useMemo(() => {
+        return projection.map(p => ({
+            time: p.time,
+            value: p.liquid_net_worth || 0
+        }));
+    }, [projection]);
+
+    const netWorthData = useMemo(() => {
+        return projection.map(p => ({
+            time: p.time,
+            value: p.net_worth || 0
+        }));
+    }, [projection]);
 
     const handleCrosshairMove = useCallback((y: number | null) => {
         if (y) setSelectedYear(y);
@@ -174,7 +275,7 @@ export default function PlanPage() {
                 <div className="p-4 md:p-8 flex flex-col gap-8 max-w-5xl mx-auto w-full">
                     <header>
                         <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-fuchsia-400">
-                                Financial Plan
+                            Financial Plan
                         </h1>
                         <p className="text-slate-400 mt-2">
                             Projection based on current net worth of {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(finances?.net_worth || 0)}
@@ -183,18 +284,23 @@ export default function PlanPage() {
 
                     {/* Chart Section */}
                     <div className="bg-slate-900/50 rounded-2xl p-6 border border-slate-800 shadow-xl backdrop-blur-sm">
-                        <div className="h-[400px] w-full">
+                        <div className="w-full">
                             {/* Pass mapped projection data */}
-                            <PlanChart 
-                                data={projection} 
-                                markers={markers as any} 
-                                height={400} 
-                                onCrosshairMove={handleCrosshairMove} 
+                            <PlanChart
+                                data={liquidData}
+                                secondaryData={netWorthData}
+                                markers={markers as any}
+                                height={400}
+                                birthYear={settings?.primaryUser?.birthYear || 1980}
+                                onCrosshairMove={handleCrosshairMove}
                             />
                         </div>
                         <div className="mt-4 flex gap-4 text-xs text-slate-500 justify-center">
                             <div className="flex items-center gap-2">
-                                <span className="w-3 h-3 rounded-full bg-[#8b5cf6]"></span> Net Worth
+                                <span className="w-3 h-3 rounded-full bg-[#8b5cf6]"></span> Liquid NW
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="w-3 h-1 rounded-full bg-slate-500"></span> Net Worth
                             </div>
                         </div>
                     </div>
@@ -208,7 +314,7 @@ export default function PlanPage() {
             </div>
 
             {/* Right Side Pane (Fixed/Sticky) */}
-            <PlanDetailsPane 
+            <PlanDetailsPane
                 data={selectedData}
                 prevData={prevData}
                 currentYear={selectedYear}

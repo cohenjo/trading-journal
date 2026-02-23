@@ -24,6 +24,11 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi",
     "opentelemetry-instrumentation-sqlalchemy",
     "opentelemetry-instrumentation-logging",
+    "schwab-py",
+    "github-copilot-sdk>=0.1.25",
+    "pdfplumber>=0.11.9",
+    "pypdf>=6.7.1",
+    "python-multipart>=0.0.22",
 ]
 requires-python = ">=3.10"
 

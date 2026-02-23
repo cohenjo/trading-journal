@@ -1,14 +1,64 @@
-from fastapi import APIRouter
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from typing import List, Dict, Any
+from sqlmodel import Session
+
+from app.dal.database import get_session
 from app.schema.dividend_models import (
-    DividendRecord,
-    DividendProjectionParams,
-    DividendProjectionPoint,
-    DividendProjectionResponse,
+    DividendPosition,
+    DividendPositionCreate,
+    DividendPositionStats,
+    DividendDashboardStats,
+    DividendRecord, # Legacy
+    DividendProjectionParams, # Legacy
+    DividendProjectionResponse # Legacy
 )
+from app.services import dividend_service
 from app.data.dividends_xlsx import load_dividends, save_dividends
 
-router = APIRouter()
+router = APIRouter(tags=["dividends"]) # Prefix handled in main.py usually, checking main.py it is prefix="/api", tags=["dividends"]
+
+# --- New Dashboard Endpoints ---
+
+@router.get("/dividends/dashboard", response_model=Dict[str, Any])
+def get_dividend_dashboard(
+    background_tasks: BackgroundTasks,
+    account: str = Query(None), 
+    currency: str = Query("USD"),
+    db: Session = Depends(get_session)
+):
+    """
+    Get dashboard stats and enriched positions.
+    Optionally filter by account.
+    """
+    positions = dividend_service.get_all_positions(db, account)
+    
+    # Trigger background cache update
+    if positions:
+        tickers = list(set(p.ticker for p in positions))
+        background_tasks.add_task(dividend_service.update_dividend_cache_background, tickers)
+        
+    result = dividend_service.enrich_positions(positions, db, target_currency=currency)
+    return result
+
+@router.post("/dividends/position", response_model=DividendPosition)
+def create_dividend_position(position: DividendPositionCreate, db: Session = Depends(get_session)):
+    return dividend_service.create_position(db, position)
+
+@router.put("/dividends/position/{position_id}", response_model=DividendPosition)
+def update_dividend_position(position_id: int, position: DividendPositionCreate, db: Session = Depends(get_session)):
+    updated = dividend_service.update_position(db, position_id, position)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Position not found")
+    return updated
+
+@router.delete("/dividends/position/{position_id}", response_model=bool)
+def delete_dividend_position(position_id: int, db: Session = Depends(get_session)):
+    success = dividend_service.delete_position(db, position_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Position not found")
+    return True
+
+# --- Legacy / Existing Endpoints (Preserved for now) ---
 
 @router.get("/dividends", response_model=List[DividendRecord])
 def get_dividends():
@@ -23,6 +73,8 @@ def update_dividends(records: List[DividendRecord]):
 
 @router.post("/dividends/projection", response_model=DividendProjectionResponse)
 def get_dividend_projection(params: DividendProjectionParams):
+    from app.schema.dividend_models import DividendProjectionPoint # Import locally to avoid circular if any
+    
     historical = load_dividends()
 
     if not historical:

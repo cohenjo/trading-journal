@@ -176,9 +176,14 @@ class MatchedTrade(SQLModel, table=True):
     close_price: float
     pnl: float
     notes: Optional[str] = None
+
 # Import backtest models to register them with SQLModel.metadata
 from .backtest_models import OptionContract, HistoricalOptionBar, BacktestRun, BacktestTrade
 # Import finance models for alebmic registration
 from .finance_models import FinanceSnapshot
 # Import plan models for alembic registration
 from .plan_models import Plan
+# Import dividend models for alembic registration
+from .dividend_models import DividendPosition, DividendAccount, DividendTickerData
+# Import trading models for alembic registration
+from .trading_models import TradingAccountConfig

@@ -4,14 +4,16 @@ import { PlanItem, PlanMilestone } from './types';
 import { PlanTimeSelector } from './PlanTimeSelector';
 import { PlanAssetDetails } from './PlanAssetDetails';
 import { PlanAccountDetails } from './PlanAccountDetails';
+import { CurrencySelector } from '../Common/CurrencySelector';
 
 interface Props {
     isOpen: boolean;
     onClose: () => void;
     onSave: (item: PlanItem) => void;
-    category: 'Income' | 'Expense' | 'Asset' | 'Liability' | 'Milestone' | 'Account'; 
+    category: 'Income' | 'Expense' | 'Asset' | 'Liability' | 'Milestone' | 'Account';
     milestones?: PlanMilestone[];
     initialData?: PlanItem;
+    mode?: 'planning' | 'snapshot';
 }
 
 const INCOME_TYPES = [
@@ -27,7 +29,12 @@ const INCOME_TYPES = [
 const EXPENSE_TYPES = [
     { label: 'Living Expenses', icon: '🏠' },
     { label: 'Rent', icon: '🏘️' },
-    { label: 'Mortgage', icon: '🏦' }, 
+    { label: 'Mortgage', icon: '🏦' },
+    { label: 'Food', icon: '🍔' },
+    { label: 'Health care', icon: '⚕️' },
+    { label: 'Insurance', icon: '🛡️' },
+    { label: 'Online Services', icon: '🌐' },
+    { label: 'Self Care', icon: '🧘' },
     { label: 'Travel', icon: '✈️' },
     { label: 'Education', icon: '🎓' },
     { label: 'Custom Expense', icon: '💲' },
@@ -44,14 +51,20 @@ const ASSET_TYPES = [
 
 const ACCOUNT_TYPES = [
     { label: 'Taxable Investments', icon: '📈' },
+    { label: 'Brokerage Account', icon: '💼' },
     { label: '401k/403b', icon: '🏦' },
     { label: 'Roth IRA', icon: '🛡️' },
+    { label: 'IRA', icon: '📜' },
+    { label: 'Hishtalmut Fund', icon: '🎓' },
+    { label: 'ESPP', icon: '📉' },
+    { label: 'RSU', icon: '🎫' },
     { label: 'Savings', icon: '🐖' },
     { label: 'HSA', icon: '🏥' },
+    { label: 'Pension Fund', icon: '👴' },
     { label: 'Custom Account', icon: '💲' },
 ];
 
-export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, milestones = [], initialData }) => {
+export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, milestones = [], initialData, mode = 'planning' }) => {
     const [step, setStep] = useState<'type-select' | 'details'>(initialData ? 'details' : 'type-select');
     const [formData, setFormData] = useState<Partial<PlanItem>>({});
 
@@ -68,6 +81,7 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
                     value: 0,
                     growth_rate: category === 'Expense' ? 3.0 : 0.0,
                     owner: 'You',
+                    currency: 'ILS',
                     start_condition: 'Now'
                 });
             }
@@ -80,14 +94,14 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
 
     if (!isOpen) return null;
 
-    const types = category === 'Income' ? INCOME_TYPES : 
-                 category === 'Expense' ? EXPENSE_TYPES : 
-                 category === 'Account' ? ACCOUNT_TYPES : ASSET_TYPES;
+    const types = category === 'Income' ? INCOME_TYPES :
+        category === 'Expense' ? EXPENSE_TYPES :
+            category === 'Account' ? ACCOUNT_TYPES : ASSET_TYPES;
 
     // --- RENDER TYPE SELECT ---
     if (step === 'type-select') {
-        if(category === 'Milestone') {
-            setStep('details'); 
+        if (category === 'Milestone') {
+            setStep('details');
             return null;
         }
 
@@ -98,13 +112,30 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
                         <h2 className="text-xl font-bold text-white">New {category}</h2>
                         <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
                     </div>
-                    
+
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                         {types.map((t) => (
                             <button
                                 key={t.label}
                                 onClick={() => {
-                                    handleUpdate({ sub_category: t.label, name: t.label });
+                                    const update: any = { sub_category: t.label, name: t.label };
+                                    if (category === 'Account') {
+                                        // Auto-map label to type
+                                        let type = 'Taxable';
+                                        if (t.label.includes('Brokerage')) type = 'Broker';
+                                        else if (t.label.includes('401k')) type = '401k';
+                                        else if (t.label === 'Roth IRA') type = 'Roth';
+                                        else if (t.label === 'IRA') type = 'IRA';
+                                        else if (t.label.includes('Hishtalmut')) type = 'Hishtalmut';
+                                        else if (t.label === 'ESPP') type = 'ESPP';
+                                        else if (t.label === 'RSU') { type = 'RSU'; update.currency = 'USD'; }
+                                        else if (t.label === 'HSA') type = 'HSA';
+                                        else if (t.label === 'Pension Fund') type = 'Pension';
+                                        else if (t.label === 'Savings') type = 'Savings';
+
+                                        update.account_settings = { type };
+                                    }
+                                    handleUpdate(update);
                                     setStep('details');
                                 }}
                                 className="flex flex-col items-center gap-3 p-6 rounded-xl bg-slate-800 hover:bg-slate-700 hover:border-violet-500 border border-transparent transition-all group"
@@ -115,7 +146,7 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
                         ))}
                     </div>
                 </div>
-            </div>
+            </div >
         );
     }
 
@@ -123,7 +154,7 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
             <div className="bg-slate-950 rounded-xl border border-slate-800 w-full max-w-2xl shadow-2xl animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
-                
+
                 {/* Header */}
                 <div className="flex justify-between items-center p-6 border-b border-slate-800">
                     <div className="flex items-center gap-3">
@@ -142,120 +173,133 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
 
                 {/* Content */}
                 <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
-                    
+
                     {/* Basic Info */}
                     <div className="grid grid-cols-2 gap-4">
                         <div className="col-span-2">
-                             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Name</label>
-                             <input type="text" className="w-full bg-slate-900 border-slate-700 rounded p-3 text-lg text-white focus:ring-2 focus:ring-violet-500 outline-none" 
-                                value={formData.name || ''} onChange={e => handleUpdate({ name: e.target.value })} 
-                             />
-                        </div>
-                        
-                        <div>
-                             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Owner</label>
-                             <select className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                value={formData.owner} onChange={e => handleUpdate({ owner: e.target.value })}
-                             >
-                                <option value="You">You</option>
-                                <option value="Spouse">Spouse</option>
-                                <option value="Joint">Joint</option>
-                             </select>
+                            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Name</label>
+                            <input type="text" className="w-full bg-slate-900 border-slate-700 rounded p-3 text-lg text-white focus:ring-2 focus:ring-violet-500 outline-none"
+                                value={formData.name || ''} onChange={e => handleUpdate({ name: e.target.value })}
+                            />
                         </div>
 
-                         <div>
-                             <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Frequency</label>
-                             <select className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                value={formData.frequency} onChange={e => handleUpdate({ frequency: e.target.value as any })}
-                             >
-                                <option value="Yearly">Yearly</option>
-                                <option value="Monthly">Monthly</option>
-                                <option value="OneTime">One Time</option>
-                             </select>
+                        <div>
+                            <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Owner</label>
+                            <select className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                value={formData.owner} onChange={e => handleUpdate({ owner: e.target.value })}
+                            >
+                                <option value="You">You</option>
+                                <option value="Spouse">Spouse</option>
+                                {!formData.sub_category?.includes('Pension') && <option value="Joint">Joint</option>}
+                            </select>
                         </div>
+
+                        {mode === 'planning' && (
+                            <div>
+                                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Frequency</label>
+                                <select className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                    value={formData.frequency} onChange={e => handleUpdate({ frequency: e.target.value as any })}
+                                >
+                                    <option value="Yearly">Yearly</option>
+                                    <option value="Monthly">Monthly</option>
+                                    <option value="OneTime">One Time</option>
+                                </select>
+                            </div>
+                        )}
                     </div>
 
                     {category === 'Asset' ? (
-                        <PlanAssetDetails item={formData as PlanItem} onChange={handleUpdate} />
+                        <PlanAssetDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} />
                     ) : category === 'Account' ? (
-                        <PlanAccountDetails item={formData as PlanItem} onChange={handleUpdate} />
+                        <PlanAccountDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} milestones={milestones} />
                     ) : (
                         // Standard Amount & Growth for Income/Expense
                         <div className="bg-slate-800 p-4 rounded-lg space-y-4 border border-slate-700">
-                             <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Annual Amount</label>
-                                    <input type="number" className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                        value={formData.value ?? ''} 
-                                        onChange={e => {
-                                            const val = parseFloat(e.target.value);
-                                            handleUpdate({ value: isNaN(val) ? 0 : val });
-                                        }}
-                                    />
+                                    <div className="flex gap-2">
+                                        <input type="number" className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                            value={formData.value ?? ''}
+                                            onChange={e => {
+                                                const val = parseFloat(e.target.value);
+                                                handleUpdate({ value: isNaN(val) ? 0 : val });
+                                            }}
+                                        />
+                                        <CurrencySelector
+                                            value={formData.currency || 'ILS'}
+                                            onChange={c => handleUpdate({ currency: c })}
+                                            className="w-24 shrink-0"
+                                        />
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Growth Rate (%)</label>
-                                    <input type="number" step="0.1" className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                        value={formData.growth_rate ?? ''} 
-                                        onChange={e => {
-                                             const val = parseFloat(e.target.value);
-                                             handleUpdate({ growth_rate: isNaN(val) ? 0 : val });
-                                        }}
-                                    />
-                                </div>
-                             </div>
+                                {mode === 'planning' && (
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Growth Rate (%)</label>
+                                        <input type="number" step="0.1" className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                            value={formData.growth_rate ?? ''}
+                                            onChange={e => {
+                                                const val = parseFloat(e.target.value);
+                                                handleUpdate({ growth_rate: isNaN(val) ? 0 : val });
+                                            }}
+                                        />
+                                    </div>
+                                )}
+                            </div>
 
-                             {category === 'Income' && (
-                                 <div>
+                            {category === 'Income' && (
+                                <div>
                                     <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Tax Rate (%)</label>
                                     <input type="number" step="1" className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                        value={formData.tax_rate ?? ''} 
+                                        value={formData.tax_rate ?? ''}
                                         onChange={e => {
                                             const val = parseFloat(e.target.value);
                                             handleUpdate({ tax_rate: isNaN(val) ? 0 : val });
                                         }}
                                     />
                                     <p className="text-xs text-slate-500 mt-1">Effective tax rate on this income source.</p>
-                                 </div>
-                             )}
+                                </div>
+                            )}
                         </div>
                     )}
 
-                    {/* Time Range */}
-                    <div className="space-y-4">
-                        <PlanTimeSelector 
-                            label="Start" 
-                            condition={formData.start_condition}
-                            reference={formData.start_reference}
-                            date={formData.start_date}
-                            milestones={milestones}
-                            onChange={handleUpdate}
-                        />
-                        
-                         <PlanTimeSelector 
-                            label="End" 
-                            condition={formData.end_condition}
-                            reference={formData.end_reference}
-                            date={formData.end_date}
-                            milestones={milestones}
-                            onChange={handleUpdate}
-                            isEnd
-                        />
-                    </div>
+                    {/* Time Range - Hide in Snapshot Mode, Hide for Pension */}
+                    {mode === 'planning' && !formData.sub_category?.includes('Pension') && formData.account_settings?.type !== 'Pension' && (
+                        <div className="space-y-4">
+                            <PlanTimeSelector
+                                label="Start"
+                                condition={formData.start_condition}
+                                reference={formData.start_reference}
+                                date={formData.start_date}
+                                milestones={milestones}
+                                onChange={handleUpdate}
+                            />
+
+                            <PlanTimeSelector
+                                label="End"
+                                condition={formData.end_condition}
+                                reference={formData.end_reference}
+                                date={formData.end_date}
+                                milestones={milestones}
+                                onChange={handleUpdate}
+                                isEnd
+                            />
+                        </div>
+                    )}
                 </div>
 
                 {/* Footer */}
                 <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-xl flex justify-between items-center">
-                     <button 
-                        onClick={() => setStep('type-select')} 
+                    <button
+                        onClick={() => setStep('type-select')}
                         className="text-slate-400 hover:text-white text-sm"
                         style={{ display: initialData ? 'none' : 'block' }}
-                    > 
+                    >
                         ← Back to Types
                     </button>
                     <div className="flex gap-3 ml-auto">
                         <button onClick={onClose} className="px-4 py-2 text-slate-300 hover:bg-slate-800 rounded">Cancel</button>
-                        <button 
+                        <button
                             onClick={() => {
                                 onSave({ ...formData, id: formData.id || crypto.randomUUID() } as PlanItem);
                                 onClose();

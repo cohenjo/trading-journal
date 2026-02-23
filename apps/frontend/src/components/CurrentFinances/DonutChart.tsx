@@ -12,6 +12,7 @@ interface DonutChartProps {
   subLabel?: string;
   size?: number;
   thickness?: number;
+  mainCurrency?: string;
 }
 
 export const DonutChart: React.FC<DonutChartProps> = ({
@@ -20,6 +21,7 @@ export const DonutChart: React.FC<DonutChartProps> = ({
   subLabel,
   size = 200,
   thickness = 12,
+  mainCurrency = 'USD'
 }) => {
   const total = data.reduce((acc, curr) => acc + curr.value, 0);
   const radius = (size - thickness) / 2;
@@ -32,20 +34,20 @@ export const DonutChart: React.FC<DonutChartProps> = ({
   if (total === 0) {
     return (
       <div className="flex flex-col items-center justify-center" style={{ width: size, height: size }}>
-         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-            <circle
-              cx={center}
-              cy={center}
-              r={radius}
-              fill="transparent"
-              stroke="#334155" // slate-700
-              strokeWidth={thickness}
-            />
-         </svg>
-           <div className="absolute flex flex-col items-center justify-center text-center">
-            <span className="text-2xl font-bold text-white">$0</span>
-            <span className="text-xs text-slate-400">{totalLabel}</span>
-          </div>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <circle
+            cx={center}
+            cy={center}
+            r={radius}
+            fill="transparent"
+            stroke="#334155" // slate-700
+            strokeWidth={thickness}
+          />
+        </svg>
+        <div className="absolute flex flex-col items-center justify-center text-center">
+          <span className="text-2xl font-bold text-white">$0</span>
+          <span className="text-xs text-slate-400">{totalLabel}</span>
+        </div>
       </div>
     );
   }
@@ -56,10 +58,10 @@ export const DonutChart: React.FC<DonutChartProps> = ({
         {data.map((segment, index) => {
           const segmentLength = (segment.value / total) * circumference;
           // We leave a tiny gap if there are multiple segments
-          const gap = data.length > 1 ? 4 : 0; 
+          const gap = data.length > 1 ? 4 : 0;
           const dashArray = `${Math.max(0, segmentLength - gap)} ${circumference}`;
           const offset = -accumulatedOffset;
-          
+
           accumulatedOffset += segmentLength;
 
           return (
@@ -80,8 +82,8 @@ export const DonutChart: React.FC<DonutChartProps> = ({
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
         <span className="text-3xl font-bold text-slate-100">
-            {/* Format large numbers compactly if needed, here simple currency */}
-            {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(total)}
+          {/* Format large numbers compactly if needed, here simple currency */}
+          {new Intl.NumberFormat('en-US', { style: 'currency', currency: mainCurrency, maximumFractionDigits: 0 }).format(total)}
         </span>
         <span className="text-sm font-medium text-slate-400 mt-1">{totalLabel}</span>
         {subLabel && <span className="text-xs text-slate-500">{subLabel}</span>}

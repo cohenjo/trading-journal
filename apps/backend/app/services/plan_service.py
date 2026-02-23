@@ -1,8 +1,10 @@
 from typing import List, Dict, Any, Optional, Union
+from sqlmodel import Session
 from datetime import datetime
 from pydantic import BaseModel
 from app.schema.plan_models import PlanData, PlanItem
 from app.schema.finance_models import FinanceSnapshot
+from app.services.plan_components import MilestoneManager, AccountManager, RealAssetManager, PlanInterfaces
 
 class ProjectionPoint(BaseModel):
     year: int
@@ -17,6 +19,11 @@ class ProjectionPoint(BaseModel):
     expenses: float
     withdrawals: float
     accounts: List[Dict[str, Any]]
+    withdrawal_details: List[Dict[str, Any]]
+    milestones_hit: List[str]
+    liquid_net_worth: float
+    total_dividend_income: float
+
 
 class PlanService:
     @staticmethod
@@ -34,158 +41,102 @@ class PlanService:
             return default
 
     @staticmethod
+    def _convert(amount: float, from_curr: str, to_curr: str) -> float:
+        if not amount: return 0.0
+        # Rates: USD=3 ILS, EUR=3.5 ILS. Base ILS=1
+        rates = {
+            'ILS': 1.0,
+            'USD': 3.0,
+            'EUR': 3.5
+        }
+        from_rate = rates.get(from_curr, 1.0)
+        to_rate = rates.get(to_curr, 1.0)
+        
+        in_ils = amount * from_rate
+        return in_ils / to_rate
+
+    @staticmethod
     def calculate_projection(
         plan_data: Dict[str, Any],
         finance_snapshot: Optional[Union[FinanceSnapshot, Dict[str, Any]]],
-        user_settings: Dict[str, Any] = {}
+        user_settings: Dict[str, Any] = {},
+        db: Optional[Session] = None
     ) -> List[Dict[str, Any]]:
         
         # 1. Config & Initialization
         current_year = datetime.now().year
         _birth_year = user_settings.get("primaryUser", {}).get("birthYear", 1980)
         birth_year = PlanService._safe_int(_birth_year, 1980)
-            
+        main_currency = user_settings.get("mainCurrency", "ILS")
+        
         end_age = 95
         end_year = birth_year + end_age
         
-        # Inflation / Defaults
-        inflation_rate = 0.025 # 2.5%
+        # 2. Instantiate Managers
+        # Load Accounts & Assets
+        accounts = AccountManager.load_accounts(plan_data, finance_snapshot, user_settings, db=db)
+        real_assets_list, unallocated_cash_diff = RealAssetManager.load_real_assets(plan_data, finance_snapshot, user_settings)
         
-        # Flatten Accounts from Finances
-        # Structure: { name: str, value: float, config: Dict }
-        accounts = []
-        unallocated_cash = 0.0
+        account_manager = AccountManager(accounts, user_settings, birth_year)
+        real_asset_manager = RealAssetManager(real_assets_list)
         
-        # Flatten Real Assets (House, Car)
-        real_assets = []
+        # Unallocated Cash start (usually 0 unless debt found in snapshot)
+        unallocated_cash = unallocated_cash_diff
         
-        items = plan_data.get('items', [])
+        # Milestones
         milestones = plan_data.get('milestones', [])
+        milestone_manager = MilestoneManager(milestones, birth_year, user_settings, accounts)
         
-        # Helper to find plan config for a snapshot item
-        def find_item_config(name: str, category: str):
-            for i in items:
-                if i.get('name') == name and i.get('category') == category:
-                    return i
-            return None
+        # Plan Items (Income/Expense/Assignments)
+        items = plan_data.get('items', [])
 
-        # Load from Snapshot
-        snapshot_data = None
-        if finance_snapshot:
-            if isinstance(finance_snapshot, dict):
-                 snapshot_data = finance_snapshot.get('data')
-            else:
-                 snapshot_data = finance_snapshot.data
-
-        if snapshot_data:
-            snapshot_items = snapshot_data.get('items', [])
-            for f_item in snapshot_items:
-                cat = f_item.get('category')
-                name = f_item.get('name')
-                val = PlanService._safe_float(f_item.get('value', 0))
-                
-                if cat in ['Savings', 'Investments']:
-                    config = find_item_config(name, 'Account') or {}
-                    account_settings = config.get('details', {}).get('account_settings', {})
-                    # If config is missing, use defaults
-                    accounts.append({
-                        "name": name,
-                        "value": val,
-                        "type": account_settings.get('type', 'Taxable'),
-                        "growth": PlanService._safe_float(config.get('growth_rate', 5.0)),
-                        "yield": PlanService._safe_float(account_settings.get('dividend_yield', 0.0)),
-                        "fees": PlanService._safe_float(account_settings.get('fees', 0.0)),
-                        "priority": PlanService._safe_int(account_settings.get('withdrawal_priority', 50))
-                    })
-                elif cat in ['Real Estate', 'Vehicle']:
-                    config = find_item_config(name, 'Asset') or {}
-                    real_assets.append({
-                        "name": name,
-                        "value": val,
-                        "growth": PlanService._safe_float(config.get('growth_rate', 0.0)),
-                        "depreciation": PlanService._safe_float(config.get('depreciation_rate', 0.0)),
-                        "loan_balance": 0.0 # TODO: Link liabilities
-                    })
-                elif cat in ['Debt', 'Liability']:
-                     # For now, treat liabilities as negative cash if not linked
-                     unallocated_cash -= val
-                else:
-                    unallocated_cash += val
-
-        # Load "Manual" Accounts (in Plan but not in Snapshot)
-        for p_item in items:
-            if p_item.get('category') == 'Account':
-                # Check if already added via snapshot
-                if not any(a['name'] == p_item['name'] for a in accounts):
-                    details = p_item.get('details', {})
-                    acc_set = details.get('account_settings', {})
-                    accounts.append({
-                        "name": p_item['name'],
-                        "value": PlanService._safe_float(p_item.get('value', 0)),
-                        "type": acc_set.get('type', 'Taxable'),
-                        "growth": PlanService._safe_float(p_item.get('growth_rate', 5.0)),
-                        "yield": PlanService._safe_float(acc_set.get('dividend_yield', 0.0)),
-                        "fees": PlanService._safe_float(acc_set.get('fees', 0.0)),
-                        "priority": PlanService._safe_int(acc_set.get('withdrawal_priority', 50))
-                    })
-
-        # Helper: Resolve Date Conditions
-        def get_year_from_condition(item, target_cond_field='start_condition', target_ref_field='start_reference', target_date_field='start_date'):
-            cond = item.get(target_cond_field)
-            ref = item.get(target_ref_field)
-            date_val = item.get(target_date_field)
-            
-            if cond == 'Date' and date_val:
-                try:
-                    return datetime.strptime(str(date_val)[:10], "%Y-%m-%d").year
-                except:
-                    return current_year
-            if cond == 'Milestone' and ref:
-                # Find milestone
-                m = next((x for x in milestones if x.get('id') == ref), None)
-                if m:
-                    if m.get('date'):
-                        try:
-                            return datetime.strptime(str(m['date'])[:10], "%Y-%m-%d").year
-                        except: 
-                            pass
-                    if m.get('year_offset') is not None:
-                        return current_year + PlanService._safe_int(m['year_offset'])
-            if cond == 'Age' and ref:
-                # ref is age int
-                return birth_year + PlanService._safe_int(ref)
-            
-            # Defaults
-            if target_cond_field == 'end_condition':
-                return current_year + 100
-            if target_cond_field == 'start_condition':
-                return current_year # Start Now
-            return current_year
-
-        # 2. Simulation Loop
+        # 3. Simulation Loop
         projection = []
         
         for year in range(current_year, end_year + 1):
             age = year - birth_year
             
+            # Dynamic Milestones (Stub)
+            liq_nw = account_manager.get_liquid_accounts_value() + unallocated_cash
+            milestone_manager.check_dynamic_milestones(year, liq_nw, 0.0) # expenses passed as 0 for now to avoid circular dep
+            
+            # Determine active milestones/annuities
+            resolved_milestones = milestone_manager.resolved_milestones
+            active_annuities = account_manager.active_annuities
+            
+            dividend_payouts = []
+            
             if year > current_year:
                 # A. Growth Phase
-                for acc in accounts:
-                    rate = (acc['growth'] + acc['yield'] - acc['fees']) / 100.0
-                    acc['value'] *= (1 + rate)
-                
-                # Unallocated Cash Inflation/Growth (Safe rate 2%)
-                unallocated_cash *= 1.02 
-                
-                # Real Assets
-                for asset in real_assets:
-                    # Growth - Depreciation
-                    rate = (asset.get('growth', 0) - asset.get('depreciation', 0)) / 100.0
-                    asset['value'] *= (1 + rate)
-
+                unallocated_cash, year_div_payouts, active_annuities = account_manager.process_growth_and_income(
+                    year, unallocated_cash, resolved_milestones
+                )
+                dividend_payouts = year_div_payouts
+                real_asset_manager.process_growth()
+            else:
+                # For the first year, calculate "current" dividend income for display
+                # without actually applying growth/payouts to the balance.
+                for acc in account_manager.accounts:
+                    gross_dividend = 0.0
+                    if acc.get('dividend_mode') == 'Fixed' and acc.get('dividend_fixed_amount'):
+                         gross_dividend = acc['dividend_fixed_amount']
+                    else:
+                        yield_rate = acc.get('yield', 0.0)
+                        if yield_rate > 0:
+                            gross_dividend = acc['value'] * (yield_rate / 100.0)
+                    
+                    if gross_dividend > 0:
+                        # We don't apply it to value or taxes here, just for reporting total_dividend_income
+                        dividend_payouts.append({
+                            "name": f"Dividend: {acc['name']}",
+                            "type": "Dividend Income",
+                            "gross": gross_dividend
+                        })
+            
             # B. Income & Expense Phase
+            withdrawal_details_list = []
             year_gross_income = 0.0
-            year_taxable_income = 0.0 # Simplify: All income taxable unless marked?
+            year_taxable_income = 0.0
             year_tax_paid = 0.0
             year_expense = 0.0
             
@@ -197,182 +148,170 @@ class PlanService:
                 if cat not in ['Income', 'Expense', 'Asset']:
                     continue
                 
-                start_y = get_year_from_condition(item, 'start_condition', 'start_reference', 'start_date')
-                end_y = get_year_from_condition(item, 'end_condition', 'end_reference', 'end_date')
+                # Use Manager for Condition Checks
+                start_y = milestone_manager.get_year_from_condition(item, 'start_condition', 'start_reference', 'start_date')
+                end_y = milestone_manager.get_year_from_condition(item, 'end_condition', 'end_reference', 'end_date')
                 
-                # Check Active
                 if year >= start_y and year <= end_y:
-                    # Calculate Inflated Value
-                    base_val = PlanService._safe_float(item.get('value', 0))
+                    base_val_raw = PlanService._safe_float(item.get('value', 0))
+                    base_val = PlanService._convert(base_val_raw, item.get('currency', 'ILS'), main_currency)
+                    
                     item_growth = PlanService._safe_float(item.get('growth_rate', 0))
                     years_passed = year - current_year
                     
-                    # Apply Frequency Multiplier
+                    # Frequency
                     freq = item.get('frequency', 'Yearly')
-                    
+                    multiplier = 1.0
                     if freq == 'OneTime':
-                        if year != start_y:
-                            continue
-                        multiplier = 1.0
+                        if year != start_y: continue
                     elif freq == 'Monthly': multiplier = 12.0
                     elif freq == 'Weekly': multiplier = 52.0
                     elif freq == 'Bi-Weekly': multiplier = 26.0
                     elif freq == 'Daily': multiplier = 365.0
-                    else: multiplier = 1.0
                     
                     base_val *= multiplier
                     
-                    # For Assets (Purchase), we handle differently
                     if cat == 'Asset':
-                        # Check Purchase Year (Start Year OR Recurrence)
-                        is_purchase = False
-                        if year == start_y:
-                            is_purchase = True
-                        
-                        # Recurrence
-                        recurrence = item.get('recurrence') or {}
-                        if recurrence.get('rule') == 'Replace':
-                            period = PlanService._safe_int(recurrence.get('period_years', 10), 10)
-                            if period > 0 and year > start_y and (year - start_y) % period == 0:
-                                is_purchase = True
+                         # Asset Purchase
+                         is_purchase = False
+                         if year == start_y: is_purchase = True
+                         
+                         recurrence = item.get('recurrence') or {}
+                         if recurrence.get('rule') == 'Replace':
+                             period = PlanService._safe_int(recurrence.get('period_years', 10), 10)
+                             if period > 0 and year > start_y and (year - start_y) % period == 0:
+                                 is_purchase = True
 
-                        if is_purchase:
-                            # Purchase Cost
-                            cost = base_val * ((1 + 0.03) ** years_passed)
-                            
-                            # Financing
-                            financing = item.get('details', {}).get('financing', None)
-                            if financing:
-                                down_pct = PlanService._safe_float(financing.get('down_payment', 0)) / base_val if base_val else 0
-                                down_amt = cost * down_pct
-                                year_expense += down_amt
-                                expense_details_list.append({
-                                    "name": f"Down Payment: {item.get('name')}",
-                                    "value": round(down_amt, 2),
-                                    "category": "Asset Purchase"
-                                })
-                                # TODO: Add Loan to liabilities
-                            else:
-                                year_expense += cost
-                                expense_details_list.append({
-                                    "name": f"Purchase: {item.get('name')}",
-                                    "value": round(cost, 2),
-                                    "category": "Asset Purchase"
-                                })
-                                
-                            # Add to Active Real Assets
-                            real_assets.append({
-                                "name": item.get('name'),
-                                "value": cost,
-                                "growth": PlanService._safe_float(item.get('growth_rate', 0)),
-                                "depreciation": PlanService._safe_float(item.get('depreciation_rate', 0))
-                            })
-                            
+                         if is_purchase:
+                             cost = base_val * ((1 + 0.03) ** years_passed) # 3% asset inflation stub
+                             
+                             financing = item.get('details', {}).get('financing', None)
+                             if financing:
+                                 down_pct = PlanService._safe_float(financing.get('down_payment', 0)) / base_val_raw if base_val_raw else 0
+                                 down_amt = cost * down_pct
+                                 year_expense += down_amt
+                                 expense_details_list.append({
+                                     "name": f"Down Payment: {item.get('name')}",
+                                     "value": round(down_amt, 2),
+                                     "type": "Asset Purchase"
+                                 })
+                             else:
+                                 year_expense += cost
+                                 expense_details_list.append({
+                                     "name": f"Purchase: {item.get('name')}",
+                                     "value": round(cost, 2),
+                                     "type": "Asset Purchase"
+                                 })
+
+                             # Add to Real Asset Manager
+                             real_asset_manager.add_asset(item, base_val_raw, cost)
+
                     else:
                         # Income / Expense
                         current_val = base_val * ((1 + item_growth/100.0) ** years_passed)
                         
                         if cat == 'Income':
                             year_gross_income += current_val
-                            
-                            # Tax logic
                             tax_rate = PlanService._safe_float(item.get('tax_rate', 0))
                             tax_amount = current_val * (tax_rate/100.0)
                             year_tax_paid += tax_amount
-                            
-                            # Assume all income here is "Taxable" for display purposes
                             year_taxable_income += current_val
-
+                            
                             income_details_list.append({
                                 "name": item.get('name'),
-                                "type": item.get('sub_category', 'Earned Income'), # Use sub_category or default
+                                "type": item.get('sub_category', 'Earned Income'),
                                 "value": round(current_val, 2),
                             })
-                            
                         else:
                             year_expense += current_val
                             expense_details_list.append({
                                 "name": item.get('name'),
-                                "category": item.get('sub_category', 'Living Expenses'),
+                                "type": item.get('sub_category', 'General'),
                                 "value": round(current_val, 2)
                             })
 
+            # Add Dividend Payouts to Income
+            for div in dividend_payouts:
+                gross = div.get('gross', 0.0)
+                year_gross_income += gross
+                year_tax_paid += div.get('tax', 0.0)
+                year_taxable_income += gross
+                
+                # Show Gross in Sankey usually if Tax is shown separate
+                div_display = div.copy()
+                div_display['value'] = round(gross, 2)
+                income_details_list.append(div_display)
 
-            # Net Income
+            # Add Pension Payouts
+            for ann in active_annuities:
+                val = ann['payout']
+                t_rate = ann.get('tax_rate', 0.0)
+                year_gross_income += val
+                year_tax_paid += val * (t_rate / 100.0)
+                year_taxable_income += val
+                
+                income_details_list.append({
+                    "name": f"Pension: {ann['name']}",
+                    "type": "Pension Income",
+                    "value": round(val, 2)
+                })
+
             year_net_income = year_gross_income - year_tax_paid
-
-            # C. Net Flow Rebalancing
             net_flow = year_net_income - year_expense
-            withdrawals = 0.0
+            
             savings_breakdown = []
+            withdrawals = 0.0
             
             if net_flow > 0:
-                # Add to Savings (Priority: 1. Unallocated, 2. Taxable Accounts)
-                # For simplicity, add 50% to unallocated, 50% to first "Taxable" account
-                # If no taxable, 100% to unallocated
-                taxable = next((a for a in accounts if a['type'] == 'Taxable'), None)
-                if taxable:
-                    amount = net_flow * 0.5
-                    taxable['value'] += amount
-                    unallocated_cash += amount
-                    savings_breakdown.append({"name": taxable['name'], "value": round(amount, 2), "type": "Investment"})
-                    savings_breakdown.append({"name": "Cash Savings", "value": round(amount, 2), "type": "Cash"})
-                else:
-                    unallocated_cash += net_flow
-                    savings_breakdown.append({"name": "Cash Savings", "value": round(net_flow, 2), "type": "Cash"})
+                # Savings
+                _, unallocated_cash, savings_breakdown = account_manager.process_savings(net_flow, unallocated_cash)
             else:
                 # Deficit
                 deficit = abs(net_flow)
-                withdrawals = deficit # Tracking how much we pulled from savings
-                
-                # 1. Drain Cash
-                if unallocated_cash >= deficit:
-                    unallocated_cash -= deficit
-                    deficit = 0
-                else:
-                    deficit -= unallocated_cash
-                    unallocated_cash = 0
-                    
-                    # 2. Drain Accounts by Priority (Low to High)
-                    # Sort active accounts by priority
-                    sorted_accs = sorted(accounts, key=lambda x: x['priority'])
-                    for acc in sorted_accs:
-                        if deficit <= 0: break
-                        if acc['value'] >= deficit:
-                            acc['value'] -= deficit
-                            deficit = 0
-                        else:
-                            deficit -= acc['value']
-                            acc['value'] = 0
-                    
-                    # If still deficit, Debt increases (negative cash)
-                    if deficit > 0:
-                        unallocated_cash -= deficit
+                _, unallocated_cash, withdrawals, withdrawal_details_list = account_manager.process_deficit(deficit, unallocated_cash)
             
-            # Summary
-            total_accounts = sum(a['value'] for a in accounts)
-            total_real = sum(a['value'] for a in real_assets)
-            total_liquid = total_accounts + unallocated_cash
-            net_worth = total_liquid + total_real # - debts
+            # Summaries
+            total_net_worth = 0.0
+            liquid_net_worth = 0.0
+            total_real_assets = 0.0
+            
+            # From Managers
+            liq, debt = real_asset_manager.get_liquid_assets_value(items)
+            liquid_net_worth += liq
+            
+            # Accounts
+            liquid_net_worth += account_manager.get_liquid_accounts_value()
+                
+            liquid_net_worth += unallocated_cash
+            
+            # Total Real Assets (for display)
+            for ra in real_asset_manager.real_assets:
+                total_real_assets += ra['value']
+            
+            # Calculate Total Net Worth independent of Liquid NW
+            total_accounts_val = sum(a['value'] for a in account_manager.accounts)
+            total_net_worth = total_accounts_val + unallocated_cash + total_real_assets - debt
             
             projection.append({
                 "year": year,
                 "age": age,
-                "net_worth": round(net_worth, 2),
-                "liquid_assets": round(total_liquid, 2),
-                "real_assets": round(total_real, 2),
-                "debt": 0,
-                "income": round(year_gross_income, 2), # Gross
+                "net_worth": round(total_net_worth, 2),
+                "liquid_net_worth": round(liquid_net_worth, 2), # New Field
+                "liquid_assets": round(liquid_net_worth, 2), # Legacy
+                "real_assets": round(total_real_assets, 2),
+                "debt": 0.0, # TODO
+                "income": round(year_gross_income, 2),
                 "taxable_income": round(year_taxable_income, 2),
                 "tax_paid": round(year_tax_paid, 2),
                 "expenses": round(year_expense, 2),
                 "withdrawals": round(withdrawals, 2),
-                "accounts": [{"name": a['name'], "value": round(a['value'], 2)} for a in accounts],
+                "accounts": [a.copy() for a in account_manager.accounts], # Snapshot
+                "withdrawal_details": withdrawal_details_list,
                 "income_details": income_details_list,
                 "expense_details": expense_details_list,
-                "savings_details": savings_breakdown
+                "savings_details": savings_breakdown,
+                "milestones_hit": milestone_manager.get_hits_for_year(year),
+                "total_dividend_income": round(sum(div.get('gross', 0.0) for div in dividend_payouts), 2)
             })
-
-
+            
         return projection
-

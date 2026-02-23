@@ -4,6 +4,7 @@ import { ResponsiveSankey } from '@nivo/sankey';
 
 interface Props {
     data: any; // Projection item for a specific year
+    currency: string;
 }
 
 const theme = {
@@ -25,13 +26,13 @@ const theme = {
     }
 };
 
-export const CashFlowSankey: React.FC<Props> = ({ data }) => {
+export const CashFlowSankey: React.FC<Props> = ({ data, currency }) => {
 
 
     const { nodes, links } = (() => {
         if (!data) return { nodes: [], links: [] };
 
-        const { income, withdrawals, tax_paid, expenses: totalExpenses, income_details, expense_details, savings_details } = data;
+        const { income, withdrawals, tax_paid, expenses: totalExpenses, income_details, expense_details, savings_details, withdrawal_details } = data;
 
         let nodesList: any[] = [];
         let linksList: any[] = [];
@@ -80,14 +81,25 @@ export const CashFlowSankey: React.FC<Props> = ({ data }) => {
         });
 
         // Withdrawals
-        if (withdrawals > 0) {
-            const wId = 'income_src_Withdrawals';
-            const wType = 'income_type_Investment_Income';
-            addNode(wId, '#60a5fa', 'Withdrawals'); // Blue
-            addNode(wType, '#2dd4bf', 'Investment Income'); // Teal
-            addLink(wId, wType, withdrawals);
-            incomeTypes.add(wType);
-        }
+        const safeWithdrawalDetails = (withdrawal_details && withdrawal_details.length > 0)
+            ? withdrawal_details
+            : (withdrawals > 0 ? [{ name: 'Withdrawals', type: 'Portfolio Withdrawal', value: withdrawals }] : []);
+
+        safeWithdrawalDetails.forEach((item: any) => {
+            const rawName = item.name || 'Withdrawal';
+            // const rawType = item.type || 'Inflow'; 
+            // Map all withdrawals to "Investment Income" type so they get grouped on the right side of the left block
+            const rawType = 'Investment Income';
+
+            const sourceId = `w_src_${rawName}`;
+            const typeId = `income_type_${rawType}`;
+
+            addNode(sourceId, '#60a5fa', rawName); // Blue
+            addNode(typeId, '#2dd4bf', rawType);   // Teal
+            addLink(sourceId, typeId, item.value);
+
+            incomeTypes.add(typeId);
+        });
 
         // --- 3. Stage: Income Types -> Total Inflows ---
         const totalInflowsId = 'node_Inflows';
@@ -135,12 +147,19 @@ export const CashFlowSankey: React.FC<Props> = ({ data }) => {
             addNode(expensesId, '#fb7185', 'Living Expenses'); // Rose
             addLink(totalInflowsId, expensesId, totalCalculatedExpenses);
 
-            // --- 5. Stage: Expenses -> Specific Items ---
+            // --- 5. Stage: Expenses -> Expense Categories ---
+            const expenseCategories = new Map<string, number>();
+
             expenseDetails.forEach((item: any) => {
-                const rawName = item.name || 'Misc';
-                const itemId = `exp_item_${rawName}`;
-                addNode(itemId, '#f43f5e', rawName); // Red/Pink
-                addLink(expensesId, itemId, item.value);
+                const category = item.type || 'Misc';
+                const current = expenseCategories.get(category) || 0;
+                expenseCategories.set(category, current + item.value);
+            });
+
+            expenseCategories.forEach((value, category) => {
+                const catId = `exp_cat_${category}`;
+                addNode(catId, '#f43f5e', category); // Red/Pink
+                addLink(expensesId, catId, value);
             });
         }
 
@@ -206,7 +225,7 @@ export const CashFlowSankey: React.FC<Props> = ({ data }) => {
                 labelTextColor={{ from: 'color', modifiers: [['brighter', 1]] }}
                 theme={theme}
                 valueFormat={value =>
-                    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value)
+                    new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD', maximumFractionDigits: 0 }).format(value)
                 }
             />
         </div>

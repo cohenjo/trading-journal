@@ -1,5 +1,5 @@
 from datetime import date
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Union, Optional, Any
 from pydantic import BaseModel
 from sqlmodel import SQLModel, Field, Column, JSON
 from datetime import date as date_type
@@ -13,7 +13,21 @@ class FinanceItem(BaseModel):
     value: float
     type: str
     owner: str
-    details: Optional[Dict[str, Union[str, float]]] = None
+class FinanceItem(BaseModel):
+    id: str
+    category: str # 'Savings', 'Investments', 'Assets', 'Liabilities'
+    name: str
+    value: float
+    type: str
+    owner: str
+    # Priorities for Cash Flow
+    inflow_priority: Optional[int] = 100 # Lower number = Higher priority
+    withdrawal_priority: Optional[int] = 100
+    # Withdrawal Limits
+    max_withdrawal_rate: Optional[float] = None # Percentage (0-100)
+    max_withdrawal_cap: Optional[float] = None # Fixed amount (e.g. 200000 for RSU)
+    currency: Optional[str] = 'ILS' # Default to ILS
+    details: Optional[Dict[str, Any]] = None
 
 class SnapshotData(BaseModel):
     items: List[FinanceItem] = []

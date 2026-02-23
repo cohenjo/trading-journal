@@ -12,11 +12,15 @@ from app.api import (
     holdings,
     bonds,
     dividends,
+    dividend_accounts,
     options,
     tax_condor,
     backtest,
     finances,
     plans,
+    trading,
+    pension,
+    metrics as telemetry_metrics,
 )
 import os
 from opentelemetry import trace, metrics
@@ -68,10 +72,7 @@ FastAPIInstrumentor.instrument_app(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -90,11 +91,15 @@ app.include_router(ladder.router, prefix="/api", tags=["ladder"])
 app.include_router(holdings.router, prefix="/api", tags=["holdings"])
 app.include_router(bonds.router, prefix="/api", tags=["bonds"])
 app.include_router(dividends.router, prefix="/api", tags=["dividends"])
+app.include_router(dividend_accounts.router)
 app.include_router(options.router, prefix="/api", tags=["options"])
 app.include_router(tax_condor.router, prefix="/api/tax-condor", tags=["tax-condor"])
 app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
 app.include_router(finances.router)
 app.include_router(plans.router)
+app.include_router(trading.router)
+app.include_router(pension.router)
+app.include_router(telemetry_metrics.router)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

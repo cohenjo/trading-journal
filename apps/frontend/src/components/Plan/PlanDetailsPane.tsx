@@ -7,7 +7,7 @@ const COLORS = [
 ];
 
 interface Props {
-    data: any | null; 
+    data: any | null;
     prevData: any | null;
     currentYear: number;
     minYear: number;
@@ -17,11 +17,11 @@ interface Props {
 }
 
 export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, minYear, maxYear, onChangeYear, settings }) => {
-    
+
     // Ages
     const primaryBirthYear = settings?.primaryUser?.birthYear || 1980;
     const spouseBirthYear = settings?.spouse?.birthYear;
-    
+
     const primaryAge = currentYear - primaryBirthYear;
     const spouseAge = spouseBirthYear ? currentYear - spouseBirthYear : null;
 
@@ -45,7 +45,7 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
 
     if (!data) return <div className="p-6 text-slate-500">Select a year on the chart</div>;
 
-    const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+    const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: settings?.mainCurrency || 'USD', maximumFractionDigits: 0 }).format(val);
     const formatPercent = (val: number) => new Intl.NumberFormat('en-US', { style: 'percent', minimumFractionDigits: 2 }).format(val);
 
     return (
@@ -63,12 +63,12 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
                         📅 {currentYear}
                     </div>
                 </div>
-                
-                <input 
-                    type="range" 
-                    min={minYear} 
-                    max={maxYear} 
-                    value={currentYear} 
+
+                <input
+                    type="range"
+                    min={minYear}
+                    max={maxYear}
+                    value={currentYear}
                     onChange={(e) => onChangeYear(parseInt(e.target.value))}
                     className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500"
                 />
@@ -76,7 +76,7 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
 
             {/* Metrics List */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar text-sm">
-                
+
                 {/* Net Worth Block */}
                 <div className="space-y-3">
                     <div className="flex justify-between items-center">
@@ -89,15 +89,15 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
                             {changeNetWorth > 0 ? '+' : ''}{formatCurrency(changeNetWorth)}
                         </span>
                     </div>
-                     <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center">
                         <span className="text-slate-500">Liquid Net Worth</span>
-                        <span className="text-slate-300">{formatCurrency(data.liquid_assets)}</span>
+                        <span className="text-slate-300">{formatCurrency(data.liquid_net_worth)}</span>
                     </div>
                 </div>
 
                 {/* Cash Flow Block */}
                 <div className="space-y-3 pt-4 border-t border-slate-800/50">
-                     <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center">
                         <span className="text-slate-100 font-medium">Withdrawals</span>
                         <span className="text-slate-100">{formatCurrency(data.withdrawals)}</span>
                     </div>
@@ -114,7 +114,13 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
                         <span className="text-emerald-400 font-medium">Income</span>
                         <span className="text-slate-100">{formatCurrency(data.income)}</span>
                     </div>
-                     <div className="flex justify-between items-center">
+                    {data.total_dividend_income > 0 && (
+                        <div className="flex justify-between items-center">
+                            <span className="text-emerald-500/70">Current Annual Dividends</span>
+                            <span className="text-slate-300">{formatCurrency(data.total_dividend_income)}</span>
+                        </div>
+                    )}
+                    <div className="flex justify-between items-center">
                         <span className="text-emerald-600/70">Taxable Income</span>
                         <span className="text-slate-300">{formatCurrency(data.taxable_income)}</span>
                     </div>
@@ -125,7 +131,7 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
                     <div className="flex justify-between items-center">
                         <span className="text-slate-500">Effective Tax Rate</span>
                         <span className="text-slate-300">
-                             {data.income > 0 ? formatPercent(data.tax_paid / data.income) : '0%'}
+                            {data.income > 0 ? formatPercent(data.tax_paid / data.income) : '0%'}
                         </span>
                     </div>
                 </div>
@@ -135,11 +141,11 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
                         <span className="text-orange-400 font-medium">Expenses</span>
                         <span className="text-slate-100">{formatCurrency(data.expenses)}</span>
                     </div>
-                     <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center">
                         <span className="text-orange-500/70">Spending</span>
                         <span className="text-slate-300">{formatCurrency(data.expenses)}</span>
                     </div>
-                     <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center">
                         <span className="text-fuchsia-400 font-medium">Savings Rate</span>
                         <span className="text-slate-300">
                             {data.income > 0 ? formatPercent((data.income - data.tax_paid - data.expenses) / data.income) : '0%'}
@@ -151,7 +157,7 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
                     <div className="flex justify-between items-center mb-3">
                         <span className="text-slate-100 font-medium">Investment Growth</span>
                         <span className={investGrowth >= 0 ? "text-green-400" : "text-red-400"}>
-                             {investGrowth > 0 ? '+' : ''}{formatCurrency(investGrowth)}
+                            {investGrowth > 0 ? '+' : ''}{formatCurrency(investGrowth)}
                         </span>
                     </div>
                 </div>
@@ -161,23 +167,23 @@ export const PlanDetailsPane: React.FC<Props> = ({ data, prevData, currentYear, 
                     <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Portfolio Allocations</h4>
                     <div className="space-y-2">
                         {data.accounts.map((acc: any, i: number) => (
-                             acc.value > 0 && (
+                            acc.value > 0 && (
                                 <div key={acc.name} className="group">
                                     <div className="flex justify-between text-xs mb-1">
                                         <span className="text-slate-400 truncate w-2/3">{acc.name}</span>
                                         <span className="text-slate-300">{formatCurrency(acc.value)}</span>
                                     </div>
                                     <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
-                                        <div 
-                                            className="h-full rounded-full transition-all duration-500" 
-                                            style={{ 
-                                                width: `${Math.min(100, (acc.value / data.liquid_assets) * 100)}%`,
+                                        <div
+                                            className="h-full rounded-full transition-all duration-500"
+                                            style={{
+                                                width: `${data.liquid_assets > 0 && acc.value > 0 ? Math.min(100, (acc.value / data.liquid_assets) * 100) : 0}%`,
                                                 backgroundColor: COLORS[i % COLORS.length]
                                             }}
                                         />
                                     </div>
                                 </div>
-                             )
+                            )
                         ))}
                     </div>
                 </div>

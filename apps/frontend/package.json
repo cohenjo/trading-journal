@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev --turbopack -H 0.0.0.0",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0",
     "lint": "next lint"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@nivo/core": "^0.99.0",
     "@nivo/sankey": "^0.99.0",
     "lightweight-charts": "^5.1.0",

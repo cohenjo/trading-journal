@@ -24,6 +24,9 @@ export type UserSettings = {
   dividendFinalYear: number;
   optionsGrowthRate: number;
   optionsFinalYear: number;
+
+  // App Settings
+  mainCurrency: 'USD' | 'ILS' | 'EUR';
 };
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -40,6 +43,8 @@ const DEFAULT_SETTINGS: UserSettings = {
   dividendFinalYear: 2064,
   optionsGrowthRate: 0.05,
   optionsFinalYear: 2064,
+
+  mainCurrency: 'ILS',
 };
 
 const STORAGE_KEY = "trading-journal-settings-v1";
@@ -61,7 +66,7 @@ const loadSettings = (): UserSettings => {
       planningMode: parsed.planningMode === 'Couple' ? 'Couple' : 'Individual',
       primaryUser: parsed.primaryUser || DEFAULT_SETTINGS.primaryUser,
       spouse: parsed.spouse || DEFAULT_SETTINGS.spouse,
-      
+
       targetIncome:
         typeof parsed.targetIncome === "number" && parsed.targetIncome >= 0
           ? parsed.targetIncome
@@ -98,6 +103,10 @@ const loadSettings = (): UserSettings => {
         typeof parsed.optionsFinalYear === "number"
           ? parsed.optionsFinalYear
           : DEFAULT_SETTINGS.optionsFinalYear,
+
+      mainCurrency: (parsed.mainCurrency === 'USD' || parsed.mainCurrency === 'EUR')
+        ? parsed.mainCurrency
+        : DEFAULT_SETTINGS.mainCurrency,
     };
   } catch {
     return DEFAULT_SETTINGS;

@@ -42,6 +42,8 @@ memory-bank/
 .roo/
 docs/
 sample images/
+sample/
+reports/
 
 # IDE
 .vscode/
