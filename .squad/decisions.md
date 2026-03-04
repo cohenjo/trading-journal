@@ -528,3 +528,76 @@ This places it as the last item in the TRADING section — logically it's a rese
 5. 48 tests cover all models including edge cases (negative values, zero denominators, insufficient data)
 
 **Impact:** Additive — no existing code modified. Hockney can import from `app.services.analysis` directly.
+
+### 2025-07-18: UI Decision — Company Analysis Page Shell
+**By:** Fenster (Frontend Dev)
+**Category:** Frontend, UI/UX
+**Status:** Implemented
+
+**What:** Split-Brain Toggle UI component with pill/segmented control styling. Blue for Long-Term Investor view, amber for Short-Term Income view. Toggle state is React state only (no URL params). Ticker validation is client-side only: uppercase, alphabetic, 1–5 characters for US equity tickers.
+
+**Design decisions:**
+- Color distinction gives instant visual feedback about active "brain"
+- Both views use `shadow-lg` with color-tinted glow for premium feel
+- Placeholder card structure (3 cards per view) with dashed borders makes Phase 2/3 drop-in integration straightforward
+- Page layout follows `pension/page.tsx` pattern: `min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8`, cards use `bg-slate-900 border border-slate-800 rounded-xl p-6`
+
+**Files Created:**
+- `apps/frontend/src/app/analyze/page.tsx`
+- `apps/frontend/src/components/Analyze/AnalyzePage.tsx`
+- `apps/frontend/src/components/Analyze/SplitBrainToggle.tsx`
+- `apps/frontend/src/components/Analyze/TickerSearch.tsx`
+- `apps/frontend/src/components/Analyze/LongTermView.tsx`
+- `apps/frontend/src/components/Analyze/ShortTermView.tsx`
+- Modified: `apps/frontend/src/components/Layout/MainLayout.tsx` (added nav link)
+
+**Impact:** Additive. No breaking changes.
+
+### 2025-07-18: API Router Implementation — Analyze Endpoints
+**By:** Hockney (Backend Dev)
+**Category:** Backend, API Design
+**Status:** Implemented
+
+**What:** Created `/api/analyze` router with 5 endpoints wiring yfinance data to McManus's pure calculation functions:
+1. `GET /api/analyze/fundamentals/{ticker}` — Company financials + DCF inputs
+2. `GET /api/analyze/price-history/{ticker}` — OHLCV with period/interval params
+3. `GET /api/analyze/technicals/{ticker}` — Latest EMA, RSI, MACD, Bollinger scalar values
+4. `GET /api/analyze/options/{ticker}` — Option chain with IV percentile/rank
+5. `GET /api/analyze/synthesis/{ticker}` — Template-based observations (Phase 1)
+
+**Design decisions:**
+- WACC Cost of Equity uses CAPM (4.3% risk-free, 5.5% market premium) — hardcoded for now, should be configurable Phase 2
+- IV Percentile/Rank approximated from current chain distribution (not historical) — true 52w percentile requires data provider Phase 2
+- Technicals return scalars only (last valid value per indicator), not full arrays — separate endpoint can be added if charts need time series
+- Synthesis uses conditional templates on financial ratios (no raw number interpolation without context)
+- Error handling: 404 for unknown tickers, 502 for yfinance failures, individual metrics return `null` on calc failure (don't block response)
+
+**Files:**
+- Created: `apps/backend/app/api/analyze.py`
+- Modified: `apps/backend/main.py` (router import/registration)
+
+**Open items:**
+- [ ] Add TTL caching for yfinance calls (Phase 4)
+- [ ] Replace hardcoded CAPM parameters
+- [ ] Source proper historical IV data
+
+### 2026-07-24: Growth Story Agent + Copilot SDK Service
+**By:** Kobayashi (AI Agent Engineer)
+**Category:** AI Integration, Feature Development
+**Status:** Implemented
+
+**What:** Created Growth Story analysis feature — three artifacts:
+1. `.github/agents/growth-analyst.agent.md` — Agent persona for Copilot Chat and backend SDK reference. Senior Equity Research Analyst with structured search phase, source weighting (SEC filings > news > social), three-scenario framework, JSON output contract.
+2. `apps/backend/app/services/growth_story.py` — Copilot SDK service following established `copilot_analyzer.py` pattern. Uses streaming delta accumulation, `send_and_wait`, `claude-opus-4.6`, and `system_message` with `mode: "append"`.
+3. `apps/backend/app/api/analyze.py` — Added `POST /api/analyze/growth-story/{ticker}` endpoint with optional company_name/sector, yfinance fallback, 180s timeout, proper error handling.
+
+**Why:** Delivers Phase 2 AI synthesis with web search, multi-source analysis, structured scenarios. POST method chosen because it triggers expensive AI operation (not cached lookup).
+
+**Design decisions:**
+- System message uses `mode: "append"` — preserves Copilot safety guardrails while injecting analyst persona
+- Response parsing handles multiple JSON extraction strategies (direct parse, markdown stripping, object extraction)
+- Agent file doubles as both Copilot Chat persona and canonical backend system prompt reference
+- 180s timeout accommodates web search + multi-source analysis
+- Existing synthesis endpoint preserved as fast fallback (no modifications)
+
+**Impact:** Additive — no existing endpoints/services modified.

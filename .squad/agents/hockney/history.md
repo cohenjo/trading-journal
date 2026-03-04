@@ -51,3 +51,32 @@
 📌 **Team update (2026-02-23T22:59:59Z):** Security Hardening consolidated - CRITICAL findings: credentials in git, no auth, unrestricted CORS. Week 1: rotate credentials, JWT auth, restrict CORS, security headers. Application blocked from production in current state. — Keaton, Hockney, Rabin
 
 📌 **Team update (2026-02-23T22:59:59Z):** Testing and Quality - Backend lacks comprehensive financial calculation tests. Need pytest suite with known test cases for trade PnL, daily summaries, portfolio metrics. GitHub Actions CI/CD pipeline required. — Fenster, Hockney, Keaton
+
+### 2025-07-18: Company Analysis API Router Built
+
+**What was built:**
+Created `apps/backend/app/api/analyze.py` with all 5 endpoints for the Analyze page:
+
+1. `GET /api/analyze/fundamentals/{ticker}` — Full fundamentals with ROIC, WACC, CAGR, valuation multiples, DCF inputs. Uses McManus's scorecard, valuation, and DCF service functions.
+2. `GET /api/analyze/price-history/{ticker}` — OHLCV data with configurable period/interval via query params.
+3. `GET /api/analyze/technicals/{ticker}` — 6-month daily data run through EMA, RSI, MACD, Bollinger, support/resistance. Returns latest scalar values matching the architecture contract.
+4. `GET /api/analyze/options/{ticker}` — Option chain with IV percentile/rank. ATM IV used as current IV reference against chain distribution.
+5. `GET /api/analyze/synthesis/{ticker}` — Phase 1 template-based synthesis. Derives growth_engine, bear_case, and price_action_summary from yfinance info fields. No LLM dependency.
+
+**Integration:**
+- Registered in `main.py` alongside existing routers (import + include_router).
+- Router uses `/api/analyze` prefix with "analyze" tag.
+- All endpoints use `try/except` around yfinance calls with appropriate HTTP error codes (404, 502).
+
+**Design decisions:**
+- ROIC/WACC calculations extract raw data from yfinance DataFrames (Operating Income, Tax Provision, etc.) and feed McManus's pure functions. Tax rate is computed dynamically from Pretax Income / Tax Provision.
+- WACC uses CAPM for cost of equity (risk-free + beta × market premium) since yfinance doesn't provide WACC directly.
+- Technicals endpoint returns latest scalar values (not full arrays) to match the architecture contract's response shape.
+- IV percentile/rank uses the current option chain's IV distribution as a proxy since yfinance doesn't provide historical IV time series. This is a known approximation — noted for Phase 2 improvement.
+- Synthesis endpoint uses conditional template logic based on financial ratios, not hardcoded text.
+
+**Dependencies on McManus's services:**
+- `calculate_roic`, `calculate_wacc`, `calculate_cagr`, `calculate_net_debt_to_ebitda` from scorecard
+- `calculate_forward_pe`, `calculate_peg_ratio`, `calculate_ev_fcf` from valuation
+- `calculate_ema`, `calculate_rsi`, `calculate_macd`, `calculate_bollinger_bands`, `detect_support_resistance` from technicals
+- `calculate_iv_percentile`, `calculate_iv_rank` from options_analytics
