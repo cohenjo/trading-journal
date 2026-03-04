@@ -80,3 +80,25 @@ Created `apps/backend/app/api/analyze.py` with all 5 endpoints for the Analyze p
 - `calculate_forward_pe`, `calculate_peg_ratio`, `calculate_ev_fcf` from valuation
 - `calculate_ema`, `calculate_rsi`, `calculate_macd`, `calculate_bollinger_bands`, `detect_support_resistance` from technicals
 - `calculate_iv_percentile`, `calculate_iv_rank` from options_analytics
+
+### 2026-03-05: yfinance Caching Layer (Issue #7)
+
+**What was built:**
+Created `apps/backend/app/services/cache.py` — thread-safe in-memory TTL cache using `cachetools.TTLCache`. Four cache types with different TTLs:
+- `price`: 100 entries, 5-min TTL
+- `fundamentals`: 50 entries, 1-hour TTL
+- `technicals`: 100 entries, 5-min TTL
+- `options`: 50 entries, 5-min TTL
+
+Updated `apps/backend/app/api/analyze.py` to wrap all 4 yfinance-backed endpoints with cache check/store logic. Added `X-Cache: HIT/MISS` and `Cache-Control` response headers. Added `GET /api/analyze/cache-stats` monitoring endpoint.
+
+**Design decisions:**
+- Used `threading.Lock` for thread safety since yfinance calls are sync and may run in FastAPI's threadpool executor
+- Cache key format varies by endpoint: ticker-only for fundamentals/technicals, `ticker:period:interval` for price-history, `ticker:expiry` for options
+- Returns `JSONResponse` instead of raw dict when cache is involved, to set custom headers
+- Hit/miss counters are tracked per cache type for observability
+- Cache stats endpoint is unauthenticated (monitoring use case) — should be locked down when auth is added
+
+**PR:** #14 (draft)
+**Branch:** `squad/7-yfinance-cache`
+**Dependency added:** `cachetools>=5.5.0`
