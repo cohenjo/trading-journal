@@ -72,3 +72,12 @@ The application supports comprehensive trading workflows:
 📌 **Team update (2026-02-23T22:59:59Z):** Security Hardening CRITICAL - Credentials exposed in version control, zero authentication across all 17 API endpoints, unrestricted CORS. Week 1 actions: rotate credentials, implement JWT, restrict CORS, add security headers. Blocks production deployment. — Keaton, Hockney, Rabin
 
 📌 **Team update (2026-02-23T22:59:59Z):** API Documentation and DevOps - No OpenAPI documentation, missing CI/CD workflows, no security architecture documentation. Add FastAPI OpenAPI generation, create GitHub Actions workflows for lint/test/build, document production hardening checklist. — Keaton
+
+### 2025-07-18: Company Analysis Page Architecture Decision
+**Context:** Jony requested a "Split-Brain" Company Analysis page with Long-Term (business owner) and Short-Term (income mechanic) views, covering fundamentals, charting, DCF, options Greeks, and AI synthesis.
+
+**Decision:** Architected full page at `/analyze` route with 5 backend API endpoints (`/api/analyze/fundamentals`, `/price-history`, `/technicals`, `/options`, `/synthesis`), 17 frontend components across longterm/shortterm view folders, and a 4-phase delivery plan (Foundation → Long-Term → Short-Term → Polish). All financial calculations server-side in a new `analyze_service.py`. yfinance covers all data needs — no new deps required. AI synthesis starts as template-based (Phase 1) with Copilot SDK integration planned for Phase 2.
+
+**Key routing insight:** Existing TRADING-section pages (`/options`, `/ladder`, `/holdings`) use top-level paths despite being in the TRADING nav group — so `/analyze` follows established convention rather than nesting under `/trading/`.
+
+**Decomposition:** 17 tasks across 4 phases, parallelizable at each phase. Hockney (API), McManus (financial math), Fenster (UI) can all start Phase 1 simultaneously. Plan written to `.squad/decisions/inbox/keaton-analyze-page-architecture.md`.
