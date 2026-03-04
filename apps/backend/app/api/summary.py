@@ -6,6 +6,13 @@ from app.schema.models import DailySummary, date_type
 
 router = APIRouter()
 
+@router.get("/summary/latest-month")
+def get_latest_summary_month(session: Session = Depends(get_session)):
+    latest_date = session.exec(select(DailySummary.date).order_by(DailySummary.date.desc())).first()
+    if latest_date is None:
+        return None
+    return {"year": latest_date.year, "month": latest_date.month}
+
 @router.get("/summary/{year}/{month}", response_model=list[DailySummary])
 def get_summary_for_month(year: int, month: int, session: Session = Depends(get_session)):
     start_date = date_type(year, month, 1)

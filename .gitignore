@@ -44,6 +44,8 @@ docs/
 sample images/
 sample/
 reports/
+backups/
+trading-journal-data/
 
 # IDE
 .vscode/

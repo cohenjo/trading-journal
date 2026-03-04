@@ -55,7 +55,6 @@ services:
   ib-gateway:
     platform: linux/amd64
     image: ghcr.io/gnzsnz/ib-gateway:latest
-    restart: always
     environment:
       TWS_USERID: ${TWS_USERID}
       TWS_PASSWORD: ${TWS_PASSWORD}

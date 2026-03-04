@@ -16,6 +16,26 @@ export default function Dashboard() {
   const [pnlData, setPnlData] = useState<{ time: string; value: number }[]>([]);
 
   useEffect(() => {
+    const initializeDate = async () => {
+      try {
+        const response = await fetch("/api/summary/latest-month");
+        if (!response.ok) {
+          return;
+        }
+        const latest: { year: number; month: number } | null = await response.json();
+        if (!latest) {
+          return;
+        }
+        setCurrentDate(new Date(latest.year, latest.month - 1, 1));
+      } catch (error) {
+        console.error("Failed to fetch latest summary month:", error);
+      }
+    };
+
+    initializeDate();
+  }, []);
+
+  useEffect(() => {
     const fetchData = async () => {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1;
