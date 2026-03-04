@@ -29,6 +29,7 @@ dependencies = [
     "pdfplumber>=0.11.9",
     "pypdf>=6.7.1",
     "python-multipart>=0.0.22",
+    "cachetools>=5.5.0",
 ]
 requires-python = ">=3.10"
 
