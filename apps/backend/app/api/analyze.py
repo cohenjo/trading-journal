@@ -5,7 +5,6 @@ Wraps yfinance data fetching with McManus's calculation services.
 Includes Copilot SDK-powered growth story analysis.
 """
 
-import asyncio
 import logging
 import math
 from datetime import datetime, date
@@ -684,10 +683,16 @@ async def post_growth_story(ticker: str, body: Optional[GrowthStoryRequest] = No
     SEC filings, news, and social sentiment to produce three investment
     scenarios (best / probable / worst case).
 
-    Falls back to yfinance ticker.info for company_name and sector if
-    not provided in the request body.
+    On AI failure or timeout, gracefully falls back to the template-based
+    synthesis from ``GET /api/analyze/synthesis/{ticker}``.
+
+    Response always includes ``source`` ("ai" | "template") and
+    ``analysis_duration_seconds``.
     """
+    import time
+
     ticker = ticker.upper().strip()
+    start_time = time.monotonic()
 
     company_name = body.company_name if body else ""
     sector = body.sector if body else ""
@@ -703,27 +708,36 @@ async def post_growth_story(ticker: str, body: Optional[GrowthStoryRequest] = No
         except Exception as e:
             logger.warning(f"Could not fetch ticker info for {ticker}: {e}")
 
-    try:
-        result = await asyncio.wait_for(
-            generate_growth_story(ticker, company_name, sector),
-            timeout=180.0,  # 3 min — agent needs time to search the web
-        )
+    # Attempt AI-powered analysis (returns None on failure)
+    result = await generate_growth_story(ticker, company_name, sector)
+
+    if result is not None:
+        result["analysis_duration_seconds"] = round(time.monotonic() - start_time, 1)
         return result
-    except asyncio.TimeoutError:
-        logger.error(f"Growth story generation timed out for {ticker}")
-        raise HTTPException(
-            status_code=504,
-            detail=f"Growth story generation timed out for {ticker}. Try again later.",
+
+    # Fallback: use template-based synthesis
+    logger.info("growth_story.fallback ticker=%s — using template synthesis", ticker)
+    try:
+        template_response = await get_synthesis(ticker)
+        # get_synthesis returns a dict or JSONResponse; normalize
+        if hasattr(template_response, "body"):
+            import json as _json
+            fallback = _json.loads(template_response.body)
+        elif isinstance(template_response, dict):
+            fallback = template_response
+        else:
+            fallback = template_response
+
+        fallback["source"] = "template"
+        fallback["analysis_duration_seconds"] = round(
+            time.monotonic() - start_time, 1
         )
-    except RuntimeError as e:
-        logger.error(f"Copilot SDK error for {ticker}: {e}")
+        return fallback
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Template fallback also failed for {ticker}: {e}")
         raise HTTPException(
             status_code=502,
-            detail=f"AI analysis service unavailable: {e}",
-        )
-    except ValueError as e:
-        logger.error(f"Response parsing error for {ticker}: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to parse AI response for {ticker}: {e}",
+            detail=f"Both AI and template analysis failed for {ticker}",
         )
