@@ -81,3 +81,20 @@ The application supports comprehensive trading workflows:
 **Key routing insight:** Existing TRADING-section pages (`/options`, `/ladder`, `/holdings`) use top-level paths despite being in the TRADING nav group — so `/analyze` follows established convention rather than nesting under `/trading/`.
 
 **Decomposition:** 17 tasks across 4 phases, parallelizable at each phase. Hockney (API), McManus (financial math), Fenster (UI) can all start Phase 1 simultaneously. Plan written to `.squad/decisions/inbox/keaton-analyze-page-architecture.md`.
+
+### 2026-03-04: v0.0.1 Project Board Created
+**Context:** Set up release tracking using GitHub milestone + labeled issues (gh project command requires unauthorized scope).
+
+**What was created:**
+- **14 labels:** 5 stage labels (backlog→done workflow), 3 priority levels (critical/high/medium), 5 domain labels (frontend/backend/security/testing/infra), plus `squad` label
+- **Milestone:** v0.0.1 — "First release — core trading journal with analysis page, pension tracking, and financial planning"
+- **13 issues** across 3 priority tiers:
+  - **Critical (3):** #1 API authentication, #2 credential cleanup from git history, #3 CORS restriction — all security, all block release
+  - **High (5):** #4 frontend tests, #5 backend financial calc tests, #6 analysis page polish, #7 yfinance caching, #8 CI/CD pipeline
+  - **Medium (5):** #9 Decimal migration, #10 security headers, #11 Growth Story AI Phase 2, #12 OpenAPI docs, #13 pension history browser
+
+**Routing:** Each issue tagged with owner (Rabin=auth/security, Kujan=infra/cleanup, Hockney=backend/CORS, Redfoot=testing, Fenster=frontend, McManus=data, Kobayashi=AI).
+
+**Board URL:** https://github.com/cohenjo/trading-journal/milestone/1
+
+**Learning:** `gh project` requires project scope not available in our token. Milestone + labels gives us equivalent workflow columns (stage:backlog → stage:done) with native GitHub filtering. Filter by `milestone:v0.0.1 label:priority:critical` to see release blockers.

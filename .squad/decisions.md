@@ -601,3 +601,43 @@ This places it as the last item in the TRADING section — logically it's a rese
 - Existing synthesis endpoint preserved as fast fallback (no modifications)
 
 **Impact:** Additive — no existing endpoints/services modified.
+### 2026-07-25: Frontend Test Infrastructure — Tooling and Patterns
+**By:** Redfoot (Tester)
+**Category:** Testing, Quality, Infrastructure
+**Status:** Implemented (PR #15, draft)
+
+**What:** Established frontend test infrastructure with vitest + React Testing Library + jsdom. Created 4 test files (20 tests) covering PensionTable, AnalyzePage, SplitBrainToggle, and OptionChainSnapshot.
+
+**Design decisions:**
+1. **vitest over Jest** — vitest integrates natively with the Vite ecosystem, shares config patterns with the existing Next.js setup, runs faster, and has built-in ESM support. No babel config needed.
+2. **Global mocks in setup.ts** — `lightweight-charts` and `next/navigation` are mocked globally because nearly every component depends on one or both. This avoids repetitive per-file mock boilerplate.
+3. **Child component mocking pattern** — Page-level tests (AnalyzePage) mock child views (LongTermView, ShortTermView) to isolate page logic (routing, toggle state, ticker validation) from data-fetching and rendering concerns. This keeps tests fast and focused.
+4. **Null-safety as a test priority** — OptionChainSnapshot tests explicitly verify behavior with null Greeks and IV metrics. This validates the recent null-safety fix and prevents regressions from API data inconsistencies.
+5. **Test scripts convention** — `npm test` (CI), `npm run test:watch` (dev), `npm run test:coverage` (quality gate). Consistent with team decision on quality gates.
+
+**Impact:** Additive. No existing code modified (only package.json scripts added). Foundation for expanding coverage to all 53+ frontend components.
+
+**Next steps:**
+- Add tests for chart components (will need more sophisticated lightweight-charts mock interactions)
+- Add tests for data hooks (useCompanyFundamentals, usePriceHistory, etc.) with fetch mocking
+- Set up coverage thresholds once baseline is established
+- Wire `npm test` into CI pipeline (GitHub Actions)
+### 2026-03-05: yfinance Caching — In-Memory TTL with cachetools
+**By:** Hockney (Backend Dev)
+**Category:** Performance, API Design
+**Status:** Implemented (PR #14, draft)
+
+**What:** Added `cachetools.TTLCache`-based in-memory caching for all `/api/analyze` endpoints. Each cache type has its own TTL:
+- Prices/technicals/options: 5 minutes (300s)
+- Fundamentals: 1 hour (3600s)
+
+**Why:** yfinance calls are slow (1-3s per ticker). Repeated requests for the same ticker within the TTL window now return instantly from cache. This directly addresses the Phase 4 caching item from the Company Analysis architecture decision.
+
+**Design decisions:**
+1. **cachetools over Redis** — For a single-instance personal app, in-memory caching is simpler and has zero operational overhead. If the app scales to multiple workers/instances, this should migrate to Redis.
+2. **Thread lock, not asyncio lock** — yfinance is synchronous and runs in FastAPI's threadpool. A `threading.Lock` protects the shared cache dict correctly.
+3. **JSONResponse for cached responses** — Switching from returning raw dicts to `JSONResponse` when cache headers are needed. This is a slight change in response behavior (no Pydantic serialization on cached hits) but the data is already serialized.
+4. **Cache-stats endpoint is public** — No auth yet on the app. When JWT auth is added (per Security Hardening decision), this endpoint should be admin-only.
+5. **No cache invalidation API** — For a personal app with TTL-based expiry, manual invalidation isn't needed yet. Can add `DELETE /api/analyze/cache` if required.
+
+**Impact:** Additive — no breaking changes. Existing test suite passes.

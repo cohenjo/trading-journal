@@ -31,6 +31,14 @@
 |------|------|---------|--------|
 | @copilot | Coding Agent | — | 🤖 Coding Agent |
 
+## Issue Source
+
+| Field | Value |
+|-------|-------|
+| Repository | `cohenjo/trading-journal` |
+| Connected | 2026-03-04 |
+| Filters | All open issues |
+
 ## Project Context
 
 - **Owner:** Jony Vesterman Cohen
