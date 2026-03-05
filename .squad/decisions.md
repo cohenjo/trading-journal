@@ -98,3 +98,506 @@
 5. Create deployment runbook for production hardening checklist
 
 **Priority:** High - Required before production deployment.
+# Architecture Decision: Company Analysis Page ("Split-Brain" View)
+
+**Author:** Keaton (Lead)
+**Date:** 2025-07-18
+**Status:** Proposed
+**Requested by:** Jony Vesterman Cohen
+
+---
+
+## 1. Route Path
+
+**Route:** `/analyze`
+**App Router path:** `apps/frontend/src/app/analyze/page.tsx`
+
+**Rationale:** `/analyze` is short, action-oriented, and avoids collision with existing routes (`/trading/*`, `/options`, `/backtest`). It sits at the top level like other trading tools (`/options`, `/ladder`, `/holdings`) rather than nested under `/trading/` — consistent with how the app routes standalone tool pages. The page is about *analyzing a company*, not managing trades, so it deserves its own namespace.
+
+**Alternative considered:** `/trading/analyze` — rejected because existing TRADING-section pages like `/options`, `/ladder`, `/holdings` already use top-level paths.
+
+---
+
+## 2. Page Component Structure
+
+```
+apps/frontend/src/components/Analyze/
+├── AnalyzePage.tsx              # Page shell: ticker search bar + Split-Brain toggle
+├── SplitBrainToggle.tsx         # Toggle between "Long-Term" and "Short-Term" views
+├── TickerSearch.tsx              # Autocomplete ticker input (debounced API call)
+│
+├── longterm/
+│   ├── LongTermView.tsx         # Container for all Long-Term panes
+│   ├── PriceChartWithFairValue.tsx  # 1Y/5Y line chart + DCF fair-value overlay
+│   ├── AISynthesis.tsx          # "Growth Engine" + "Bear Case" bulleted lists
+│   ├── FinancialScorecard.tsx   # ROIC vs WACC, Revenue/FCF CAGR, Net Debt/EBITDA
+│   ├── ValuationBenchmarks.tsx  # Forward P/E, PEG, EV/FCF display cards
+│   └── DCFCalculator.tsx        # Interactive sliders → recalculates fair value live
+│
+├── shortterm/
+│   ├── ShortTermView.tsx        # Container for all Short-Term panes
+│   ├── CandlestickChart.tsx     # 1M candlestick + EMA 50/200 + Bollinger + volume
+│   ├── MomentumPanel.tsx        # RSI + MACD indicators
+│   ├── AIPriceAction.tsx        # "Current Support", "Setup Quality" summary
+│   ├── OptionChainSnapshot.tsx  # IV Percentile, IV Rank table
+│   └── BreakevenVisualizer.tsx  # Price vs Strike vs Breakeven visual
+│
+└── hooks/
+    ├── useCompanyFundamentals.ts  # Fetch + cache fundamentals data
+    ├── usePriceHistory.ts         # Fetch OHLCV data for charts
+    ├── useOptionChain.ts          # Fetch options chain data
+    └── useDCFCalculator.ts        # Client-side DCF recalculation on slider change
+```
+
+**Key design decisions:**
+- `SplitBrainToggle` uses React state (not URL params) — both views share the same ticker context, switching is instant
+- Chart components follow the `OptionsChart.tsx` pattern: `useRef` + `useEffect` with `createChart` from lightweight-charts
+- DCF Calculator does client-side recalculation via `useDCFCalculator` hook — sliders call a pure function, no API round-trip needed
+- Each view is lazy-loaded with `React.lazy()` to avoid loading Short-Term chart code when in Long-Term mode
+
+---
+
+## 3. API Contracts
+
+All endpoints under prefix `/api/analyze`. New router file: `apps/backend/app/api/analyze.py`.
+
+### 3.1 Company Fundamentals
+
+```
+GET /api/analyze/fundamentals/{ticker}
+```
+
+**Response:**
+```json
+{
+  "ticker": "AAPL",
+  "name": "Apple Inc.",
+  "sector": "Technology",
+  "market_cap": 3200000000000,
+  "currency": "USD",
+  "financials": {
+    "roic": 0.562,
+    "wacc": 0.098,
+    "revenue_cagr_5y": 0.082,
+    "fcf_cagr_5y": 0.115,
+    "net_debt_ebitda": 0.42,
+    "forward_pe": 28.5,
+    "peg_ratio": 2.1,
+    "ev_fcf": 25.3,
+    "trailing_eps": 6.42,
+    "forward_eps": 7.10,
+    "dividend_yield": 0.0055
+  },
+  "dcf_inputs": {
+    "current_fcf": 110000000000,
+    "shares_outstanding": 15400000000,
+    "growth_rate_default": 0.08,
+    "discount_rate_default": 0.10,
+    "terminal_growth": 0.025,
+    "projection_years": 10
+  }
+}
+```
+
+**Source:** yfinance `ticker.info`, `ticker.financials`, `ticker.cashflow`, `ticker.balance_sheet`
+
+### 3.2 Price History
+
+```
+GET /api/analyze/price-history/{ticker}?period={1y|5y|1mo}&interval={1d|1wk}
+```
+
+**Response:**
+```json
+{
+  "ticker": "AAPL",
+  "period": "1y",
+  "interval": "1d",
+  "data": [
+    {
+      "time": "2024-07-18",
+      "open": 178.50,
+      "high": 182.30,
+      "low": 177.80,
+      "close": 181.20,
+      "volume": 52340000
+    }
+  ]
+}
+```
+
+**Source:** yfinance `ticker.history(period, interval)`
+
+### 3.3 Technical Indicators
+
+```
+GET /api/analyze/technicals/{ticker}
+```
+
+**Response:**
+```json
+{
+  "ticker": "AAPL",
+  "as_of": "2025-07-18",
+  "indicators": {
+    "ema_50": 179.30,
+    "ema_200": 172.15,
+    "rsi_14": 62.5,
+    "macd": {
+      "macd_line": 2.45,
+      "signal_line": 1.80,
+      "histogram": 0.65
+    },
+    "bollinger": {
+      "upper": 188.50,
+      "middle": 181.20,
+      "lower": 173.90,
+      "bandwidth": 0.081
+    }
+  },
+  "support_resistance": {
+    "support_1": 175.00,
+    "resistance_1": 190.00,
+    "trend": "bullish"
+  }
+}
+```
+
+**Source:** Calculated server-side from yfinance OHLCV using standard TA formulas (EMA, RSI, MACD, Bollinger Bands)
+
+### 3.4 Option Chain
+
+```
+GET /api/analyze/options/{ticker}?expiry={YYYY-MM-DD}
+```
+
+**Response:**
+```json
+{
+  "ticker": "AAPL",
+  "current_price": 181.20,
+  "expirations": ["2025-07-25", "2025-08-01", "2025-08-15"],
+  "selected_expiry": "2025-07-25",
+  "iv_percentile": 32.5,
+  "iv_rank": 28.1,
+  "calls": [
+    {
+      "strike": 180.0,
+      "bid": 3.20,
+      "ask": 3.40,
+      "iv": 0.245,
+      "delta": 0.52,
+      "gamma": 0.035,
+      "theta": -0.12,
+      "volume": 1520,
+      "open_interest": 8400
+    }
+  ],
+  "puts": [
+    {
+      "strike": 180.0,
+      "bid": 2.80,
+      "ask": 3.00,
+      "iv": 0.252,
+      "delta": -0.48,
+      "gamma": 0.034,
+      "theta": -0.11,
+      "volume": 980,
+      "open_interest": 6200
+    }
+  ]
+}
+```
+
+**Source:** yfinance `ticker.options` for expirations, `ticker.option_chain(expiry)` for chain data
+
+### 3.5 AI Synthesis (Future — Stub First)
+
+```
+GET /api/analyze/synthesis/{ticker}
+```
+
+**Response:**
+```json
+{
+  "ticker": "AAPL",
+  "generated_at": "2025-07-18T14:00:00Z",
+  "growth_engine": [
+    "Services revenue growing 15% YoY, now 25% of total revenue",
+    "Vision Pro ecosystem expanding developer adoption",
+    "India manufacturing diversification reducing supply chain risk"
+  ],
+  "bear_case": [
+    "iPhone unit sales declining 3% in key China market",
+    "Regulatory pressure on App Store fees in EU",
+    "Premium valuation leaves little margin of safety at 28x forward P/E"
+  ],
+  "price_action_summary": {
+    "current_support": "$175 (200-day EMA + high volume node)",
+    "setup_quality": "Moderate — consolidating above support, awaiting catalyst"
+  }
+}
+```
+
+**Phase 1:** Return hardcoded/templated synthesis derived from fundamentals data (no LLM).
+**Phase 2:** Integrate Copilot SDK or OpenAI for genuine AI synthesis from financial data + news.
+
+---
+
+## 4. Financial Model Interfaces
+
+### 4.1 DCF Valuation (McManus)
+
+```python
+# apps/backend/app/services/analyze_service.py
+
+def calculate_dcf(
+    current_fcf: float,        # Latest free cash flow
+    growth_rate: float,         # Annual FCF growth rate (slider: 0-30%)
+    discount_rate: float,       # WACC / required return (slider: 5-20%)
+    terminal_growth: float,     # Terminal perpetuity growth (default 2.5%)
+    projection_years: int,      # Typically 10
+    shares_outstanding: float,  # For per-share fair value
+) -> dict:
+    """Returns projected FCFs, terminal value, enterprise value, fair value per share."""
+```
+
+**Output:** `{ "projected_fcfs": [...], "terminal_value": float, "enterprise_value": float, "fair_value_per_share": float }`
+
+### 4.2 ROIC Calculation
+
+```python
+def calculate_roic(
+    nopat: float,          # Net Operating Profit After Tax
+    invested_capital: float # Total equity + net debt
+) -> float:
+```
+
+**Source fields:** From yfinance financials and balance_sheet DataFrames.
+
+### 4.3 Technical Indicators (McManus)
+
+```python
+def calculate_ema(prices: list[float], period: int) -> list[float]:
+def calculate_rsi(prices: list[float], period: int = 14) -> list[float]:
+def calculate_macd(prices: list[float]) -> dict:  # macd_line, signal, histogram
+def calculate_bollinger(prices: list[float], period: int = 20, std_dev: float = 2.0) -> dict:
+```
+
+These are pure functions operating on price arrays. No external dependencies — standard formulas.
+
+### 4.4 IV Percentile / IV Rank
+
+```python
+def calculate_iv_percentile(current_iv: float, historical_ivs: list[float]) -> float:
+    """% of days in past year where IV was below current IV."""
+
+def calculate_iv_rank(current_iv: float, high_iv_52w: float, low_iv_52w: float) -> float:
+    """(Current IV - 52w Low) / (52w High - 52w Low) * 100"""
+```
+
+### 4.5 Breakeven Calculator
+
+```python
+def calculate_breakeven(
+    strike: float,
+    premium: float,
+    option_type: str,  # "call" | "put"
+    current_price: float,
+) -> dict:
+    """Returns breakeven price and distance from current price."""
+```
+
+---
+
+## 5. Data Sources
+
+| Data Need | Source | Notes |
+|-----------|--------|-------|
+| Company info, financials | `yfinance` ticker.info, .financials, .cashflow, .balance_sheet | Already in dependencies |
+| Price history (OHLCV) | `yfinance` ticker.history() | Supports 1d, 1wk, 1mo intervals |
+| Option chains + Greeks | `yfinance` ticker.option_chain() | Greeks included in chain data |
+| Technical indicators | **Calculated server-side** | Pure math from OHLCV — no extra deps |
+| IV historical data | `yfinance` options chain over time | May need caching strategy for 52-week lookback |
+| AI Synthesis | **Phase 1: Template-based** from fundamentals | Phase 2: Copilot SDK / OpenAI integration |
+| Social sentiment | **Out of scope for v1** | Future: Reddit/Twitter APIs or third-party sentiment feeds |
+
+**Caching strategy:** yfinance calls are slow (1-3s per ticker). Add a simple in-memory TTL cache (5-minute expiry for prices, 1-hour for fundamentals) using `cachetools` or a dict-based approach in the service layer.
+
+---
+
+## 6. Nav Integration
+
+**File:** `apps/frontend/src/components/Layout/MainLayout.tsx`
+**Location:** After the "Backtest" link (line 156), before the Settings divider (line 158).
+
+Insert:
+```tsx
+<Link
+    href="/analyze"
+    className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+    onClick={() => setMenuOpen(false)}
+>
+    Company Analysis
+</Link>
+```
+
+This places it as the last item in the TRADING section — logically it's a research/analysis tool that complements the existing trading execution pages above it.
+
+---
+
+## 7. Work Decomposition
+
+### Phase 1: Foundation (No dependencies between tasks)
+
+| # | Task | Agent | Depends On | Description |
+|---|------|-------|------------|-------------|
+| 1 | Backend router + fundamentals endpoint | **Hockney** | — | Create `app/api/analyze.py`, register in `main.py`, implement `GET /api/analyze/fundamentals/{ticker}` using yfinance |
+| 2 | Backend price history endpoint | **Hockney** | — | Implement `GET /api/analyze/price-history/{ticker}` with period/interval params |
+| 3 | Financial calculation service | **McManus** | — | Implement `app/services/analyze_service.py` with DCF, ROIC, EMA, RSI, MACD, Bollinger pure functions |
+| 4 | Frontend page shell + nav link | **Fenster** | — | Create `app/analyze/page.tsx`, `AnalyzePage.tsx`, `SplitBrainToggle.tsx`, `TickerSearch.tsx`, add nav link in MainLayout |
+
+### Phase 2: Long-Term View (Depends on Phase 1)
+
+| # | Task | Agent | Depends On | Description |
+|---|------|-------|------------|-------------|
+| 5 | Price chart with fair value overlay | **Fenster** | 2, 3 | `PriceChartWithFairValue.tsx` — line chart using lightweight-charts, DCF overlay line |
+| 6 | Financial Scorecard component | **Fenster** | 1 | `FinancialScorecard.tsx` — display ROIC/WACC, CAGR, Debt/EBITDA from fundamentals endpoint |
+| 7 | Valuation Benchmarks + DCF Calculator | **Fenster** | 1, 3 | `ValuationBenchmarks.tsx` + `DCFCalculator.tsx` with interactive sliders |
+| 8 | AI Synthesis stub | **Hockney** | 1 | `GET /api/analyze/synthesis/{ticker}` — template-based summary from fundamentals data |
+| 9 | AI Synthesis component | **Fenster** | 8 | `AISynthesis.tsx` — render growth engine + bear case lists |
+
+### Phase 3: Short-Term View (Depends on Phase 1)
+
+| # | Task | Agent | Depends On | Description |
+|---|------|-------|------------|-------------|
+| 10 | Technicals endpoint | **Hockney** | 2, 3 | `GET /api/analyze/technicals/{ticker}` — calls McManus calculation functions |
+| 11 | Option chain endpoint | **Hockney** | 3 | `GET /api/analyze/options/{ticker}` — wraps yfinance option_chain + IV calculations |
+| 12 | Candlestick chart + indicators | **Fenster** | 2, 10 | `CandlestickChart.tsx` + `MomentumPanel.tsx` — candlestick series with overlays |
+| 13 | Option chain + breakeven UI | **Fenster** | 11 | `OptionChainSnapshot.tsx` + `BreakevenVisualizer.tsx` |
+| 14 | AI Price Action component | **Fenster** | 8, 10 | `AIPriceAction.tsx` — support/resistance + setup quality display |
+
+### Phase 4: Polish
+
+| # | Task | Agent | Depends On | Description |
+|---|------|-------|------------|-------------|
+| 15 | Caching layer for yfinance | **Hockney** | 1, 2, 10, 11 | Add TTL-based in-memory cache to avoid repeated yfinance calls |
+| 16 | Loading states + error handling | **Fenster** | 5-14 | Skeleton loaders, error boundaries, empty states for all components |
+| 17 | Integration review | **Keaton** | All | End-to-end review, verify data flow, chart performance, mobile responsiveness |
+
+---
+
+## Design Principles Applied
+
+1. **Separation:** Backend does all financial math — frontend is a render layer with one exception (DCF slider recalculation for instant feedback)
+2. **yfinance first:** No new dependencies for data. yfinance covers fundamentals, prices, and options chains
+3. **Incremental delivery:** Each phase delivers a working slice. Phase 1 + 2 alone gives a useful Long-Term analysis tool
+4. **AI as enhancement, not dependency:** Synthesis is template-based in v1. The page works without AI — it adds color but isn't load-bearing
+5. **Chart consistency:** All charts follow the `OptionsChart.tsx` pattern (dark theme, slate grid, lightweight-charts API)
+
+---
+
+## Open Questions
+
+1. **Ticker universe:** Should we restrict to US equities, or support international tickers (TASE, LSE)? yfinance supports both but data coverage varies.
+2. **Persistence:** Should analysis results be saved to DB, or is this always live/ephemeral? Recommend ephemeral for v1.
+3. **AI Phase 2 timeline:** When do we want genuine LLM synthesis? Copilot SDK is already in the project — could integrate relatively quickly.
+
+---
+
+*This plan is ready for team review. Hockney, McManus, and Fenster can begin Phase 1 tasks in parallel immediately.*
+### 2025-07-24: Company Analysis — Financial Calculation Module Structure
+**By:** McManus (Data/Finance Dev)
+**Category:** Architecture, Financial Accuracy
+**Status:** Implemented
+
+**What:** Created `app/services/analysis/` as a Python package with 5 submodules:
+- `dcf.py` — Two-stage DCF with Gordon Growth terminal value, net-debt adjustment, margin-of-safety
+- `scorecard.py` — ROIC, WACC, CAGR (revenue + FCF), Net Debt/EBITDA, value-creation check
+- `valuation.py` — Forward P/E, PEG Ratio, EV/FCF
+- `technicals.py` — EMA, Bollinger Bands, RSI (Wilder's), MACD, Support/Resistance pivot detection
+- `options_analytics.py` — IV Percentile, IV Rank, Cash Secured Put breakeven, Greeks formatter
+
+**Why:** Company Analysis page requires both long-term valuation models and short-term technical/options analytics. All functions are pure (no DB, no network, no side effects) so Hockney can wrap them in API endpoints without coupling concerns.
+
+**Design decisions:**
+1. All monetary calculations use `decimal.Decimal` per team precision decision — converted to float only at serialization boundary
+2. Technical indicators work on `List[float]` (not pandas Series) to keep them framework-agnostic
+3. Each module has Pydantic input/output models for the composite functions, plus standalone functions for individual metrics
+4. Support/Resistance uses pivot-point detection with configurable clustering tolerance
+5. 48 tests cover all models including edge cases (negative values, zero denominators, insufficient data)
+
+**Impact:** Additive — no existing code modified. Hockney can import from `app.services.analysis` directly.
+
+### 2025-07-18: UI Decision — Company Analysis Page Shell
+**By:** Fenster (Frontend Dev)
+**Category:** Frontend, UI/UX
+**Status:** Implemented
+
+**What:** Split-Brain Toggle UI component with pill/segmented control styling. Blue for Long-Term Investor view, amber for Short-Term Income view. Toggle state is React state only (no URL params). Ticker validation is client-side only: uppercase, alphabetic, 1–5 characters for US equity tickers.
+
+**Design decisions:**
+- Color distinction gives instant visual feedback about active "brain"
+- Both views use `shadow-lg` with color-tinted glow for premium feel
+- Placeholder card structure (3 cards per view) with dashed borders makes Phase 2/3 drop-in integration straightforward
+- Page layout follows `pension/page.tsx` pattern: `min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8`, cards use `bg-slate-900 border border-slate-800 rounded-xl p-6`
+
+**Files Created:**
+- `apps/frontend/src/app/analyze/page.tsx`
+- `apps/frontend/src/components/Analyze/AnalyzePage.tsx`
+- `apps/frontend/src/components/Analyze/SplitBrainToggle.tsx`
+- `apps/frontend/src/components/Analyze/TickerSearch.tsx`
+- `apps/frontend/src/components/Analyze/LongTermView.tsx`
+- `apps/frontend/src/components/Analyze/ShortTermView.tsx`
+- Modified: `apps/frontend/src/components/Layout/MainLayout.tsx` (added nav link)
+
+**Impact:** Additive. No breaking changes.
+
+### 2025-07-18: API Router Implementation — Analyze Endpoints
+**By:** Hockney (Backend Dev)
+**Category:** Backend, API Design
+**Status:** Implemented
+
+**What:** Created `/api/analyze` router with 5 endpoints wiring yfinance data to McManus's pure calculation functions:
+1. `GET /api/analyze/fundamentals/{ticker}` — Company financials + DCF inputs
+2. `GET /api/analyze/price-history/{ticker}` — OHLCV with period/interval params
+3. `GET /api/analyze/technicals/{ticker}` — Latest EMA, RSI, MACD, Bollinger scalar values
+4. `GET /api/analyze/options/{ticker}` — Option chain with IV percentile/rank
+5. `GET /api/analyze/synthesis/{ticker}` — Template-based observations (Phase 1)
+
+**Design decisions:**
+- WACC Cost of Equity uses CAPM (4.3% risk-free, 5.5% market premium) — hardcoded for now, should be configurable Phase 2
+- IV Percentile/Rank approximated from current chain distribution (not historical) — true 52w percentile requires data provider Phase 2
+- Technicals return scalars only (last valid value per indicator), not full arrays — separate endpoint can be added if charts need time series
+- Synthesis uses conditional templates on financial ratios (no raw number interpolation without context)
+- Error handling: 404 for unknown tickers, 502 for yfinance failures, individual metrics return `null` on calc failure (don't block response)
+
+**Files:**
+- Created: `apps/backend/app/api/analyze.py`
+- Modified: `apps/backend/main.py` (router import/registration)
+
+**Open items:**
+- [ ] Add TTL caching for yfinance calls (Phase 4)
+- [ ] Replace hardcoded CAPM parameters
+- [ ] Source proper historical IV data
+
+### 2026-07-24: Growth Story Agent + Copilot SDK Service
+**By:** Kobayashi (AI Agent Engineer)
+**Category:** AI Integration, Feature Development
+**Status:** Implemented
+
+**What:** Created Growth Story analysis feature — three artifacts:
+1. `.github/agents/growth-analyst.agent.md` — Agent persona for Copilot Chat and backend SDK reference. Senior Equity Research Analyst with structured search phase, source weighting (SEC filings > news > social), three-scenario framework, JSON output contract.
+2. `apps/backend/app/services/growth_story.py` — Copilot SDK service following established `copilot_analyzer.py` pattern. Uses streaming delta accumulation, `send_and_wait`, `claude-opus-4.6`, and `system_message` with `mode: "append"`.
+3. `apps/backend/app/api/analyze.py` — Added `POST /api/analyze/growth-story/{ticker}` endpoint with optional company_name/sector, yfinance fallback, 180s timeout, proper error handling.
+
+**Why:** Delivers Phase 2 AI synthesis with web search, multi-source analysis, structured scenarios. POST method chosen because it triggers expensive AI operation (not cached lookup).
+
+**Design decisions:**
+- System message uses `mode: "append"` — preserves Copilot safety guardrails while injecting analyst persona
+- Response parsing handles multiple JSON extraction strategies (direct parse, markdown stripping, object extraction)
+- Agent file doubles as both Copilot Chat persona and canonical backend system prompt reference
+- 180s timeout accommodates web search + multi-source analysis
+- Existing synthesis endpoint preserved as fast fallback (no modifications)
+
+**Impact:** Additive — no existing endpoints/services modified.
