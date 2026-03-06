@@ -20,6 +20,7 @@ from app.api import (
     plans,
     trading,
     pension,
+    analyze,
     metrics as telemetry_metrics,
 )
 import os
@@ -99,6 +100,7 @@ app.include_router(finances.router)
 app.include_router(plans.router)
 app.include_router(trading.router)
 app.include_router(pension.router)
+app.include_router(analyze.router)
 app.include_router(telemetry_metrics.router)
 
 if __name__ == "__main__":
