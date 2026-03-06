@@ -690,3 +690,23 @@ This places it as the last item in the TRADING section — logically it's a rese
 **Team impact:** Frontend devs accept longer E2E runs; CI/CD needs network access to yfinance; tests need periodic review if yfinance API changes.
 
 **Revisit if:** E2E flakiness >5%, runtime >2min, or team grows and needs faster feedback loops.
+
+### 2026-03-06: Allow `.squad/` files on protected branches
+**By:** Kujan (DevOps/Platform)  
+**Date:** 2026-03-06  
+**Status:** Implemented (Commit: 904c595)  
+**Impact:** CI/CD workflow behavior change
+
+**What:** Remove `.squad/` and `.squad/**` path patterns from the forbidden paths check in `.github/workflows/squad-main-guard.yml` while maintaining protection for `.ai-team/`, `.ai-team-templates/`, `docs/proposals/`, and `team-docs/`.
+
+**Why:** The squad framework is actively used on `main` for team state management. The `.squad/` directory already contains 66 tracked files and is part of the team's normal workflow. The guard correctly blocks other developer/template directories which should stay off production branches.
+
+**Decision:** Removed `.squad/` from forbidden paths check. Kept protection for: `.ai-team/`, `.ai-team-templates/`, `team-docs/`, `docs/proposals/`.
+
+**Changes:**
+- Line 78 (filter): Removed `.squad` and `.squad/**` check
+- Line 98 (error message): Removed `.squad/` mention from runtime team state description
+- Lines 113-114 (remediation): Removed `git rm --cached -r .squad/` command
+- Line 121 (note): Updated to reference only `.ai-team/`
+
+**Verification:** All other forbidden paths remain blocked. CI now green (run 22758227640).
