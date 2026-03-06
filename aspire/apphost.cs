@@ -1,7 +1,7 @@
-#:sdk Aspire.AppHost.Sdk@13.1.0
-#:package Aspire.Hosting.PostgreSQL@13.1.0
-#:package Aspire.Hosting.Python@13.1.0
-#:package Aspire.Hosting.JavaScript@13.1.0
+﻿#:sdk Aspire.AppHost.Sdk@13.1.2
+#:package Aspire.Hosting.PostgreSQL@13.1.2
+#:package Aspire.Hosting.Python@13.1.2
+#:package Aspire.Hosting.JavaScript@13.1.2
 
 var builder = DistributedApplication.CreateBuilder(args);
 var runIbGateway = string.Equals(
