@@ -663,3 +663,30 @@ This places it as the last item in the TRADING section — logically it's a rese
 4. **Agent prompt strengthened** — Added explicit required-fields table, noise filter rules, source weighting priority table. This reduces malformed JSON occurrences at the source.
 
 **Impact:** No breaking changes. The endpoint never crashes on SDK failures now. Template fallback provides consistent UX. This pattern should be replicated for any future SDK-powered endpoints.
+### 2026-02-23: Real API Integration Testing for /analyze Page
+**By:** Redfoot (Tester)
+**Category:** Testing, E2E, Architecture
+**Status:** Implemented (PR #16)
+
+**What:** Playwright E2E tests for `/analyze` page use REAL API calls to the backend (which calls yfinance), not mocks. 11 comprehensive tests covering page load, ticker search, toggle switching, financial data display (Scorecard, Valuation Benchmarks, DCF), error handling.
+
+**Why:** 
+- Integration coverage: Mocking the API tests only the frontend in isolation, missing integration issues between frontend, backend, and yfinance
+- Real behavior: Live market data has edge cases (missing data, null values, API errors) hard to predict and mock accurately
+- Confidence: Tests passing with real APIs give higher confidence for production
+- Trade-off: Tests are slower (5-15s each), can be flaky if yfinance is down, but catch real bugs
+
+**Design decisions:**
+- Test timeouts: 30s per test, 15s for API-dependent visibility assertions
+- Assertions focus on UI presence and label text (not exact numbers, which vary)
+- Toggle buttons tested via `aria-pressed` attribute
+- Metric labels must include spaces: "Net Debt / EBITDA" not "NetDebt/EBITDA"
+
+**Alternatives rejected:**
+- Mock all API calls: False confidence, misses integration issues
+- Hybrid (mock some, real for others): Added complexity without benefit
+- Separate mock/integration suites: Possible future if flakiness becomes issue (>5% external failures, >2min runtime)
+
+**Team impact:** Frontend devs accept longer E2E runs; CI/CD needs network access to yfinance; tests need periodic review if yfinance API changes.
+
+**Revisit if:** E2E flakiness >5%, runtime >2min, or team grows and needs faster feedback loops.

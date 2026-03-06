@@ -102,3 +102,17 @@ Updated `apps/backend/app/api/analyze.py` to wrap all 4 yfinance-backed endpoint
 **PR:** #14 (draft)
 **Branch:** `squad/7-yfinance-cache`
 **Dependency added:** `cachetools>=5.5.0`
+
+### 2026-03-06: analyze Router Registration Commit (f81ec80)
+
+**What was done:**
+- Registered the `analyze` router in `main.py` — added import and `app.include_router(analyze.router)` call
+- Fix addresses 404 errors on `/analyze` page that were due to router not being attached to the FastAPI app
+- Commit f81ec80 landed on squad/4 branch
+
+**Impact:**
+- `/analyze` page now routes correctly to backend endpoints
+- All 5 analyze endpoints (fundamentals, price-history, technicals, options, synthesis) now accessible
+- Backend ready for E2E testing
+
+**Cross-team:** Redfoot proceeded to write E2E tests once this fix was in place.
