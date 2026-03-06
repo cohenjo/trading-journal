@@ -47,6 +47,15 @@ reports/
 backups/
 trading-journal-data/
 
+# Aspire (local settings)
+.aspire/
+
+# Next.js build output
+.next/
+
+# Copilot CLI (local MCP config)
+.copilot/
+
 # IDE
 .vscode/
 .idea/
