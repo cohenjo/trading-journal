@@ -35,24 +35,15 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                 <nav className="fixed top-14 left-0 w-64 h-[calc(100vh-3.5rem)] bg-slate-900 border-r border-slate-800 shadow-xl z-20 overflow-y-auto">
                     {/* Using a distinct background for menu to separate it from body */}
                     <div className="flex flex-col py-2">
-                        <Link
-                            href="/summary"
-                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                            onClick={() => setMenuOpen(false)}
-                        >
-                            Summary
-                        </Link>
-
-                        <div className="mt-4 mb-2 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                        <div className="mb-2 px-6 pt-2 text-xs font-bold text-slate-500 uppercase tracking-wider">
                             Financial Planning
                         </div>
-
                         <Link
-                            href="/plan"
+                            href="/current-finances"
                             className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                             onClick={() => setMenuOpen(false)}
                         >
-                            Plan
+                            Net Worth
                         </Link>
                         <Link
                             href="/cash-flow"
@@ -62,18 +53,11 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                             Cash Flow
                         </Link>
                         <Link
-                            href="/pension"
+                            href="/plan"
                             className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                             onClick={() => setMenuOpen(false)}
                         >
-                            Pension Upload
-                        </Link>
-                        <Link
-                            href="/current-finances"
-                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                            onClick={() => setMenuOpen(false)}
-                        >
-                            Current Finances
+                            Financial Plan
                         </Link>
                         <Link
                             href="/progress"
@@ -84,21 +68,56 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                         </Link>
 
                         <div className="mt-4 mb-2 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider border-t border-slate-800 pt-4">
-                            Dividends
+                            Income &amp; Yield
                         </div>
+                        <Link
+                            href="/summary"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Income Summary
+                        </Link>
+                        <Link
+                            href="/pension"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Pension
+                        </Link>
                         <Link
                             href="/dividends"
                             className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                             onClick={() => setMenuOpen(false)}
                         >
-                            Dashboard
+                            Dividends
                         </Link>
                         <Link
                             href="/dividends/estimations"
                             className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                             onClick={() => setMenuOpen(false)}
                         >
-                            Estimations
+                            Dividend Estimations
+                        </Link>
+                        <Link
+                            href="/holdings"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Bonds
+                        </Link>
+                        <Link
+                            href="/ladder"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Bond Ladder
+                        </Link>
+                        <Link
+                            href="/options"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Options Income
                         </Link>
 
                         <div className="mt-4 mb-2 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider border-t border-slate-800 pt-4">
@@ -111,34 +130,19 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                         >
                             Accounts
                         </Link>
-
-                        <Link
-                            href="/options"
-                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                            onClick={() => setMenuOpen(false)}
-                        >
-                            Options income
-                        </Link>
-                        <Link
-                            href="/ladder"
-                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                            onClick={() => setMenuOpen(false)}
-                        >
-                            Ladder
-                        </Link>
-                        <Link
-                            href="/holdings"
-                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-                            onClick={() => setMenuOpen(false)}
-                        >
-                            Bond holdings
-                        </Link>
                         <Link
                             href="/day/2025-01-01"
                             className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                             onClick={() => setMenuOpen(false)}
                         >
-                            Day view
+                            Day View
+                        </Link>
+                        <Link
+                            href="/analyze"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Stock Analyzer
                         </Link>
                         <Link
                             href="/tax-condor"
