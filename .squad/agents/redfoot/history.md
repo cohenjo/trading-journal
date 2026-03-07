@@ -39,3 +39,7 @@
 **Commit:** (pending)
 
 **Cross-team:** Waited for Hockney's router fix before starting tests. Backend now ready for production validation.
+- ### 2026-03-07: Pension multi-owner regressions
+- Backend pension identities now come from `extract_pension_payload` in `apps/backend/app/api/pension.py` and encode owner + product + fund/account, which keeps Jony/Rita products distinct across dashboard history, plan sync, and delete flows.
+- `build_pension_dashboard_payload` is the key aggregation seam for pension history/projections; tests now verify it only emits latest active pensions and that deletes remove the same identity from historical snapshots and the plan.
+- Frontend pension rendering now centers on `apps/frontend/src/components/Pension/pensionTypes.ts` and `pensionChartUtils.ts`; chart regression tests cover empty projections and missing history anchors, while `PensionTable.test.tsx` covers the four-fund Jony/Rita scenario and stable delete targeting.

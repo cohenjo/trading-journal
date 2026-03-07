@@ -116,3 +116,20 @@ Updated `apps/backend/app/api/analyze.py` to wrap all 4 yfinance-backed endpoint
 - Backend ready for E2E testing
 
 **Cross-team:** Redfoot proceeded to write E2E tests once this fix was in place.
+
+### 2026-03-07: Stable Pension Identity Flow
+
+**What changed:**
+- Reworked `apps/backend/app/api/pension.py` so pension uploads derive a stable identity from owner + product + account/fund metadata and carry it through snapshot storage, plan items, dashboard series ids, and delete operations.
+- Dashboard responses now emit only the latest active pension identities, which keeps deleted products out of the table/chart while still allowing historical snapshots to exist in storage.
+- Added regression coverage in `apps/backend/tests/test_pension_api.py` for multi-product uploads, stable identifiers, dashboard payload filtering, and delete-by-identity behavior.
+
+**Patterns / decisions:**
+- For JSON-backed finance assets, use a stable id derived from business identity rather than random UUIDs when the same logical account must survive snapshot cloning, UI refreshes, and deletes.
+- When a dashboard is meant to represent current holdings, build its active account list from the latest snapshot first, then backfill history only for those active series ids.
+- Keep pension product metadata (`pension_product`, `pension_fund_name`, `account_number`) in `details` so frontend display and future migrations do not need to reverse-engineer names.
+
+**Key paths:**
+- `apps/backend/app/api/pension.py`
+- `apps/backend/app/utils/copilot_analyzer.py`
+- `apps/backend/tests/test_pension_api.py`

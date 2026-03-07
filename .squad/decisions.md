@@ -710,3 +710,32 @@ This places it as the last item in the TRADING section — logically it's a rese
 - Line 121 (note): Updated to reference only `.ai-team/`
 
 **Verification:** All other forbidden paths remain blocked. CI now green (run 22758227640).
+
+### 2026-03-07: Stable pension identifiers (consolidated)
+**By:** Hockney, Fenster, Redfoot
+**Category:** Data Integrity, Frontend Contract, Testing
+**Status:** Implemented (Session: 2026-03-07T18-36-08Z)
+
+**What:** 
+Three-agent consolidation of pension identity stabilization across backend, frontend, and tests.
+- Backend: Use stable pension identity `pension::{owner}::{product}::{account-or-fund}` persisted in `item.id` and `item.details.pension_identity`
+- Frontend: Treat `series_id`/`id` as the only chart and delete identity; `product_name`, `fund_name`, `display_name` are presentation-only
+- Tests: Regression coverage for multi-owner/product scenarios, delete consistency, chart edge cases
+
+**Why:** 
+- Multi-product uploads for same owner were overwriting each other (random ids + owner-only matching)
+- Frontend chart series keys were unstable (different identities across renders)
+- Delete prompts were ambiguous without business identity
+- Frontend had identity logic scattered across components (not reusable)
+
+**Consequences:**
+- Uploads update correct pension product even when owner has multiple products
+- Dashboard series ids stable, only include pensions in latest snapshot
+- Deletes operate by business identity, not heuristics
+- Chart helpers in `pensionTypes.ts` centralized for reuse
+- Regression tests validate identity through full dashboard flow (backend → frontend layers)
+
+**Decision Chain:**
+1. Hockney defined backend identity contract and update flows
+2. Fenster aligned frontend series/delete contract and centralized display logic
+3. Redfoot validated full identity chain with regression tests (multi-owner, delete + history, chart edge cases)
