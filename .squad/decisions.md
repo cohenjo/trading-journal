@@ -739,3 +739,27 @@ Three-agent consolidation of pension identity stabilization across backend, fron
 1. Hockney defined backend identity contract and update flows
 2. Fenster aligned frontend series/delete contract and centralized display logic
 3. Redfoot validated full identity chain with regression tests (multi-owner, delete + history, chart edge cases)
+# Decision: Increase Copilot SDK `send_and_wait` timeout to 120s
+
+**Date:** 2025-07-18
+**Author:** Hockney (Backend Dev)
+**Requested by:** Jony
+
+## Context
+
+The `send_and_wait` call in `copilot_analyzer.py` was using the SDK default timeout of 60 seconds. With the enhanced Hebrew RTL prompt for pension PDF analysis, the AI model needs additional processing time — especially for multi-page Hebrew documents with complex financial tables.
+
+## Decision
+
+Increased the timeout from 60s (default) to 120s (2 minutes) on line 136 of `apps/backend/app/utils/copilot_analyzer.py`.
+
+## Rationale
+
+- Pension PDFs in Hebrew with RTL formatting produce longer prompts and require more model reasoning time.
+- 120s provides a comfortable margin without being excessively long.
+- If we find 120s is still insufficient for edge-case documents, we should consider making this configurable via environment variable.
+
+## Impact
+
+- No breaking changes — all 17 pension tests pass.
+- Users analyzing large pension PDFs will experience fewer timeout errors.
