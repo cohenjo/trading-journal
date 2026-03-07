@@ -151,3 +151,5 @@ Updated `apps/backend/app/api/analyze.py` to wrap all 4 yfinance-backed endpoint
 - `apps/backend/app/api/pension.py` — upload endpoint, `_validate_pension_payload()`
 - `apps/backend/app/utils/copilot_analyzer.py` — Hebrew RTL prompt improvements
 - `apps/backend/tests/test_pension_api.py` — 3 new regression tests
+
+📌 **Team update (2026-03-07T20:18:16Z):** Pension upload bugs fixed — snapshot propagation for dashboard visibility + Hebrew RTL analyzer prompt + zero-value validation. All 17 tests passing. — Hockney, Redfoot

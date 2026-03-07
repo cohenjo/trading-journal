@@ -43,3 +43,14 @@
 - Backend pension identities now come from `extract_pension_payload` in `apps/backend/app/api/pension.py` and encode owner + product + fund/account, which keeps Jony/Rita products distinct across dashboard history, plan sync, and delete flows.
 - `build_pension_dashboard_payload` is the key aggregation seam for pension history/projections; tests now verify it only emits latest active pensions and that deletes remove the same identity from historical snapshots and the plan.
 - Frontend pension rendering now centers on `apps/frontend/src/components/Pension/pensionTypes.ts` and `pensionChartUtils.ts`; chart regression tests cover empty projections and missing history anchors, while `PensionTable.test.tsx` covers the four-fund Jony/Rita scenario and stable delete targeting.
+
+### 2026-07-23: Pension upload propagation & zero-value regression tests (8 tests)
+
+- **Bug-1 (invisible pension after upload):** Tests verify that upserting to both report-date and latest snapshot makes the pension visible on the dashboard. Key pattern: create multiple snapshots with different dates, upsert to both, then assert `build_pension_dashboard_payload` returns the pension in `accounts[]`. The dashboard reads only from `snapshots[-1]`.
+- **Bug-2 (zero ILS from null Total Amount):** `_safe_float(None)` returns 0.0 — this is documented behavior now pinned by test. Sub-fields (deposits, earnings, fees) are preserved even when total is zero. Any future fix must update `test_extract_pension_payload_zero_total`.
+- **Complementary pension resolution:** `resolve_pension_product` falls through product fields → fund name → filename. The "comp" hint in any of those resolves to "פנסיה משלימה". Tests pin all three paths.
+- **Same-owner dual-product coexistence:** `_make_jony_comprehensive` and `_make_jony_supplementary` helpers exist for reuse. Identity uniqueness comes from the product slug in `build_pension_identity`.
+- **Key file:** `apps/backend/tests/test_pension_api.py` — 13 tests total (5 original + 8 regression).
+- **Edge case discovered:** double-upsert on the same snapshot (same date = report date = latest) does not duplicate — the identity match prevents it. This is safe.
+
+📌 **Team update (2026-03-07T20:18:16Z):** Pension upload bugs fixed — snapshot propagation for dashboard visibility + Hebrew RTL analyzer prompt + zero-value validation. All 17 tests passing. — Hockney, Redfoot
