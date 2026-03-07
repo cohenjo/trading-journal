@@ -133,3 +133,21 @@ Updated `apps/backend/app/api/analyze.py` to wrap all 4 yfinance-backed endpoint
 - `apps/backend/app/api/pension.py`
 - `apps/backend/app/utils/copilot_analyzer.py`
 - `apps/backend/tests/test_pension_api.py`
+
+### 2025-07-19: Pension Upload Bug Fixes (Latest Snapshot + Hebrew RTL)
+
+**What was fixed:**
+
+1. **Bug 1 — Pension parsed but invisible on dashboard:** The upload endpoint only upserted into the report-date snapshot. If later snapshots existed, the dashboard (which reads `snapshots[-1]`) never saw the pension. Fix: after upserting into the report-date snapshot, also propagate the pension into the latest snapshot when the dates differ. Historical data preserved at the correct date; dashboard shows it immediately.
+
+2. **Bug 2 — Complementary pension uploaded with 0 ILS:** Hebrew RTL text extraction via pdfplumber garbled keywords, causing the AI model to return null for Total Amount. Fix: expanded the copilot_analyzer system prompt with detailed RTL handling instructions—reverse-reading guidance, common Hebrew financial keywords, heuristic to pick the largest number as balance, and a self-validation step (if sub-fields are non-zero but total is 0, re-examine). Also added `_validate_pension_payload()` in pension.py that logs warnings and returns them in the upload response when total is 0 but sub-fields are not.
+
+**Patterns / decisions:**
+- Upload endpoints for time-series data should always propagate to the "current" record so dashboards reflect changes immediately, not just to the historical slot.
+- AI analyzer prompts for Hebrew PDFs need explicit RTL reversal guidance and numeric-heuristic fallbacks.
+- Zero-value detection with warning propagation to the API response gives the frontend a chance to alert the user without silently losing data.
+
+**Key paths:**
+- `apps/backend/app/api/pension.py` — upload endpoint, `_validate_pension_payload()`
+- `apps/backend/app/utils/copilot_analyzer.py` — Hebrew RTL prompt improvements
+- `apps/backend/tests/test_pension_api.py` — 3 new regression tests
