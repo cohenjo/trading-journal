@@ -54,3 +54,17 @@
 - **Edge case discovered:** double-upsert on the same snapshot (same date = report date = latest) does not duplicate — the identity match prevents it. This is safe.
 
 📌 **Team update (2026-03-07T20:18:16Z):** Pension upload bugs fixed — snapshot propagation for dashboard visibility + Hebrew RTL analyzer prompt + zero-value validation. All 17 tests passing. — Hockney, Redfoot
+
+### Deterministic table extraction tests (5 tests, all passing)
+
+- **What:** Added 5 tests for Hockney's `_extract_from_tables()` in `apps/backend/app/utils/copilot_analyzer.py`. Tests mock `pdfplumber.open` and supply Clal pension TABLE 2 data with exact Hebrew RTL keywords.
+- **Key file:** `apps/backend/tests/test_pension_api.py` — now 21 tests total (16 original + 5 new).
+- **Mock pattern:** `_mock_pdf()` builds a MagicMock with `__enter__`/`__exit__` for context manager protocol, `.pages[0].extract_tables()` and `.extract_text()`. Hebrew keywords in mock data must match the `_KW_*` constants exactly (e.g., `"ןועברה ףוסב םיפסכה תרתי"` not abbreviated).
+- **Page text regexes:** Name, ID, and date are extracted via `_PAT_NAME`, `_PAT_ID`, `_PAT_DATE` regexes from page text — not from tables. Mock text must match these patterns (e.g., `'66475922 :ז.ת רפסמ ישראלי ישראל :תימעה םש'`).
+- **Name reversal:** pdfplumber returns reversed Hebrew word order; the function does `" ".join(reversed(raw_name.split()))`. Mock text must provide name in reversed order.
+- **Product detection:** `_PRODUCT_COMP = "המילשמ"` vs `_PRODUCT_COMPREHENSIVE = "הפיקמ"` in first 600 chars of page text. Fund: `_FUND_CLAL = "היסנפ ללכ"`.
+- **Monthly deposits formula:** `round(deposits_ytd / month_num)` where month_num comes from report date month. Sep 30 → month 9 → 33146/9 ≈ 3683.
+- **Earnings/fees split:** Single cell `"120,818\n-580"` → split on newline, fees = abs(second part).
+- **Fallback:** When `_find_table2()` returns None (no matching keywords), function returns None, signaling caller to use AI path.
+
+📌 **Team update (2026-03-07T20:59:37Z):** Deterministic table extraction implemented and tested. `_extract_from_tables()` reliably parses Clal pension PDFs (800,545 ILS comp, 1,194,873 ILS main). AI fallback preserved. 21 tests total, all passing. Non-breaking change. — Hockney, Redfoot

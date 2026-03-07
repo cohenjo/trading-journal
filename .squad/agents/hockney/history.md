@@ -153,3 +153,31 @@ Updated `apps/backend/app/api/analyze.py` to wrap all 4 yfinance-backed endpoint
 - `apps/backend/tests/test_pension_api.py` — 3 new regression tests
 
 📌 **Team update (2026-03-07T20:18:16Z):** Pension upload bugs fixed — snapshot propagation for dashboard visibility + Hebrew RTL analyzer prompt + zero-value validation. All 17 tests passing. — Hockney, Redfoot
+
+### 2025-07-21: Deterministic Table Extraction for Pension PDFs
+
+**What was built:**
+Added `_extract_from_tables()` to `apps/backend/app/utils/copilot_analyzer.py` — a deterministic, zero-AI-cost extraction path for Clal-style pension PDFs. The function uses pdfplumber's table extraction (which works perfectly even with Hebrew RTL) to parse TABLE 2 (financial summary) by matching reversed Hebrew keyword labels.
+
+**How it works:**
+1. `analyze_report()` now calls `_extract_from_tables()` FIRST.
+2. If deterministic extraction returns a valid result (total > 0), it's returned immediately — no AI call.
+3. If it fails (no tables, unrecognised structure, zero total), falls back to existing Copilot SDK AI analysis.
+4. Logging indicates which path was taken.
+
+**Key patterns:**
+- Hebrew RTL text from pdfplumber has reversed word order but numbers are intact. Table cells have the number in column 0 and the Hebrew label in column 1.
+- Name is extracted from page text using regex between `:ז.ת רפסמ` and `:תימעה םש` patterns, then reversed word-by-word.
+- Product type detected by searching title area for `המילשמ` (comp) vs `הפיקמ` (comprehensive) vs `למג` (gemel).
+- Earnings+fees row has both values separated by `\n` in one cell — split and take absolute value for fees.
+- Monthly deposits = YTD deposits / report month number.
+- Insurance fees = sum of disability + death insurance (absolute values).
+
+**Verified against:**
+- `sample/reports/Jony/Report_03_2025-comp.pdf` → 800,545 ILS (פנסיה משלימה)
+- `sample/reports/Jony/Report_03_2025.pdf` → 1,194,873 ILS (פנסיה מקיפה)
+
+**Key paths:**
+- `apps/backend/app/utils/copilot_analyzer.py` — `_extract_from_tables()`, modified `analyze_report()`
+
+📌 **Team update (2026-03-07T20:59:37Z):** Deterministic table extraction implemented and tested. `_extract_from_tables()` reliably parses Clal pension PDFs (800,545 ILS comp, 1,194,873 ILS main). AI fallback preserved. 21 tests total, all passing. Non-breaking change. — Hockney, Redfoot
