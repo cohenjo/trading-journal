@@ -181,3 +181,29 @@ Added `_extract_from_tables()` to `apps/backend/app/utils/copilot_analyzer.py` �
 - `apps/backend/app/utils/copilot_analyzer.py` — `_extract_from_tables()`, modified `analyze_report()`
 
 📌 **Team update (2026-03-07T20:59:37Z):** Deterministic table extraction implemented and tested. `_extract_from_tables()` reliably parses Clal pension PDFs (800,545 ILS comp, 1,194,873 ILS main). AI fallback preserved. 21 tests total, all passing. Non-breaking change. — Hockney, Redfoot
+
+### 2026-03-07: Pension Reclassification to Savings
+
+**What changed:**
+Reclassified Israeli pension accounts from `category: "Investments"` to `category: "Savings"` with `draw_income: true` and `max_withdrawal_rate: 0`. Israeli pensions are savings vehicles that convert to monthly income payments at retirement age — you cannot withdraw from them before retirement.
+
+**Changes in `apps/backend/app/api/pension.py`:**
+
+1. **`extract_pension_payload()` (line 161):** Changed category from "Investments" to "Savings"
+2. **`extract_pension_payload()` (line 168):** Added `max_withdrawal_rate: 0` to prevent withdrawals
+3. **`extract_pension_payload()` (line 182):** Added `draw_income: True` to details dict for plan editor display
+4. **`upsert_plan_pension()` (line 381):** Added `draw_income: True` to account_settings for new plan items
+
+**Verification:**
+- `_recalculate_snapshot()` correctly sums by category string — pensions now contribute to `total_savings` instead of `total_investments`
+- `upsert_snapshot_pension()` filters by `type == "Pension"` (category-independent) — works correctly
+- `_latest_active_pensions()` filters by `type == "Pension"` (category-independent) — works correctly
+- All 21 tests pass without modification — tests were already written in a category-agnostic way
+
+**Key insight:**
+The codebase was already architected for this change. All pension-specific logic uses `type == "Pension"` filtering rather than category filtering, which made the reclassification seamless. The `_recalculate_snapshot()` function automatically moves pension values from the investments bucket to the savings bucket based on the category field.
+
+**Key paths:**
+- `apps/backend/app/api/pension.py` — pension data extraction and storage
+
+📌 Team update (2026-03-07T21:49:50Z): Pension category reclassification completed and merged across team. Backend, frontend, and testing layers verified. All 26 tests passing. Category-agnostic architecture documented for future reorganizations. — Scribe (Team Orchestration)

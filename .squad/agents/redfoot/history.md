@@ -68,3 +68,25 @@
 - **Fallback:** When `_find_table2()` returns None (no matching keywords), function returns None, signaling caller to use AI path.
 
 📌 **Team update (2026-03-07T20:59:37Z):** Deterministic table extraction implemented and tested. `_extract_from_tables()` reliably parses Clal pension PDFs (800,545 ILS comp, 1,194,873 ILS main). AI fallback preserved. 21 tests total, all passing. Non-breaking change. — Hockney, Redfoot
+
+### 2026-03-08: Pension category changed from Investments to Savings (5 new tests)
+
+**Backend change:** Hockney reclassified pensions from `category: "Investments"` to `category: "Savings"`. This is a semantic correction — pensions are savings vehicles, not liquid investments. Dashboard/matching still works because all pension filtering uses `type == "Pension"`, not category.
+
+**Key changes in `apps/backend/app/api/pension.py`:**
+- `extract_pension_payload()`: category now "Savings", added `draw_income: True` to details, added `max_withdrawal_rate: 0`
+- `upsert_plan_pension()`: new plan items get `draw_income: True` in account_settings
+- `_recalculate_snapshot()`: pensions now contribute to `total_savings` (line 286), not `total_investments` (line 291)
+
+**Test updates:**
+- No existing test assertions needed fixing (all filtering was already using `type == "Pension"`)
+- Added 5 new tests in `apps/backend/tests/test_pension_api.py`:
+  1. `test_pension_defaults_draw_income_true`: verifies draw_income flag is set in payload details
+  2. `test_pension_max_withdrawal_rate_zero`: enforces pensions can't be withdrawn from
+  3. `test_pension_counted_in_savings_total`: confirms pensions contribute to total_savings, not total_investments
+  4. `test_plan_pension_defaults_draw_income`: verifies plan items get draw_income in account_settings
+  5. `test_pension_category_is_savings`: simple category assertion
+
+**All 26 tests passing** (21 original + 5 new). No regressions. The category change is non-breaking because all domain logic uses `type`, not `category`.
+
+📌 Team update (2026-03-07T21:49:50Z): Pension category reclassification testing completed. 26 tests passing (21 updated + 5 new). All three team layers verified through orchestration. Decisions merged and documented. — Scribe (Team Orchestration)

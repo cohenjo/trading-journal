@@ -794,3 +794,41 @@ Increased the timeout from 60s (default) to 120s (2 minutes) on line 136 of `app
 5. **Fallback test verifies None return** — the AI integration path is not tested here (would require async CopilotClient mocking). The contract is: None = use AI.
 
 **Impact:** 21 total tests in test_pension_api.py. All passing.
+
+### 2026-03-07: User directive — Israel pension classification
+**By:** Jony Vesterman Cohen (via Copilot)
+**What:** In Israel, pension accounts are savings accounts that eventually turn into monthly income payments — you can't withdraw from them. Pensions should be classified as Savings (not Investments) and should default to "turn into income" (draw_income=true).
+**Why:** User request — domain-specific financial classification for Israel pension products.
+
+### 2026-03-07: Pension Category Reclassification (consolidated)
+**By:** Hockney, Fenster, Redfoot
+**Category:** Data Model, Financial Planning, Testing, Architecture
+**Status:** Implemented & Verified
+
+**What:** Reclassified Israeli pension accounts from `category: "Investments"` to `category: "Savings"` with `draw_income: true` by default and `max_withdrawal_rate: 0`. Frontend verified zero code changes required via category-agnostic type-based architecture.
+
+**Why:** 
+- In Israel, pension accounts (פנסיה מקיפה, פנסיה משלימה, קופת גמל) are legally structured as savings vehicles that convert to monthly income payments at retirement age — they cannot be withdrawn before retirement.
+- Previous "Investments" categorization was semantically incorrect and caused confusion in financial planning dashboards.
+- Frontend already implements type-based business logic (not category-based), allowing safe category reorganization.
+
+**Implementation:**
+- Backend: Changed `extract_pension_payload()` to set `category: "Savings"`, added `draw_income: True` defaults, set `max_withdrawal_rate: 0`
+- Frontend: Zero changes needed. Type-based filtering in PlanEditor, PlanEngine, and FinanceTabs remains category-agnostic
+- Tests: Updated 21 existing tests + added 5 new tests for draw_income, max_withdrawal_rate, and plan defaults. All 26 passing.
+
+**Trade-offs:**
+- (+) Semantically correct — pensions ARE savings accounts in Israel
+- (+) Dashboards now show pensions in the correct category bucket
+- (+) Plan editor "Draw Pension Income" checkbox defaults to checked
+- (+) No breaking changes in backend logic or frontend rendering
+- (+) Non-breaking for financial calculation layer (uses type, not category)
+
+**Architecture Principle Documented:**
+**Type-based logic > Category-based filtering**
+- Category: UI organization (which tab to display in)
+- Type: Business logic and behavior (how to process the account)
+
+This separation allows backend teams to reorganize financial categories without breaking frontend functionality, as long as the `type` field remains accurate.
+
+**Impact:** Non-breaking change. Frontend displays and financial planning calculations remain correct. Demonstrates resilience of type-based architecture to category reorganizations.
