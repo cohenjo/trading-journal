@@ -207,3 +207,32 @@ The codebase was already architected for this change. All pension-specific logic
 - `apps/backend/app/api/pension.py` — pension data extraction and storage
 
 📌 Team update (2026-03-07T21:49:50Z): Pension category reclassification completed and merged across team. Backend, frontend, and testing layers verified. All 26 tests passing. Category-agnostic architecture documented for future reorganizations. — Scribe (Team Orchestration)
+
+### 2025-07-21: Pension Data Migration (Investments → Savings)
+
+**What was built:**
+Added `migrate_pensions_to_savings()` to `apps/backend/app/api/pension.py` — an idempotent migration function that fixes existing pension data in the database after the category reclassification from "Investments" to "Savings".
+
+**How it works:**
+1. Scans all `FinanceSnapshot` rows and reclassifies pension items from `category: "Investments"` to `category: "Savings"`
+2. Backfills `draw_income: True` in `details` and `max_withdrawal_rate: 0` on pension items missing these fields
+3. Recalculates snapshot totals (`total_savings`, `total_investments`, `total_assets`) after migration
+4. Scans `Plan` table and backfills `draw_income: True` in `account_settings` for pension plan items
+5. Runs automatically at app startup via the lifespan hook in `main.py`
+6. Fully idempotent — safe to run on every startup, only modifies items that need changes
+
+**Key patterns:**
+- Startup migrations should be idempotent and check-before-modify to avoid unnecessary writes
+- The `flag_modified(snapshot, "data")` call is required for SQLAlchemy to detect JSON column mutations
+- Reuses `_recalculate_snapshot()` to keep totals consistent after category changes
+
+**Tests added (4 new, 30 total):**
+- `test_migrate_reclassifies_legacy_pension_items` — verifies category change, draw_income, max_withdrawal_rate, and recalculated totals
+- `test_migrate_is_idempotent` — second run produces zero changes
+- `test_migrate_backfills_plan_draw_income` — plan account_settings get draw_income
+- `test_migrate_skips_already_correct_data` — correctly-classified items untouched
+
+**Key paths:**
+- `apps/backend/app/api/pension.py` — `migrate_pensions_to_savings()`
+- `apps/backend/main.py` — lifespan startup hook
+- `apps/backend/tests/test_pension_api.py` — migration tests
