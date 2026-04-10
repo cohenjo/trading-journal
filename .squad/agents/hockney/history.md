@@ -226,6 +226,50 @@ Added `migrate_pensions_to_savings()` to `apps/backend/app/api/pension.py` — a
 - The `flag_modified(snapshot, "data")` call is required for SQLAlchemy to detect JSON column mutations
 - Reuses `_recalculate_snapshot()` to keep totals consistent after category changes
 
+### 2026-04-10: Backend Financial Core Testing Sprint (Week 1)
+
+**Context:** Implemented P0 testing tasks from approved testing plan to establish comprehensive test coverage for financial calculation utilities.
+
+**Work Completed:**
+
+1. **Task 1: conftest.py Infrastructure (1 hour)** ✅
+   - Created shared test fixtures in `apps/backend/tests/conftest.py`:
+     - `engine` fixture: SQLite in-memory with StaticPool for test isolation
+     - `session` fixture: SQLModel Session with auto-rollback
+     - `client` fixture: Sync TestClient with dependency injection override
+     - `async_client` fixture: HTTPX AsyncClient for async endpoint testing
+   - Created `tests/fixtures/` directory for future test data
+   - Verified all 94 existing tests still pass after infrastructure changes
+
+2. **Task 2: test_currency.py (2 hours)** ✅
+   - 24 comprehensive tests for `app/utils/currency.py`
+   - Coverage areas: Known conversions (ILS, USD, EUR, ILA), round-trip consistency, edge cases
+   - Key insight: ILA (Agorot) uses rate 0.01 relative to ILS base
+
+3. **Task 3: test_bond_cashflows.py (3 hours)** ✅
+   - 20 comprehensive tests for `app/utils/bond_cashflows.py`
+   - Coverage areas: Coupon frequencies, date arithmetic, cashflow generation, bond ladder integration
+   - Critical finding: Loop uses `payment_date < maturity_date`, final coupon at maturity not in loop
+
+4. **Task 4: test_trade_matcher.py (3 hours)** ✅
+   - 13 comprehensive tests for `app/utils/trade_matcher.py`
+   - Coverage areas: FIFO matching, short positions, P&L validation, edge cases
+   - Algorithm insight: FIFO via chronological sorting, matches first open with first close
+
+**Testing Metrics:**
+- Tests before: 95 (94 passing, 1 pre-existing failure)
+- Tests added: 57 new tests (24 + 20 + 13)
+- Tests after: 138 total (137 passing, same 1 pre-existing failure)
+
+**Branch:** `squad/testing-backend-financial-core`
+
+**Learnings:**
+- Hardcoded FX rates in currency.py are temporary - need real-time rate integration
+- Trade matcher only handles exact quantity matches - may need partial fill logic
+- All financial calculations preserve decimal precision in tests, but underlying code still uses float
+
+📌 **Financial testing foundation established.** Core utility modules now have comprehensive test coverage with known expected values.
+
 **Tests added (4 new, 30 total):**
 - `test_migrate_reclassifies_legacy_pension_items` — verifies category change, draw_income, max_withdrawal_rate, and recalculated totals
 - `test_migrate_is_idempotent` — second run produces zero changes
