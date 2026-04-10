@@ -845,3 +845,100 @@ This separation allows backend teams to reorganize financial categories without 
 4. **Navigation placement** — Added under a new "Family" section with divider, below Settings. Styled slightly muted (`text-slate-400` vs `text-slate-300`) to distinguish from core trading features.
 
 **Impact:** Additive — no existing code modified except MainLayout nav links.
+### 2026-04-10: Testing Plan Approved
+**By:** Keaton (Lead)
+**Category:** Testing, Quality, Financial Accuracy
+**Status:** ✅ APPROVED — EXECUTION STARTS TODAY
+
+**Decision:** Comprehensive testing plan approved with 5 strategic priority changes after review by Fenster (Frontend), Hockney (Backend), and Kujan (DevOps).
+
+**Executive Decisions:**
+1. **Financial core testing takes absolute priority** — Test money calculations FIRST (currency, bond cashflows, trade matcher, P&L) before broad coverage
+2. **Infrastructure work elevated to P0** — Pre-commit hooks, CI/CD pipeline, Docker health checks completed Week 1
+3. **Depth over breadth on APIs** — Deep integration tests for 5 critical financial endpoints before smoke tests for remaining 57
+4. **Database models added to P0** — Zero tests for SQLAlchemy models unacceptable for financial application
+5. **PostgreSQL integration moves to Phase 1** — Tests use SQLite, production uses PostgreSQL — dangerous mismatch
+
+**Why:** This is a money application. Users trust us with financial planning, trading P&L, dividends, tax optimization. Wrong calculations = users lose money. We cannot compromise on financial accuracy.
+
+**Corrected Metrics:**
+- Backend API coverage: 16% (10/62 endpoints, not 55)
+- Frontend E2E: 30% (6/20 pages, not 50%)
+- Critical untested modules: 6+
+
+**Critical Gaps Identified:**
+- `lib/currency.ts`, `SettingsContext` — ALL financial displays affected (zero tests)
+- `bond_cashflows.py`, `currency.py`, `trade_matcher.py` — zero tests for money calculations
+- 9 SQLAlchemy model modules — zero tests for relationships and constraints
+- CI completely broken — code merged without tests passing
+- Pre-commit hooks missing — no local quality gate
+
+**Impact:** All squad members affected. Week 1 infrastructure blitz. 110+ new tests across backend/frontend. 3 branches ready for merge.
+
+**Alternatives Rejected:**
+- Broad smoke tests first (false confidence, business logic bugs slip through)
+- Delay PostgreSQL to Phase 2 (SQLite/PostgreSQL divergence risks production bugs)
+- Keep pre-commit at P1 (takes 2 hours, prevents days of CI debugging)
+
+**References:** reports/testing-audit-2026-04-10.md, reports/review-input-*.md, reports/testing-plan-approved.md
+
+---
+
+### 2026-04-10: Testing Audit and Improvement Plan
+**By:** Redfoot (Tester)
+**Category:** Quality, Testing, CI/CD
+**Status:** Requires Team Action
+
+**What:** Comprehensive testing audit completed. Report at `reports/testing-audit-2026-04-10.md` (850 lines, D+ grade).
+
+**Critical Findings:**
+1. **`squad-ci.yml` broken** — triggers on every PR but runs no tests (P0, Kujan must fix)
+2. **Financial calculations untested** — `bond_cashflows.py`, `trade_matcher.py`, `currency.py` handle real money with zero tests (P0)
+3. **No dependency security** — No dependabot, snyk, or trivy configured (P1)
+4. **91.7% frontend untested** — Only 6/72 components covered (P1)
+
+**Baseline Metrics:**
+- Frontend coverage: 8.3% (6/72 components)
+- Backend API coverage: 16% (10/62 endpoints)
+- E2E coverage: 30% (6/20 pages)
+
+**3-Phase Improvement Plan:**
+- Phase 1 (Weeks 1-3): Fix CI, create conftest.py, test critical financial calculations, smoke-test all API endpoints
+- Phase 2 (Weeks 4-6): Expand frontend component tests, add cross-browser/responsive testing, PostgreSQL integration, pre-commit hooks
+- Phase 3 (Weeks 7-10): E2E workflows, performance testing, visual regression, accessibility, security
+
+**Owner Assignments:** Kujan (CI/DevOps), Redfoot (test implementation), Hockney (backend collaboration), Fenster (frontend collaboration)
+
+**Impact:** Non-breaking. Additive quality investment. Phase 1 critical for financial data integrity.
+
+---
+
+### 2026-04-10: Lightweight i18n for After I Leave page
+**By:** Fenster (Frontend Dev)
+**Category:** Frontend, Internationalization
+**Status:** Implemented
+
+**Context:** The "After I Leave" family financial guide page needed Hebrew translation with full RTL support. Single content-heavy informational page (~600 lines), not a multi-page SPA.
+
+**Decision:** Used a **single typed translations file** (`components/AfterILeave/translations.ts`) instead of framework like `next-intl` or `react-i18next`.
+
+**Why Not a Framework?**
+- Only one page needs translation (no global routing, no locale detection needed)
+- ~200 translatable strings, all self-contained
+- Typed `Record<Lang, T>` object gives full TypeScript safety with zero runtime cost
+- Framework overhead and dependencies not justified for single page
+- PDF generation captures DOM as-is, language at download = PDF language
+
+**Pattern:**
+- `Lang = 'en' | 'he'` type exported from translations file
+- Page component uses `useState<Lang>('en')` with toggle button
+- Content container: `dir={lang === 'he' ? 'rtl' : 'ltr'}`
+- CSS logical properties (`text-start`/`text-end`, `ms-2`/`me-2`) instead of physical
+- Monetary values and phone numbers forced to `dir="ltr"` in RTL mode
+
+**Future Migrations:**
+- If more pages need translation, migrate to `next-intl`
+- Translations file pattern easily extractable into framework later
+- Other single-page translations should follow this same pattern
+
+**Impact:** Additive. Zero changes to existing pages. Bilingual support ready for expansion.
