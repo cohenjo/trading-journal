@@ -3,6 +3,7 @@
 import React from 'react';
 import { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
 import { formatCurrency } from '@/lib/currency';
+import { Lang, translations } from './translations';
 
 interface DemoInsuranceItem {
   name: string;
@@ -14,44 +15,15 @@ interface DemoInsuranceItem {
   isDemo: boolean;
 }
 
-const DEMO_INSURANCE: DemoInsuranceItem[] = [
-  {
-    name: 'Life Insurance (ביטוח חיים)',
-    institution: 'Clal (כלל)',
-    type: 'Life Insurance',
-    value: '₪2,000,000',
-    owner: 'Jony',
-    notes: '[DEMO — Update with real data]',
-    isDemo: true,
-  },
-  {
-    name: 'Mortgage Insurance (ביטוח משכנתא)',
-    institution: 'Migdal (מגדל)',
-    type: 'Mortgage Insurance',
-    value: 'Covers remaining mortgage',
-    owner: 'Joint',
-    notes: '[DEMO — Update with real data]',
-    isDemo: true,
-  },
-  {
-    name: 'Health Insurance (ביטוח בריאות)',
-    institution: 'Clalit + Supplementary',
-    type: 'Health',
-    value: '—',
-    owner: 'Joint',
-    notes: '[DEMO — Update with real data]',
-    isDemo: true,
-  },
-  {
-    name: 'Car Insurance (ביטוח רכב)',
-    institution: '[Provider TBD]',
-    type: 'Vehicle',
-    value: '—',
-    owner: 'Joint',
-    notes: '[DEMO — Update with real data]',
-    isDemo: true,
-  },
-];
+function getDemoInsurance(lang: Lang): DemoInsuranceItem[] {
+  const d = translations[lang].summary.demoItems;
+  return [
+    { name: d.lifeInsurance.name, institution: d.lifeInsurance.institution, type: 'Life Insurance', value: d.lifeInsurance.value, owner: 'Jony', notes: d.lifeInsurance.notes, isDemo: true },
+    { name: d.mortgageInsurance.name, institution: d.mortgageInsurance.institution, type: 'Mortgage Insurance', value: d.mortgageInsurance.value, owner: 'Joint', notes: d.mortgageInsurance.notes, isDemo: true },
+    { name: d.healthInsurance.name, institution: d.healthInsurance.institution, type: 'Health', value: '—', owner: 'Joint', notes: d.healthInsurance.notes, isDemo: true },
+    { name: d.carInsurance.name, institution: d.carInsurance.institution, type: 'Vehicle', value: '—', owner: 'Joint', notes: d.carInsurance.notes, isDemo: true },
+  ];
+}
 
 const CATEGORY_ORDER = ['Insurance', 'Pension', 'Savings', 'Investments', 'Assets', 'Liabilities'] as const;
 
@@ -93,9 +65,10 @@ function mapFinanceItems(items: FinanceItem[]): GroupedRow[] {
   });
 }
 
-export default function SummaryTable({ items }: { items: FinanceItem[] }) {
+export default function SummaryTable({ items, lang = 'en' }: { items: FinanceItem[]; lang?: Lang }) {
+  const t = translations[lang].summary;
   const financeRows = mapFinanceItems(items);
-  const insuranceRows: GroupedRow[] = DEMO_INSURANCE.map((d) => ({
+  const insuranceRows: GroupedRow[] = getDemoInsurance(lang).map((d) => ({
     category: 'Insurance',
     ...d,
   }));
@@ -112,13 +85,13 @@ export default function SummaryTable({ items }: { items: FinanceItem[] }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-700 pdf-light:border-gray-200">
-            <th className="text-left py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium">Category</th>
-            <th className="text-left py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium">Name</th>
-            <th className="text-left py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden md:table-cell">Institution</th>
-            <th className="text-left py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden lg:table-cell">Type</th>
-            <th className="text-right py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium">Value</th>
-            <th className="text-left py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden md:table-cell">Owner</th>
-            <th className="text-left py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden lg:table-cell">Notes</th>
+            <th className="text-start py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium">{t.columns.category}</th>
+            <th className="text-start py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium">{t.columns.name}</th>
+            <th className="text-start py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden md:table-cell">{t.columns.institution}</th>
+            <th className="text-start py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden lg:table-cell">{t.columns.type}</th>
+            <th className="text-end py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium">{t.columns.value}</th>
+            <th className="text-start py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden md:table-cell">{t.columns.owner}</th>
+            <th className="text-start py-3 px-3 text-slate-400 pdf-light:text-gray-500 font-medium hidden lg:table-cell">{t.columns.notes}</th>
           </tr>
         </thead>
         <tbody>
@@ -129,7 +102,7 @@ export default function SummaryTable({ items }: { items: FinanceItem[] }) {
                   colSpan={7}
                   className="py-2 px-3 text-sm font-semibold text-slate-300 pdf-light:text-gray-700"
                 >
-                  {CATEGORY_ICONS[group.category] || '📋'} {group.category}
+                  {CATEGORY_ICONS[group.category] || '📋'} {t.categories[group.category] || group.category}
                 </td>
               </tr>
               {group.rows.map((row, idx) => (
@@ -151,7 +124,7 @@ export default function SummaryTable({ items }: { items: FinanceItem[] }) {
                       {row.type}
                     </span>
                   </td>
-                  <td className="py-2.5 px-3 text-right text-slate-200 pdf-light:text-gray-800 font-mono">
+                  <td className="py-2.5 px-3 text-end text-slate-200 pdf-light:text-gray-800 font-mono">
                     {row.value}
                   </td>
                   <td className="py-2.5 px-3 text-slate-400 pdf-light:text-gray-600 hidden md:table-cell">

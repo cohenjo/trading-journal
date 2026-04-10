@@ -4,6 +4,7 @@ import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
 import CollapsibleSection from '@/components/AfterILeave/CollapsibleSection';
 import SummaryTable from '@/components/AfterILeave/SummaryTable';
+import { Lang, translations } from '@/components/AfterILeave/translations';
 
 async function fetchFinanceData(): Promise<FinanceItem[]> {
   try {
@@ -53,10 +54,10 @@ function DocumentsList({ items }: { items: string[] }) {
   );
 }
 
-function DemoTag() {
+function DemoTag({ text }: { text?: string }) {
   return (
-    <span className="inline-block bg-amber-500/20 text-amber-400 pdf-light:bg-amber-100 pdf-light:text-amber-700 text-xs font-bold px-2 py-0.5 rounded ml-2">
-      DEMO — Update with real data
+    <span className="inline-block bg-amber-500/20 text-amber-400 pdf-light:bg-amber-100 pdf-light:text-amber-700 text-xs font-bold px-2 py-0.5 rounded ms-2">
+      {text || 'DEMO — Update with real data'}
     </span>
   );
 }
@@ -66,6 +67,7 @@ export default function AfterILeavePage() {
   const [items, setItems] = useState<FinanceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [lang, setLang] = useState<Lang>('en');
 
   useEffect(() => {
     fetchFinanceData().then((data) => {
@@ -109,11 +111,13 @@ export default function AfterILeavePage() {
     }
   }, [generating]);
 
-  const lastUpdated = new Date().toLocaleDateString('en-IL', {
+  const lastUpdated = new Date().toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-IL', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
+
+  const t = translations[lang];
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -159,39 +163,55 @@ export default function AfterILeavePage() {
         .pdf-light-mode .max-h-0 { max-height: 5000px !important; opacity: 1 !important; }
       `}</style>
 
-      <div ref={contentRef} className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+      <div ref={contentRef} dir={lang === 'he' ? 'rtl' : 'ltr'} className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         {/* ─── Header ─── */}
         <header className="mb-10">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
               <h1 className="text-3xl sm:text-4xl font-bold text-slate-100 tracking-tight">
-                After I Leave — Financial Guide
+                {t.header.title}
               </h1>
               <p className="mt-3 text-lg text-slate-400 leading-relaxed max-w-2xl">
-                Everything you need to know about our finances, accounts, and how to access them.
-                Take it one step at a time — there&apos;s no rush.
+                {t.header.subtitle}
               </p>
               <p className="mt-2 text-sm text-slate-500">
-                Last updated: {lastUpdated}
+                {t.header.lastUpdated} {lastUpdated}
               </p>
             </div>
-            <button
-              onClick={handleDownloadPdf}
-              disabled={generating}
-              className="print-hidden flex-shrink-0 flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 text-white font-medium rounded-lg transition-colors shadow-lg shadow-blue-500/20"
-            >
-              {generating ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
-                  Generating…
-                </>
-              ) : (
-                <>📥 Download as PDF</>
-              )}
-            </button>
+            <div className="flex flex-shrink-0 items-center gap-3">
+              {/* Language toggle */}
+              <div className="print-hidden flex items-center rounded-lg border border-slate-700 overflow-hidden text-sm">
+                <button
+                  onClick={() => setLang('en')}
+                  className={`px-3 py-2 transition-colors ${lang === 'en' ? 'bg-blue-600 text-white font-medium' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                >
+                  🇬🇧 English
+                </button>
+                <button
+                  onClick={() => setLang('he')}
+                  className={`px-3 py-2 transition-colors ${lang === 'he' ? 'bg-blue-600 text-white font-medium' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+                >
+                  🇮🇱 עברית
+                </button>
+              </div>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={generating}
+                className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-400 text-white font-medium rounded-lg transition-colors shadow-lg shadow-blue-500/20"
+              >
+                {generating ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    {t.header.generating}
+                  </>
+                ) : (
+                  <>{t.header.downloadPdf}</>
+                )}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -199,49 +219,24 @@ export default function AfterILeavePage() {
           {/* ─── 1. Quick Summary Table ─── */}
           <CollapsibleSection
             emoji="📊"
-            title="Quick Financial Summary"
-            subtitle="All accounts, investments, and insurance at a glance"
+            title={t.summary.title}
+            subtitle={t.summary.subtitle}
           >
             {loading ? (
-              <div className="py-8 text-center text-slate-400">Loading financial data…</div>
+              <div className="py-8 text-center text-slate-400">{t.summary.loading}</div>
             ) : (
-              <SummaryTable items={items} />
+              <SummaryTable items={items} lang={lang} />
             )}
           </CollapsibleSection>
 
           {/* ─── 2. First Steps ─── */}
           <CollapsibleSection
             emoji="🫶"
-            title="First Steps — What to Do Right Away"
-            subtitle="A gentle guide for the first days and weeks"
+            title={t.firstSteps.title}
+            subtitle={t.firstSteps.subtitle}
           >
             <ol className="space-y-4">
-              {[
-                {
-                  title: "Don't rush — take your time to grieve",
-                  desc: 'There is no deadline on grief. Financial matters can wait a few weeks. Lean on family and friends.',
-                },
-                {
-                  title: 'Gather essential documents',
-                  desc: 'ID cards (תעודות זהות), marriage certificate (תעודת נישואין), death certificate (תעודת פטירה) — get multiple certified copies.',
-                },
-                {
-                  title: 'Contact our lawyer and accountant',
-                  desc: 'See the contacts section below. They can guide you through the legal and tax processes.',
-                },
-                {
-                  title: 'Apply for Bituach Leumi survivors\' pension (קצבת שארים)',
-                  desc: 'This provides a monthly income. See the dedicated section below for how to apply.',
-                },
-                {
-                  title: 'Check הר הביטוח and הר הכסף for the complete picture',
-                  desc: 'These free government tools show ALL insurance policies and pension funds registered under an ID number. See the Government Resources section.',
-                },
-                {
-                  title: 'Begin insurance claims — life insurance first',
-                  desc: 'Life insurance is typically the largest payout. Start this process early as it takes 30-60 days.',
-                },
-              ].map((step, i) => (
+              {t.firstSteps.steps.map((step, i) => (
                 <li key={i} className="flex gap-4">
                   <span className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-sm">
                     {i + 1}
@@ -260,31 +255,30 @@ export default function AfterILeavePage() {
           {/* 3a: Inheritance Order */}
           <CollapsibleSection
             emoji="⚖️"
-            title="Inheritance Order (צו ירושה)"
-            subtitle="The legal document you need for almost everything — start this first"
+            title={t.inheritance.title}
+            subtitle={t.inheritance.subtitle}
           >
             <div className="space-y-3 text-sm">
-              <InfoRow label="What is it">
-                A court order that proves you are the legal heir. It is required by banks, pension funds, and insurance companies to release funds.
+              <InfoRow label={t.inheritance.labels.whatIsIt}>
+                {t.inheritance.whatIsIt}
               </InfoRow>
-              <InfoRow label="Where to apply">
+              <InfoRow label={t.inheritance.labels.whereToApply}>
                 <ExternalLink href="https://inheritance.justice.gov.il/RashamYerusha/">
-                  Registrar of Inheritance online portal
+                  {t.inheritance.whereToApply}
                 </ExternalLink>
               </InfoRow>
-              <InfoRow label="Documents needed">
-                Death certificate, your ID, marriage certificate, two witness affidavits declaring the heirs
+              <InfoRow label={t.inheritance.labels.documentsNeeded}>
+                {t.inheritance.documentsNeeded}
               </InfoRow>
-              <InfoRow label="Cost">
-                ~₪507 online application fee + ₪66 publication fee
+              <InfoRow label={t.inheritance.labels.cost}>
+                {t.inheritance.cost}
               </InfoRow>
-              <InfoRow label="Timeline">
-                2-3 months for straightforward cases (no disputes)
+              <InfoRow label={t.inheritance.labels.timeline}>
+                {t.inheritance.timeline}
               </InfoRow>
               <div className="mt-3 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
                 <p className="text-blue-300 pdf-light:text-blue-700 text-sm">
-                  <strong>💡 Important:</strong> This document is needed for almost everything. Start this process as soon as possible.
-                  If we have a will, the process is called &quot;probate&quot; (צו קיום צוואה) — similar process but verifies the will.
+                  <strong>💡 {lang === 'he' ? 'חשוב:' : 'Important:'}</strong> {t.inheritance.tip}
                 </p>
               </div>
             </div>
@@ -293,29 +287,29 @@ export default function AfterILeavePage() {
           {/* 3b: Bituach Leumi */}
           <CollapsibleSection
             emoji="🏛️"
-            title="Bituach Leumi — Survivors' Pension (ביטוח לאומי — קצבת שארים)"
-            subtitle="Monthly income from National Insurance"
+            title={t.bituachLeumi.title}
+            subtitle={t.bituachLeumi.subtitle}
           >
             <div className="space-y-3 text-sm">
-              <InfoRow label="What">
-                Monthly pension paid to the surviving spouse from the National Insurance Institute.
+              <InfoRow label={t.bituachLeumi.labels.what}>
+                {t.bituachLeumi.what}
               </InfoRow>
-              <InfoRow label="Eligibility">
-                Automatic for a married spouse — no minimum contribution period required.
+              <InfoRow label={t.bituachLeumi.labels.eligibility}>
+                {t.bituachLeumi.eligibility}
               </InfoRow>
-              <InfoRow label="How to apply">
-                File a claim at your local Bituach Leumi branch, or online through the website.
+              <InfoRow label={t.bituachLeumi.labels.howToApply}>
+                {t.bituachLeumi.howToApply}
               </InfoRow>
-              <InfoRow label="Documents needed">
-                Death certificate, marriage certificate, both IDs, bank details for payments
+              <InfoRow label={t.bituachLeumi.labels.documents}>
+                {t.bituachLeumi.documents}
               </InfoRow>
-              <InfoRow label="Phone">*6050</InfoRow>
-              <InfoRow label="Website">
+              <InfoRow label={t.bituachLeumi.labels.phone}>{t.bituachLeumi.phone}</InfoRow>
+              <InfoRow label={t.bituachLeumi.labels.website}>
                 <ExternalLink href="https://www.btl.gov.il">www.btl.gov.il</ExternalLink>
               </InfoRow>
               <div className="mt-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
                 <p className="text-amber-300 pdf-light:text-amber-700 text-sm">
-                  <strong>⏰ Deadline:</strong> Submit within 12 months of the date of death to receive full retroactive payments.
+                  <strong>⏰ {lang === 'he' ? 'דדליין:' : 'Deadline:'}</strong> {t.bituachLeumi.deadline}
                 </p>
               </div>
             </div>
@@ -324,28 +318,26 @@ export default function AfterILeavePage() {
           {/* 3c: Life Insurance */}
           <CollapsibleSection
             emoji="🛡️"
-            title="Life Insurance Claims (ביטוח חיים)"
-            subtitle="Claiming the life insurance payout"
+            title={t.lifeInsurance.title}
+            subtitle={t.lifeInsurance.subtitle}
           >
-            <DemoTag />
+            <DemoTag text={t.lifeInsurance.demoTag} />
             <div className="space-y-3 text-sm mt-3">
-              <InfoRow label="Provider">Clal Insurance (כלל ביטוח)</InfoRow>
-              <InfoRow label="Sum insured">₪2,000,000</InfoRow>
-              <InfoRow label="Process">
+              <InfoRow label={t.lifeInsurance.labels.provider}>{t.lifeInsurance.provider}</InfoRow>
+              <InfoRow label={t.lifeInsurance.labels.sumInsured}>{t.lifeInsurance.sumInsured}</InfoRow>
+              <InfoRow label={t.lifeInsurance.labels.process}>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 pdf-light:text-gray-700">
-                  <li>Call Clal customer service or visit their website</li>
-                  <li>Request and fill the claim form (טופס תביעה) — download from their site</li>
-                  <li>Submit with: death certificate, your ID, policy number, marriage certificate, bank account details</li>
-                  <li>If no named beneficiary on the policy — you&apos;ll need the inheritance order</li>
-                  <li>Processing: 30-60 days after all documents are submitted</li>
+                  {t.lifeInsurance.processSteps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
                 </ol>
               </InfoRow>
-              <InfoRow label="Website">
+              <InfoRow label={t.lifeInsurance.labels.website}>
                 <ExternalLink href="https://www.clalbit.co.il">www.clalbit.co.il</ExternalLink>
               </InfoRow>
               <div className="mt-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
                 <p className="text-amber-300 pdf-light:text-amber-700 text-sm">
-                  <strong>📝 Note:</strong> Update this section with the real policy number, exact coverage amount, and beneficiary details.
+                  <strong>📝 {lang === 'he' ? 'הערה:' : 'Note:'}</strong> {t.lifeInsurance.note}
                 </p>
               </div>
             </div>
@@ -354,24 +346,24 @@ export default function AfterILeavePage() {
           {/* 3d: Mortgage Insurance */}
           <CollapsibleSection
             emoji="🏡"
-            title="Mortgage Insurance (ביטוח משכנתא)"
-            subtitle="Covers the remaining mortgage balance"
+            title={t.mortgageInsurance.title}
+            subtitle={t.mortgageInsurance.subtitle}
           >
-            <DemoTag />
+            <DemoTag text={t.mortgageInsurance.demoTag} />
             <div className="space-y-3 text-sm mt-3">
-              <InfoRow label="Provider">Migdal (מגדל)</InfoRow>
-              <InfoRow label="What it covers">
-                Pays off the remaining mortgage balance in full. You won&apos;t owe any more mortgage payments.
+              <InfoRow label={t.mortgageInsurance.labels.provider}>{t.mortgageInsurance.provider}</InfoRow>
+              <InfoRow label={t.mortgageInsurance.labels.whatItCovers}>
+                {t.mortgageInsurance.whatItCovers}
               </InfoRow>
-              <InfoRow label="Process">
-                Contact both Migdal (the insurer) and the mortgage bank. They will coordinate the payoff.
+              <InfoRow label={t.mortgageInsurance.labels.process}>
+                {t.mortgageInsurance.process}
               </InfoRow>
-              <InfoRow label="Documents needed">
-                Death certificate, mortgage account details, policy number, your ID
+              <InfoRow label={t.mortgageInsurance.labels.documents}>
+                {t.mortgageInsurance.documents}
               </InfoRow>
               <div className="mt-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
                 <p className="text-amber-300 pdf-light:text-amber-700 text-sm">
-                  <strong>📝 Note:</strong> Update this section with the real policy number and mortgage bank details.
+                  <strong>📝 {lang === 'he' ? 'הערה:' : 'Note:'}</strong> {t.mortgageInsurance.note}
                 </p>
               </div>
             </div>
@@ -380,33 +372,32 @@ export default function AfterILeavePage() {
           {/* 3e: Pension Funds */}
           <CollapsibleSection
             emoji="🏦"
-            title="Pension Funds (קרנות פנסיה)"
-            subtitle="Survivors' pension — ongoing monthly payments"
+            title={t.pension.title}
+            subtitle={t.pension.subtitle}
           >
             <div className="space-y-3 text-sm">
-              <InfoRow label="Provider">
-                Clal Pension (from existing financial data)
+              <InfoRow label={t.pension.labels.provider}>
+                {t.pension.provider}
               </InfoRow>
-              <InfoRow label="What happens">
-                The surviving spouse receives a survivors&apos; pension — monthly payments based on the accumulated pension.
+              <InfoRow label={t.pension.labels.whatHappens}>
+                {t.pension.whatHappens}
               </InfoRow>
-              <InfoRow label="Process">
+              <InfoRow label={t.pension.labels.process}>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 pdf-light:text-gray-700">
-                  <li>Contact Clal Pension fund directly</li>
-                  <li>Submit a claim form with: death certificate, marriage certificate, IDs, inheritance order</li>
-                  <li>Notify the employer — request Form 161 (טופס 161) which details pension contributions</li>
+                  {t.pension.processSteps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
                 </ol>
               </InfoRow>
-              <InfoRow label="Timeline">Submit within 12 months</InfoRow>
-              <InfoRow label="Website">
+              <InfoRow label={t.pension.labels.timeline}>{t.pension.timeline}</InfoRow>
+              <InfoRow label={t.pension.labels.website}>
                 <ExternalLink href="https://www.clalbit.co.il/pension/clalpension/">
-                  Clal Pension portal
+                  {lang === 'he' ? 'פורטל כלל פנסיה' : 'Clal Pension portal'}
                 </ExternalLink>
               </InfoRow>
               <div className="mt-3 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
                 <p className="text-blue-300 pdf-light:text-blue-700 text-sm">
-                  <strong>💡 Tip:</strong> Check if there&apos;s a lump sum component (מענק) in addition to the monthly pension.
-                  Some policies allow a one-time withdrawal alongside the ongoing payments.
+                  <strong>💡 {lang === 'he' ? 'טיפ:' : 'Tip:'}</strong> {t.pension.tip}
                 </p>
               </div>
             </div>
@@ -415,38 +406,26 @@ export default function AfterILeavePage() {
           {/* 3f: IBKR */}
           <CollapsibleSection
             emoji="📈"
-            title="Investments — Interactive Brokers (IBKR)"
-            subtitle="International brokerage account — stocks, bonds, and options"
+            title={t.ibkr.title}
+            subtitle={t.ibkr.subtitle}
           >
             <div className="space-y-3 text-sm">
-              <InfoRow label="Account type">Individual (non-US resident)</InfoRow>
-              <InfoRow label="What to do">
+              <InfoRow label={t.ibkr.labels.accountType}>{t.ibkr.accountType}</InfoRow>
+              <InfoRow label={t.ibkr.labels.whatToDo}>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 pdf-light:text-gray-700">
-                  <li>
-                    Email{' '}
-                    <a href="mailto:estateprocessing@interactivebrokers.com" className="text-blue-400 pdf-light:text-blue-600 underline">
-                      estateprocessing@interactivebrokers.com
-                    </a>{' '}
-                    with the account number
-                  </li>
-                  <li>Subject line: &quot;Estate Processing&quot;</li>
-                  <li>
-                    Required documents: certified death certificate, your government ID, inheritance order
-                    (Israeli צו ירושה with apostille), estate/probate court documents
-                  </li>
-                  <li>IBKR will freeze the account, then transfer assets to your name or liquidate to cash</li>
-                  <li>Processing: 2-4 weeks after all documents are submitted</li>
+                  {t.ibkr.steps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
                 </ol>
               </InfoRow>
-              <InfoRow label="Contact">
+              <InfoRow label={t.ibkr.labels.contact}>
                 <a href="mailto:estateprocessing@interactivebrokers.com" className="text-blue-400 pdf-light:text-blue-600 underline">
                   estateprocessing@interactivebrokers.com
                 </a>
               </InfoRow>
               <div className="mt-3 p-3 bg-blue-500/10 rounded-lg border border-blue-500/20">
                 <p className="text-blue-300 pdf-light:text-blue-700 text-sm">
-                  <strong>💡 Important:</strong> For non-US accounts, there is no &quot;Transfer on Death&quot; option.
-                  Legal inheritance documents (צו ירושה) are required. The apostille authenticates the Israeli document for international use.
+                  <strong>💡 {lang === 'he' ? 'חשוב:' : 'Important:'}</strong> {t.ibkr.important}
                 </p>
               </div>
             </div>
@@ -455,20 +434,20 @@ export default function AfterILeavePage() {
           {/* 3g: Bank Accounts */}
           <CollapsibleSection
             emoji="🏧"
-            title="Bank Accounts & Savings"
-            subtitle="Israeli bank accounts and savings plans"
+            title={t.bankAccounts.title}
+            subtitle={t.bankAccounts.subtitle}
           >
             <div className="space-y-3 text-sm">
               {items.filter((i) => i.category === 'Savings' && i.type !== 'Pension').length > 0 && (
                 <div className="mb-3">
-                  <p className="text-slate-400 pdf-light:text-gray-500 mb-2 font-medium">Your savings accounts from the financial data:</p>
+                  <p className="text-slate-400 pdf-light:text-gray-500 mb-2 font-medium">{t.bankAccounts.yourSavingsLabel}</p>
                   <ul className="space-y-1">
                     {items
                       .filter((i) => i.category === 'Savings' && i.type !== 'Pension')
                       .map((i) => (
                         <li key={i.id} className="flex justify-between text-slate-300 pdf-light:text-gray-700 py-1 border-b border-slate-800/30 pdf-light:border-gray-100">
                           <span>{i.name}</span>
-                          <span className="font-mono">
+                          <span className="font-mono" dir="ltr">
                             {new Intl.NumberFormat('en-IL', { style: 'currency', currency: i.currency || 'ILS' }).format(i.value)}
                           </span>
                         </li>
@@ -476,18 +455,16 @@ export default function AfterILeavePage() {
                   </ul>
                 </div>
               )}
-              <InfoRow label="General process">
+              <InfoRow label={t.bankAccounts.labels.generalProcess}>
                 <ol className="list-decimal list-inside space-y-1.5 text-slate-300 pdf-light:text-gray-700">
-                  <li>Visit the bank branch with the death certificate and inheritance order</li>
-                  <li>The bank will temporarily freeze the accounts</li>
-                  <li>After the inheritance order is issued: transfer or merge accounts to your name</li>
-                  <li>For joint accounts: show the death certificate — the surviving holder gets access</li>
+                  {t.bankAccounts.processSteps.map((step, i) => (
+                    <li key={i}>{step}</li>
+                  ))}
                 </ol>
               </InfoRow>
               <div className="mt-3 p-3 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
                 <p className="text-emerald-300 pdf-light:text-emerald-700 text-sm">
-                  <strong>💡 Tip:</strong> Keep some cash accessible in a joint account for immediate living expenses.
-                  Bank freezes on individual accounts can take weeks to resolve.
+                  <strong>💡 {lang === 'he' ? 'טיפ:' : 'Tip:'}</strong> {t.bankAccounts.tip}
                 </p>
               </div>
             </div>
@@ -496,64 +473,64 @@ export default function AfterILeavePage() {
           {/* 3h: Government Resources */}
           <CollapsibleSection
             emoji="🇮🇱"
-            title="Government Resources"
-            subtitle="Free official tools to find all insurance and savings"
+            title={t.government.title}
+            subtitle={t.government.subtitle}
           >
             <div className="space-y-6 text-sm">
               <div>
                 <h3 className="font-semibold text-slate-200 pdf-light:text-gray-800 mb-2">
-                  🛡️ הר הביטוח (Har HaBituach) — Insurance Mountain
+                  {t.government.harBituach.title}
                 </h3>
                 <div className="space-y-2">
-                  <InfoRow label="URL">
+                  <InfoRow label={t.government.harBituach.labels.url}>
                     <ExternalLink href="https://harb.cma.gov.il/">harb.cma.gov.il</ExternalLink>
                   </InfoRow>
-                  <InfoRow label="What it does">
-                    Shows ALL insurance policies registered under a person&apos;s ID number — from ALL insurance companies.
+                  <InfoRow label={t.government.harBituach.labels.whatItDoes}>
+                    {t.government.harBituach.whatItDoes}
                   </InfoRow>
-                  <InfoRow label="How to use">
-                    Login with Teudat Zehut (ID number) + issue date.
+                  <InfoRow label={t.government.harBituach.labels.howToUse}>
+                    {t.government.harBituach.how}
                   </InfoRow>
-                  <InfoRow label="Shows">
-                    Life insurance, health insurance, car insurance, home insurance — everything.
+                  <InfoRow label={t.government.harBituach.labels.shows}>
+                    {t.government.harBituach.shows}
                   </InfoRow>
-                  <p className="text-emerald-400 pdf-light:text-emerald-600 font-medium mt-1">✅ Free and official!</p>
+                  <p className="text-emerald-400 pdf-light:text-emerald-600 font-medium mt-1">{t.government.harBituach.freeOfficial}</p>
                 </div>
               </div>
 
               <div className="border-t border-slate-800/50 pdf-light:border-gray-200 pt-5">
                 <h3 className="font-semibold text-slate-200 pdf-light:text-gray-800 mb-2">
-                  💰 הר הכסף (Har HaKesef) — Money Mountain
+                  {t.government.harKesef.title}
                 </h3>
                 <div className="space-y-2">
-                  <InfoRow label="URL">
+                  <InfoRow label={t.government.harKesef.labels.url}>
                     <ExternalLink href="https://itur.mof.gov.il/home/shuk">itur.mof.gov.il</ExternalLink>
                   </InfoRow>
-                  <InfoRow label="What it does">
-                    Finds ALL pension funds, savings plans, dormant bank accounts registered under a person&apos;s identity.
+                  <InfoRow label={t.government.harKesef.labels.whatItDoes}>
+                    {t.government.harKesef.whatItDoes}
                   </InfoRow>
-                  <InfoRow label="Shows">
-                    Pension funds, provident funds (קופות גמל), education funds (קרנות השתלמות), inactive bank accounts.
+                  <InfoRow label={t.government.harKesef.labels.shows}>
+                    {t.government.harKesef.shows}
                   </InfoRow>
-                  <InfoRow label="Deceased search">
-                    You can search for a deceased person&apos;s funds with proper documentation.
+                  <InfoRow label={t.government.harKesef.labels.deceasedSearch}>
+                    {t.government.harKesef.deceasedSearch}
                   </InfoRow>
-                  <p className="text-emerald-400 pdf-light:text-emerald-600 font-medium mt-1">✅ Free and official!</p>
+                  <p className="text-emerald-400 pdf-light:text-emerald-600 font-medium mt-1">{t.government.harKesef.freeOfficial}</p>
                 </div>
               </div>
 
               <div className="border-t border-slate-800/50 pdf-light:border-gray-200 pt-5">
                 <h3 className="font-semibold text-slate-200 pdf-light:text-gray-800 mb-2">
-                  🏛️ Gov.il Post-Death Portal
+                  {t.government.govIl.title}
                 </h3>
                 <div className="space-y-2">
-                  <InfoRow label="URL">
+                  <InfoRow label={t.government.govIl.labels.url}>
                     <ExternalLink href="https://www.gov.il/en/service/post-death-accompaniment">
-                      gov.il — Post-Death Accompaniment
+                      gov.il
                     </ExternalLink>
                   </InfoRow>
-                  <InfoRow label="What it does">
-                    Centralized government guidance for all death-related procedures, step by step.
+                  <InfoRow label={t.government.govIl.labels.whatItDoes}>
+                    {t.government.govIl.whatItDoes}
                   </InfoRow>
                 </div>
               </div>
@@ -563,20 +540,11 @@ export default function AfterILeavePage() {
           {/* ─── 4. Important Documents Checklist ─── */}
           <CollapsibleSection
             emoji="📋"
-            title="Important Documents Checklist"
-            subtitle="Gather these documents — you'll need them repeatedly"
+            title={t.documents.title}
+            subtitle={t.documents.subtitle}
           >
             <div className="space-y-3">
-              {[
-                'Death certificate (תעודת פטירה) — get multiple certified copies (at least 5)',
-                'Marriage certificate (תעודת נישואין)',
-                'Both ID cards (תעודות זהות)',
-                'Inheritance order (צו ירושה) — apply ASAP, takes 2-3 months',
-                'Bank account details (voided check or bank letter)',
-                'All insurance policy numbers',
-                'Employment Form 161 (טופס 161) — request from employer',
-                'Attorney affidavit listing dependents (תצהיר עורך דין)',
-              ].map((doc, i) => (
+              {t.documents.items.map((doc, i) => (
                 <label key={i} className="flex items-start gap-3 cursor-pointer group">
                   <input
                     type="checkbox"
@@ -593,24 +561,18 @@ export default function AfterILeavePage() {
           {/* ─── 5. Important Contacts ─── */}
           <CollapsibleSection
             emoji="📞"
-            title="Important Contacts"
-            subtitle="People and services to reach out to"
+            title={t.contacts.title}
+            subtitle={t.contacts.subtitle}
           >
-            <div className="grid gap-4 sm:grid-cols-2">
-              {[
-                { role: 'Lawyer (עורך דין)', name: '[Name — TO BE FILLED]', phone: '[Phone]', email: '[Email]' },
-                { role: 'Accountant (רואה חשבון)', name: '[Name — TO BE FILLED]', phone: '[Phone]', email: '[Email]' },
-                { role: 'Insurance Agent (סוכן ביטוח)', name: '[Name — TO BE FILLED]', phone: '[Phone]', email: '[Email]' },
-                { role: 'Bank Contact', name: '[Name — TO BE FILLED]', phone: '[Phone]', email: '[Email]' },
-                { role: 'Bituach Leumi', name: 'National Insurance Institute', phone: '*6050', email: 'btl.gov.il' },
-              ].map((contact, i) => (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {t.contacts.roles.map((contact, i) => (
                 <div
                   key={i}
                   className="p-4 rounded-lg bg-slate-800/50 pdf-light:bg-gray-50 border border-slate-700/50 pdf-light:border-gray-200"
                 >
                   <p className="font-semibold text-slate-200 pdf-light:text-gray-800 text-sm">{contact.role}</p>
                   <p className="text-slate-400 pdf-light:text-gray-600 text-sm mt-1">{contact.name}</p>
-                  <p className="text-slate-500 pdf-light:text-gray-500 text-xs mt-1">
+                  <p className="text-slate-500 pdf-light:text-gray-500 text-xs mt-1" dir="ltr">
                     📱 {contact.phone} &nbsp;|&nbsp; ✉️ {contact.email}
                   </p>
                 </div>
@@ -621,12 +583,12 @@ export default function AfterILeavePage() {
           {/* ─── Footer Note ─── */}
           <div className="mt-8 p-6 rounded-xl bg-slate-900/50 border border-slate-800/50 text-center">
             <p className="text-slate-400 pdf-light:text-gray-500 text-sm leading-relaxed">
-              💙 This guide is here to help, not to worry you. It&apos;s just a map — so you know where to go if you ever need it.
+              {t.footer.lines[0]}
               <br />
-              Review it once, make sure the contacts and policy numbers are up to date, and then put it away.
+              {t.footer.lines[1]}
               <br />
               <span className="text-slate-500 text-xs mt-2 block">
-                Remember: you can always ask our lawyer or accountant for help navigating any of these steps.
+                {t.footer.lines[2]}
               </span>
             </p>
           </div>
