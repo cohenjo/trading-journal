@@ -30,3 +30,77 @@
 
 📌 Team update (2026-03-08T00:00:00Z): "After I Leave" page completed — comprehensive Israeli inheritance & financial instructions for spouse with life insurance claims, pension procedures, צו ירושה process, Bituach Leumi, IBKR estate liquidation, bank account procedures, government portal links, checklist, and PDF download via html2pdf.js. Route: /after-i-leave. Navigation: bottom sidebar with divider. Ready for user data input. — Scribe (Session Logger)
 - **2026-07-22: "After I Leave" Hebrew/English i18n + wider layout** — Added full Hebrew/English language toggle to the After I Leave page. Created `translations.ts` at `components/AfterILeave/translations.ts` exporting typed `Lang` and full translations object (en/he) for all 12 sections. Page.tsx uses `useState<Lang>('en')` with `dir="rtl"` when Hebrew is active. Layout widened from `max-w-4xl` to `max-w-6xl` for better wide-screen use. Contact cards grid updated to `lg:grid-cols-3`. SummaryTable accepts `lang` prop for translated column headers, category names, and demo insurance items. Used logical CSS properties (`text-start`/`text-end`) instead of `text-left`/`text-right` for RTL compatibility. Currency values forced to `dir="ltr"` in RTL mode. Pattern: for i18n of content-heavy pages, extract ALL strings to a typed translations file rather than using a framework — simpler for single-page bilingual content.
+
+
+---
+
+## 2026-04-10 — Week 1 Sprint: Frontend Testing Infrastructure (P0 Tasks)
+
+**Branch:** squad/testing-frontend-utilities
+**Status:** ALL P0 TASKS COMPLETE
+**Commits:** 4 commits, 53 new tests, all passing
+
+### Summary
+
+Completed all P0 tasks for Week 1 of the testing plan. Added comprehensive test coverage for critical frontend utilities that affect all financial displays.
+
+**Achievements:**
+- Vitest coverage configuration with baseline thresholds
+- 36 tests for currency conversion and formatting
+- 17 tests for SettingsContext (global state)
+- Cleaned up 3 E2E file issues (typo, duplicate, boilerplate)
+- Created reusable test utilities (renderWithProviders)
+
+**Impact:**
+- Coverage baseline established: 4% to approximately 8% after merge
+- Currency conversion logic fully tested (affects ALL monetary displays)
+- SettingsContext validated (global state on all pages)
+- E2E suite cleaned: 12 files to 9 files
+
+### Task Breakdown
+
+**Task 1: Vitest Coverage Configuration** (30 min)
+- Added v8 coverage provider with html/lcov/json/text reporters
+- Set baseline thresholds at 10% (will raise as coverage grows)
+- Installed @vitest/coverage-v8 dependency
+- Commit: d9a6071
+
+**Task 2: lib/currency.test.ts** (2 hours)
+- 36 comprehensive tests for currency conversion
+- Test coverage: CURRENCY_RATES, convertCurrency (18 tests), formatCurrency (14 tests)
+- Edge cases: zero, null, negative, large amounts, decimals
+- Commit: fdf596f
+
+**Task 3: SettingsContext.test.tsx** (2 hours)
+- 17 tests for global settings context
+- Created renderWithProviders test utility (reusable)
+- Test coverage: defaults, currency switching, updates, localStorage persistence
+- Commit: 466b7d8
+
+**Task 4: Fix E2E Test Issues** (1 hour)
+- Fixed typo: currrent-finances to current-finances
+- Removed duplicate: cashflow.spec.ts (kept cash-flow.spec.ts)
+- Removed boilerplate: example.spec.ts
+- Commit: 871b0db
+
+### Critical Findings
+
+1. **Currency Conversion Formula:** (amount * fromRate) / toRate with ILS as base
+2. **Invalid Currency Fallback:** Unknown currencies default to rate 1 (treated as ILS) - undocumented behavior
+3. **SettingsContext Validation:** Corrupted localStorage gracefully falls back to defaults
+4. **localStorage Key:** trading-journal-settings-v1 for persistence
+
+### Pre-existing Issues Noted
+
+- PensionTable.test.tsx has 2 failing tests (owner toggle) - existed before my work
+- Root .gitignore has lib/ pattern - requires git add -f for frontend lib files
+
+### Acceptance Criteria: ALL MET
+
+- Vitest coverage config working
+- lib/currency.test.ts: 36 tests passing
+- SettingsContext.test.tsx: 17 tests passing
+- E2E issues fixed
+- All changes committed
+
+**Branch ready for review and merge.**
