@@ -23,6 +23,7 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.schema.models import SQLModel
+from app.schema.user_models import User  # noqa: F401 — ensure User table is registered
 # from app.dal.database import DATABASE_URL
 # config.set_main_option('sqlalchemy.url', DATABASE_URL)
 target_metadata = SQLModel.metadata

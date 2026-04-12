@@ -1,7 +1,7 @@
 import json
 from decimal import Decimal
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 from contextlib import asynccontextmanager
@@ -9,7 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.dal.database import create_db_and_tables
 from app.utils.decimal_encoder import decimal_default
+from app.auth.dependencies import get_current_user
 from app.api import (
+    auth as auth_router_module,
     trades,
     day,
     summary,
@@ -117,31 +119,41 @@ app.add_middleware(
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+# Public paths that skip JWT authentication
+PUBLIC_PATHS = {"/", "/docs", "/redoc", "/openapi.json", "/api/auth/register", "/api/auth/login"}
+
+
 @app.get("/")
 def read_root():
     """Health-check root endpoint."""
     return {"Hello": "World"}
 
+# Auth router (public endpoints — registered first, no auth dependency)
+app.include_router(auth_router_module.router)
+
+# All remaining routers require authentication
+auth_dep = [Depends(get_current_user)]
+
 # Include routers
-app.include_router(trades.router, prefix="/api", tags=["trades"])
-app.include_router(day.router, prefix="/api", tags=["day"])
-app.include_router(summary.router, prefix="/api", tags=["summary"])
-app.include_router(ndx.router, prefix="/api", tags=["ndx"])
-app.include_router(ladder.router, prefix="/api", tags=["ladder"])
-app.include_router(holdings.router, prefix="/api", tags=["holdings"])
-app.include_router(bonds.router, prefix="/api", tags=["bonds"])
-app.include_router(dividends.router, prefix="/api", tags=["dividends"])
-app.include_router(dividend_accounts.router)
-app.include_router(options.router, prefix="/api", tags=["options"])
-app.include_router(tax_condor.router, prefix="/api/tax-condor", tags=["tax-condor"])
-app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"])
-app.include_router(finances.router)
-app.include_router(plans.router)
-app.include_router(trading.router)
-app.include_router(pension.router)
-app.include_router(analyze.router)
-app.include_router(insurance.router)
-app.include_router(telemetry_metrics.router)
+app.include_router(trades.router, prefix="/api", tags=["trades"], dependencies=auth_dep)
+app.include_router(day.router, prefix="/api", tags=["day"], dependencies=auth_dep)
+app.include_router(summary.router, prefix="/api", tags=["summary"], dependencies=auth_dep)
+app.include_router(ndx.router, prefix="/api", tags=["ndx"], dependencies=auth_dep)
+app.include_router(ladder.router, prefix="/api", tags=["ladder"], dependencies=auth_dep)
+app.include_router(holdings.router, prefix="/api", tags=["holdings"], dependencies=auth_dep)
+app.include_router(bonds.router, prefix="/api", tags=["bonds"], dependencies=auth_dep)
+app.include_router(dividends.router, prefix="/api", tags=["dividends"], dependencies=auth_dep)
+app.include_router(dividend_accounts.router, dependencies=auth_dep)
+app.include_router(options.router, prefix="/api", tags=["options"], dependencies=auth_dep)
+app.include_router(tax_condor.router, prefix="/api/tax-condor", tags=["tax-condor"], dependencies=auth_dep)
+app.include_router(backtest.router, prefix="/api/backtest", tags=["backtest"], dependencies=auth_dep)
+app.include_router(finances.router, dependencies=auth_dep)
+app.include_router(plans.router, dependencies=auth_dep)
+app.include_router(trading.router, dependencies=auth_dep)
+app.include_router(pension.router, dependencies=auth_dep)
+app.include_router(analyze.router, dependencies=auth_dep)
+app.include_router(insurance.router, dependencies=auth_dep)
+app.include_router(telemetry_metrics.router, dependencies=auth_dep)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)

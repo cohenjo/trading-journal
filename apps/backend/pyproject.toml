@@ -30,6 +30,9 @@ dependencies = [
     "pypdf>=6.10.0",
     "python-multipart>=0.0.22",
     "cachetools>=7.0.5",
+    "python-jose[cryptography]>=3.5.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt<4.1",
 ]
 requires-python = ">=3.10"
 

@@ -6,8 +6,13 @@ import time
 from fastapi.testclient import TestClient
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+from app.auth.dependencies import get_current_user
+from app.schema.user_models import User
 from main import app
 
+app.dependency_overrides[get_current_user] = lambda: User(
+    id=1, username="testuser", hashed_password="x", is_active=True
+)
 client = TestClient(app)
 
 SIMULATION_BUDGET_MS = float(os.getenv("PERF_SIMULATION_BUDGET_MS", "1200"))
