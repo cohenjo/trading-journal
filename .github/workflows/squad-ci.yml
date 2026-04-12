@@ -167,7 +167,7 @@ jobs:
           DATABASE_URL: "sqlite:///./test.db"
           JWT_SECRET_KEY: "ci-test-secret-key-not-for-production"
         run: |
-          uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          uv run uvicorn main:app --host 0.0.0.0 --port 8000 &
           sleep 5
 
       - name: Build frontend
