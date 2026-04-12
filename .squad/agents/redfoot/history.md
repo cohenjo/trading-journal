@@ -39,3 +39,56 @@
 **Commit:** (pending)
 
 **Cross-team:** Waited for Hockney's router fix before starting tests. Backend now ready for production validation.
+- ### 2026-03-07: Pension multi-owner regressions
+- Backend pension identities now come from `extract_pension_payload` in `apps/backend/app/api/pension.py` and encode owner + product + fund/account, which keeps Jony/Rita products distinct across dashboard history, plan sync, and delete flows.
+- `build_pension_dashboard_payload` is the key aggregation seam for pension history/projections; tests now verify it only emits latest active pensions and that deletes remove the same identity from historical snapshots and the plan.
+- Frontend pension rendering now centers on `apps/frontend/src/components/Pension/pensionTypes.ts` and `pensionChartUtils.ts`; chart regression tests cover empty projections and missing history anchors, while `PensionTable.test.tsx` covers the four-fund Jony/Rita scenario and stable delete targeting.
+
+### 2026-07-23: Pension upload propagation & zero-value regression tests (8 tests)
+
+- **Bug-1 (invisible pension after upload):** Tests verify that upserting to both report-date and latest snapshot makes the pension visible on the dashboard. Key pattern: create multiple snapshots with different dates, upsert to both, then assert `build_pension_dashboard_payload` returns the pension in `accounts[]`. The dashboard reads only from `snapshots[-1]`.
+- **Bug-2 (zero ILS from null Total Amount):** `_safe_float(None)` returns 0.0 — this is documented behavior now pinned by test. Sub-fields (deposits, earnings, fees) are preserved even when total is zero. Any future fix must update `test_extract_pension_payload_zero_total`.
+- **Complementary pension resolution:** `resolve_pension_product` falls through product fields → fund name → filename. The "comp" hint in any of those resolves to "פנסיה משלימה". Tests pin all three paths.
+- **Same-owner dual-product coexistence:** `_make_jony_comprehensive` and `_make_jony_supplementary` helpers exist for reuse. Identity uniqueness comes from the product slug in `build_pension_identity`.
+- **Key file:** `apps/backend/tests/test_pension_api.py` — 13 tests total (5 original + 8 regression).
+- **Edge case discovered:** double-upsert on the same snapshot (same date = report date = latest) does not duplicate — the identity match prevents it. This is safe.
+
+📌 **Team update (2026-03-07T20:18:16Z):** Pension upload bugs fixed — snapshot propagation for dashboard visibility + Hebrew RTL analyzer prompt + zero-value validation. All 17 tests passing. — Hockney, Redfoot
+
+### Deterministic table extraction tests (5 tests, all passing)
+
+- **What:** Added 5 tests for Hockney's `_extract_from_tables()` in `apps/backend/app/utils/copilot_analyzer.py`. Tests mock `pdfplumber.open` and supply Clal pension TABLE 2 data with exact Hebrew RTL keywords.
+- **Key file:** `apps/backend/tests/test_pension_api.py` — now 21 tests total (16 original + 5 new).
+- **Mock pattern:** `_mock_pdf()` builds a MagicMock with `__enter__`/`__exit__` for context manager protocol, `.pages[0].extract_tables()` and `.extract_text()`. Hebrew keywords in mock data must match the `_KW_*` constants exactly (e.g., `"ןועברה ףוסב םיפסכה תרתי"` not abbreviated).
+- **Page text regexes:** Name, ID, and date are extracted via `_PAT_NAME`, `_PAT_ID`, `_PAT_DATE` regexes from page text — not from tables. Mock text must match these patterns (e.g., `'66475922 :ז.ת רפסמ ישראלי ישראל :תימעה םש'`).
+- **Name reversal:** pdfplumber returns reversed Hebrew word order; the function does `" ".join(reversed(raw_name.split()))`. Mock text must provide name in reversed order.
+- **Product detection:** `_PRODUCT_COMP = "המילשמ"` vs `_PRODUCT_COMPREHENSIVE = "הפיקמ"` in first 600 chars of page text. Fund: `_FUND_CLAL = "היסנפ ללכ"`.
+- **Monthly deposits formula:** `round(deposits_ytd / month_num)` where month_num comes from report date month. Sep 30 → month 9 → 33146/9 ≈ 3683.
+- **Earnings/fees split:** Single cell `"120,818\n-580"` → split on newline, fees = abs(second part).
+- **Fallback:** When `_find_table2()` returns None (no matching keywords), function returns None, signaling caller to use AI path.
+
+📌 **Team update (2026-03-07T20:59:37Z):** Deterministic table extraction implemented and tested. `_extract_from_tables()` reliably parses Clal pension PDFs (800,545 ILS comp, 1,194,873 ILS main). AI fallback preserved. 21 tests total, all passing. Non-breaking change. — Hockney, Redfoot
+
+### 2026-03-08: Pension category changed from Investments to Savings (5 new tests)
+
+**Backend change:** Hockney reclassified pensions from `category: "Investments"` to `category: "Savings"`. This is a semantic correction — pensions are savings vehicles, not liquid investments. Dashboard/matching still works because all pension filtering uses `type == "Pension"`, not category.
+
+**Key changes in `apps/backend/app/api/pension.py`:**
+- `extract_pension_payload()`: category now "Savings", added `draw_income: True` to details, added `max_withdrawal_rate: 0`
+- `upsert_plan_pension()`: new plan items get `draw_income: True` in account_settings
+- `_recalculate_snapshot()`: pensions now contribute to `total_savings` (line 286), not `total_investments` (line 291)
+
+**Test updates:**
+- No existing test assertions needed fixing (all filtering was already using `type == "Pension"`)
+- Added 5 new tests in `apps/backend/tests/test_pension_api.py`:
+  1. `test_pension_defaults_draw_income_true`: verifies draw_income flag is set in payload details
+  2. `test_pension_max_withdrawal_rate_zero`: enforces pensions can't be withdrawn from
+  3. `test_pension_counted_in_savings_total`: confirms pensions contribute to total_savings, not total_investments
+  4. `test_plan_pension_defaults_draw_income`: verifies plan items get draw_income in account_settings
+  5. `test_pension_category_is_savings`: simple category assertion
+
+**All 26 tests passing** (21 original + 5 new). No regressions. The category change is non-breaking because all domain logic uses `type`, not `category`.
+
+📌 Team update (2026-03-07T21:49:50Z): Pension category reclassification testing completed. 26 tests passing (21 updated + 5 new). All three team layers verified through orchestration. Decisions merged and documented. — Scribe (Team Orchestration)
+
+📌 Team update (2026-04-10T08:19:59Z): Testing Sprint Phase 1-3 Complete — Full testing coverage audit completed (D+ grade, 850 lines). Phase 2 feedback from all specialists incorporated. Phase 3 implementation: 110 new tests (57 backend, 53 frontend) delivered across 3 branches. Financial core testing, infrastructure P0, PostgreSQL integration, and database models now prioritized. Orchestration logs created for all 8 agent spawns. Decisions merged: keaton-testing-plan-approved.md, redfoot-testing-audit.md, fenster-i18n.md. Session log and cross-agent updates completed. Ready for PR merge. — Scribe (Team Orchestration)

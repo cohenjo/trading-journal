@@ -59,16 +59,48 @@ async def analyze_report(file_path: str) -> Dict[str, Any]:
                 
                 The input will be text extracted from a PDF. Analyze it carefully.
 
+                IMPORTANT — Hebrew RTL text handling:
+                PDF text extraction from Hebrew documents often produces garbled or reversed text
+                due to right-to-left (RTL) rendering. Characters and words may appear in reversed
+                order (e.g. "הסנפ" instead of "פנסה", "לכ ךס" instead of "סך כל").
+                When you encounter garbled Hebrew text:
+                1. Try reading character sequences in REVERSE to reconstruct the original Hebrew.
+                2. Look for NUMBERS adjacent to common Hebrew financial keywords. Numbers are always
+                   left-to-right so they remain intact even when surrounding Hebrew is reversed.
+                3. Common Hebrew financial terms to look for (may appear reversed in extracted text):
+                   - סך כל / סך הכל = Total
+                   - יתרה = Balance
+                   - רווחים / תשואה = Earnings/Returns
+                   - הפקדות / הפרשות = Deposits/Contributions
+                   - דמי ניהול = Management Fees
+                   - פנסיה מקיפה = Comprehensive Pension
+                   - פנסיה משלימה = Complementary Pension
+                   - קופת גמל = Provident Fund
+                   - ביטוח = Insurance
+                4. Examine ALL tables in the extracted text carefully. The total fund value is
+                   typically the LARGEST number on the page (often 6-7 digits for ILS balances).
+                5. If you see a clear large number (e.g. 800,545 or 1,194,873) in the tables or
+                   text, it is very likely the total balance even if the adjacent label is garbled.
+
                 When analyzing a report, you MUST extract the following fields strictly:
                 - Report Date (The as-of date of the report, formatted strictly as YYYY-MM-DD. If only a month and year are given, use the 1st of the month, e.g. 'March 2025' -> '2025-03-01')
                 - Name (Name of the insured person)
                 - ID (Identification number)
-                - Total Amount (Total value of the policy/fund as a number)
+                - Total Amount (Total value of the policy/fund as a number. THIS IS THE MOST IMPORTANT FIELD. Never return 0 or null if there is ANY large number visible in the document that represents a fund balance.)
                 - Monthly Deposits (The average monthly deposit. Look for an explicit 'Monthly Deposit' field. If not available, calculate it by dividing the YTD total period deposits by the number of months in the period. Example: If Q3 YTD deposits are 46,258 over 9 months, write 5139. MUST be a number)
                 - Earnings (Net earnings/losses in the period as a number)
                 - Fees (Total management fees as a number)
                 - Insurance Fees (Cost of insurance coverage as a number)
                 - Pension Fund Name (Name of the exact pension fund, e.g. "Clal Pension")
+                - Pension Product (Exact pension product / track, e.g. "פנסיה מקיפה", "פנסיה משלימה", "קופת גמל")
+                - Account Number (Policy / account / product number if it appears in the report. Return digits only when possible)
+
+                Name is the insured person only. Never use the person's name as Pension Fund Name or Pension Product.
+
+                VALIDATION: Before returning your JSON, verify:
+                - If Earnings, Fees, Deposits, or Insurance Fees are non-zero but Total Amount is 0 or null, something is wrong.
+                  Re-examine the document for the total fund balance — it must be there.
+                - Total Amount should always be LARGER than individual sub-fields like Earnings or Deposits.
 
                 If a field is not found or not applicable, mark it as null.
                 If amount values have commas, remove them. Ensure numbers are float or integer in the JSON output, not strings!

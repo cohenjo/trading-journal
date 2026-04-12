@@ -13,6 +13,12 @@ services:
       - "5432:5432"
     networks:
       - trading-journal-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d trading_journal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   backend:
     container_name: trading_journal_backend
@@ -29,10 +35,18 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
     depends_on:
-      - db
-      - otel-collector
+      db:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
     networks:
       - trading-journal-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   frontend:
     container_name: trading_journal_frontend
@@ -48,9 +62,16 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: "http://localhost:8000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - trading-journal-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   ib-gateway:
     platform: linux/amd64

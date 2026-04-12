@@ -168,6 +168,19 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                                 Settings
                             </Link>
                         </div>
+
+                        <div className="mt-2 border-t border-slate-700 pt-3 pb-2">
+                            <div className="px-6 pb-1 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                Family
+                            </div>
+                            <Link
+                                href="/after-i-leave"
+                                className="block px-6 py-3 text-base font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                onClick={() => setMenuOpen(false)}
+                            >
+                                📋 After I Leave
+                            </Link>
+                        </div>
                     </div>
                 </nav>
             )}
