@@ -25,6 +25,7 @@ class BacktestResponse(BaseModel):
 
 @router.post("/run", response_model=BacktestResponse)
 async def run_backtest(request: BacktestRequest):
+    """Execute a strategy backtest for the given year and parameters."""
     try:
         results = await service.run_backtest(
             request.year, 
@@ -42,7 +43,8 @@ async def run_backtest(request: BacktestRequest):
 
 @router.get("/years")
 def get_available_years():
-    # Return list of years we support
+    """Return the list of years available for backtesting."""
+    # 2018 to current year
     # 2018 to current year
     import datetime
     current_year = datetime.date.today().year

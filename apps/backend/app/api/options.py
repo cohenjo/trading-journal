@@ -12,17 +12,20 @@ router = APIRouter()
 
 @router.get("/options", response_model=List[OptionsRecord])
 def get_options_income():
+    """Return all historical options income records."""
     return load_options()
 
 
 @router.post("/options", response_model=List[OptionsRecord])
 def update_options_income(records: List[OptionsRecord]):
+    """Replace all options income records."""
     save_options(records)
     return records
 
 
 @router.post("/options/projection", response_model=OptionsProjectionResponse)
 def get_options_projection(params: OptionsProjectionParams):
+    """Project future options income based on growth rate and cutoff year."""
     historical = load_options()
 
     if not historical:

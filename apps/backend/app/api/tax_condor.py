@@ -15,6 +15,7 @@ class RecommendationRequest(BaseModel):
 
 @router.post("/recommend", response_model=List[TaxCondorRecommendation])
 async def get_recommendations(request: RecommendationRequest):
+    """Generate iron condor tax-loss harvesting recommendations for a symbol."""
     provider = None
     if request.use_live_data:
         try:

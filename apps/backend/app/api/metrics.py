@@ -44,6 +44,7 @@ class PageLoadMetrics(BaseModel):
 
 @router.post("/page-load")
 def capture_page_load_metrics(payload: PageLoadMetrics):
+    """Ingest frontend page-load performance metrics into OpenTelemetry."""
     attributes = {"path": payload.path}
     page_load_count.add(1, attributes)
 

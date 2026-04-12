@@ -9,11 +9,13 @@ router = APIRouter()
 
 @router.post("/ndx/sync/{date}")
 def sync_ndx_data_for_date(date: date_type):
+    """Trigger NDX 1-minute data sync for the given date."""
     return sync_ndx_data(date.strftime("%Y-%m-%d"))
 
 
 @router.get("/ndx/{date}", response_model=list[Ndx1mChartData])
 def get_ndx_data_for_day(date: date_type, session: Session = Depends(get_session)):
+    """Return NDX 1-minute OHLC chart data for the given date."""
     statement = select(Ndx1m).where(Ndx1m.timestamp >= date).where(Ndx1m.timestamp < date + timedelta(days=1)).order_by(Ndx1m.timestamp)
     results = session.exec(statement)
     data = results.all()

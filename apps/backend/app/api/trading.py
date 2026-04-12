@@ -23,16 +23,19 @@ class ConfigUpdate(BaseModel):
 
 @router.get("/configs", response_model=List[TradingAccountConfig])
 def get_configs(session: Session = Depends(get_session)):
+    """List all trading account configurations."""
     return session.exec(select(TradingAccountConfig)).all()
 
 @router.get("/config", response_model=Optional[TradingAccountConfig])
 def get_config(id: Optional[int] = None, session: Session = Depends(get_session)):
+    """Get a trading account config by ID, or the first available."""
     if id:
         return session.get(TradingAccountConfig, id)
     return session.exec(select(TradingAccountConfig)).first()
 
 @router.post("/config", response_model=TradingAccountConfig)
 def update_config(config_data: ConfigUpdate, session: Session = Depends(get_session)):
+    """Create or update a trading account configuration."""
     config = None
     if config_data.id:
         config = session.get(TradingAccountConfig, config_data.id)
@@ -60,6 +63,7 @@ async def sync_account(account_id: Optional[int] = None, session: Session = Depe
 
 @router.get("/summary", response_model=Optional[TradingAccountSummary])
 def get_latest_summary(account_id: Optional[int] = None, session: Session = Depends(get_session)):
+    """Return the most recent trading account summary."""
     statement = select(TradingAccountSummary)
     if account_id:
         statement = statement.where(TradingAccountSummary.account_config_id == account_id)
@@ -68,6 +72,7 @@ def get_latest_summary(account_id: Optional[int] = None, session: Session = Depe
 
 @router.get("/positions", response_model=List[TradingPosition])
 def get_latest_positions(account_id: Optional[int] = None, session: Session = Depends(get_session)):
+    """List current trading positions, optionally filtered by account."""
     statement = select(TradingPosition)
     if account_id:
         statement = statement.where(TradingPosition.account_config_id == account_id)

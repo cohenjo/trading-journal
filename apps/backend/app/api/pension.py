@@ -574,6 +574,7 @@ async def upload_pension_report(
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
 ):
+    """Upload and analyze a pension report PDF, updating snapshots and plans."""
     try:
         root_dir = Path(__file__).parent.parent.parent.parent.parent
         reports_dir = root_dir / "reports" / owner
@@ -681,6 +682,7 @@ async def upload_pension_report(
 
 @router.get("/dashboard")
 def get_pension_dashboard(db: Session = Depends(get_session)):
+    """Return aggregated pension dashboard with history and plan data."""
     try:
         snapshots = db.exec(select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())).all()
         plan = db.exec(select(Plan).order_by(Plan.updated_at.desc()).limit(1)).first()
@@ -694,6 +696,7 @@ def get_pension_dashboard(db: Session = Depends(get_session)):
 
 @router.delete("/{pension_id}")
 def delete_pension(pension_id: str, db: Session = Depends(get_session)):
+    """Remove a pension from all snapshots and the active plan."""
     try:
         snapshots = db.exec(select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())).all()
         for snapshot in snapshots:

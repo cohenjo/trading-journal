@@ -84,6 +84,7 @@ def simulate_plan(request: SimulationRequest, db: Session = Depends(get_session)
 
 @router.get("/", response_model=List[Plan])
 def get_plans(db: Session = Depends(get_session)):
+    """List all financial plans ordered by last update."""
     statement = select(Plan).order_by(Plan.updated_at.desc())
     plans = db.exec(statement).all()
     return plans
@@ -101,6 +102,7 @@ def get_latest_plan(db: Session = Depends(get_session)):
 
 @router.get("/{plan_id}", response_model=Plan)
 def get_plan(plan_id: int, db: Session = Depends(get_session)):
+    """Get a specific financial plan by ID."""
     plan = db.get(Plan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
@@ -140,6 +142,7 @@ def update_plan(plan_id: int, plan_in: PlanData, db: Session = Depends(get_sessi
 
 @router.delete("/{plan_id}", response_model=bool)
 def delete_plan(plan_id: int, db: Session = Depends(get_session)):
+    """Delete a financial plan by ID."""
     plan = db.get(Plan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
