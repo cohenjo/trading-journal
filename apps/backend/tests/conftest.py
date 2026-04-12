@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 
 from app.dal.database import get_session
+from app.auth.dependencies import get_current_user
+from app.schema.user_models import User
 
 
 @pytest.fixture(name="engine")
@@ -50,26 +52,25 @@ def session_fixture(engine) -> Generator[Session, None, None]:
         yield session
 
 
+def _fake_current_user():
+    """Return a stub user for tests that bypass real auth."""
+    return User(id=1, username="testuser", hashed_password="x", is_active=True)
+
+
 @pytest.fixture(name="client")
 def client_fixture(session: Session) -> Generator[TestClient, None, None]:
     """Create a FastAPI TestClient with dependency overrides.
     
-    This fixture creates a synchronous test client that uses the test
-    database session instead of the production database.
-    
-    Args:
-        session: The test database session fixture
-        
-    Yields:
-        TestClient: FastAPI test client for API endpoint testing
+    Provides an authenticated test client by default — all protected
+    endpoints are accessible without a real JWT.
     """
-    # Import app here to avoid circular imports and instrumentation issues
     from main import app
     
     def get_session_override():
         return session
     
     app.dependency_overrides[get_session] = get_session_override
+    app.dependency_overrides[get_current_user] = _fake_current_user
     
     with TestClient(app) as client:
         yield client
@@ -77,26 +78,39 @@ def client_fixture(session: Session) -> Generator[TestClient, None, None]:
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(name="unauth_client")
+def unauth_client_fixture(session: Session) -> Generator[TestClient, None, None]:
+    """Create a FastAPI TestClient WITHOUT auth override.
+
+    Useful for testing that endpoints properly reject unauthenticated requests.
+    """
+    from main import app
+
+    def get_session_override():
+        return session
+
+    app.dependency_overrides[get_session] = get_session_override
+    # Do NOT override get_current_user — real auth is enforced
+
+    with TestClient(app) as client:
+        yield client
+
+    app.dependency_overrides.clear()
+
+
 @pytest.fixture(name="async_client")
 async def async_client_fixture(session: Session) -> Generator[AsyncClient, None, None]:
     """Create an async HTTPX client for testing async API endpoints.
     
-    This fixture creates an asynchronous test client that uses the test
-    database session and can handle async operations.
-    
-    Args:
-        session: The test database session fixture
-        
-    Yields:
-        AsyncClient: HTTPX async client for testing
+    Provides an authenticated async client by default.
     """
-    # Import app here to avoid circular imports and instrumentation issues
     from main import app
     
     def get_session_override():
         return session
     
     app.dependency_overrides[get_session] = get_session_override
+    app.dependency_overrides[get_current_user] = _fake_current_user
     
     async with AsyncClient(
         transport=ASGITransport(app=app),
