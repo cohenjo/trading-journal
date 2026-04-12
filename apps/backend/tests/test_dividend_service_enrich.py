@@ -129,8 +129,8 @@ class TestEnrichPositions:
         result = enrich_positions(positions, mock_db, target_currency="USD")
 
         # Total value = 2000, total income = 80
-        assert result["stats"].portfolio_yield == pytest.approx(0.04)
-        assert result["stats"].annual_income == pytest.approx(80.0)
+        assert float(result["stats"].portfolio_yield) == pytest.approx(0.04)
+        assert float(result["stats"].annual_income) == pytest.approx(80.0)
 
     @patch("app.services.dividend_service.get_market_data_batch")
     @patch("app.services.dividend_service.convert_currency")
@@ -169,7 +169,7 @@ class TestEnrichPositions:
         result = enrich_positions(positions, mock_db, target_currency="USD")
 
         # Only X(0.10) and Y(0.06) count: avg = 0.08
-        assert result["stats"].dgr_5y == pytest.approx(0.08)
+        assert float(result["stats"].dgr_5y) == pytest.approx(0.08)
 
 
 # ===================================================================

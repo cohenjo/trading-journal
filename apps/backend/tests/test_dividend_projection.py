@@ -140,7 +140,7 @@ class TestDividendProjectionCompounding:
         projected = [p for p in result.data if p.type == "projected"]
         assert len(projected) == 3
         expected = 1000.0 * (1.08 ** 3)
-        assert projected[-1].amount == pytest.approx(expected, rel=1e-6)
+        assert float(projected[-1].amount) == pytest.approx(expected, rel=1e-6)
 
     def test_zero_growth_rate(self):
         """With zero growth, only reinvest yield applies."""

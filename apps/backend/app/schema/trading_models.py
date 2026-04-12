@@ -1,6 +1,8 @@
 from enum import Enum
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
+from sqlalchemy import Column, Numeric
 from sqlmodel import SQLModel, Field
 
 class TradingAccountType(str, Enum):
@@ -37,8 +39,8 @@ class TradingAccountSummary(SQLModel, table=True):
     
     id: Optional[int] = Field(default=None, primary_key=True)
     account_config_id: Optional[int] = Field(default=None, foreign_key="trading_account_config.id")
-    net_liquidation: float
-    total_cash: float
+    net_liquidation: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    total_cash: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     currency: str = Field(default="USD")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
@@ -48,8 +50,8 @@ class TradingPosition(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     account_config_id: Optional[int] = Field(default=None, foreign_key="trading_account_config.id")
     symbol: str
-    amount: float
+    amount: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     sec_type: str
-    avg_cost: float
+    avg_cost: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     con_id: Optional[int] = Field(default=None) # Optional for non-IBKR
     timestamp: datetime = Field(default_factory=datetime.utcnow)

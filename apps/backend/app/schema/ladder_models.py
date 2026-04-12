@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import List, Literal, Optional
 
 
@@ -11,8 +12,8 @@ class LadderRung:
     year: int
     start_date: date
     end_date: date
-    target_amount: float
-    current_amount: float
+    target_amount: Decimal
+    current_amount: Decimal
 
 
 @dataclass
@@ -21,8 +22,8 @@ class LadderBond:
     ticker: Optional[str] | None
     issuer: str
     currency: str
-    face_value: float
-    coupon_rate: float
+    face_value: Decimal
+    coupon_rate: Decimal
     coupon_frequency: str
     maturity_date: date
     rung_id: str
@@ -33,7 +34,7 @@ class BondCashflow:
     id: str
     bond_id: str
     date: date
-    amount: float
+    amount: Decimal
     currency: str
     type: Literal["COUPON", "PRINCIPAL"]
     rung_id: str
@@ -42,14 +43,14 @@ class BondCashflow:
 @dataclass
 class IncomePoint:
     date: date
-    value: float
+    value: Decimal
 
 
 @dataclass
 class DistributionRow:
     id: str
     date: date
-    amount: float
+    amount: Decimal
     currency: str
     type: Literal["COUPON", "PRINCIPAL"]
     bond_id: str

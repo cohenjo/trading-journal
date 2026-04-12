@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
+from sqlalchemy import Column, Numeric
 from sqlmodel import Field, SQLModel
 
 
@@ -17,7 +19,7 @@ class InsurancePolicy(SQLModel, table=True):
     provider: str
     policy_number: Optional[str] = None
     sum_insured: str  # Free-text for display flexibility
-    monthly_premium: Optional[float] = None
+    monthly_premium: Optional[Decimal] = Field(default=None, sa_column=Column(Numeric(18, 6)))
     beneficiaries: Optional[str] = None
     expiry_date: Optional[str] = None  # ISO date string
     website: Optional[str] = None
