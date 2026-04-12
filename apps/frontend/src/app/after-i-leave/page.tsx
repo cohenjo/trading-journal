@@ -6,6 +6,31 @@ import CollapsibleSection from '@/components/AfterILeave/CollapsibleSection';
 import SummaryTable from '@/components/AfterILeave/SummaryTable';
 import { Lang, translations } from '@/components/AfterILeave/translations';
 
+interface InsurancePolicy {
+  id?: string;
+  type: string;
+  provider: string;
+  policy_number?: string;
+  sum_insured?: string;
+  monthly_premium?: number | null;
+  beneficiaries?: string;
+  expiry_date?: string;
+  website?: string;
+  notes?: string;
+  owner: string;
+}
+
+async function fetchInsurancePolicies(): Promise<InsurancePolicy[]> {
+  try {
+    const res = await fetch('/api/insurance');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.data || [];
+  } catch {
+    return [];
+  }
+}
+
 async function fetchFinanceData(): Promise<FinanceItem[]> {
   try {
     const res = await fetch('/api/finances/latest');
@@ -65,13 +90,15 @@ function DemoTag({ text }: { text?: string }) {
 export default function AfterILeavePage() {
   const contentRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<FinanceItem[]>([]);
+  const [insurancePolicies, setInsurancePolicies] = useState<InsurancePolicy[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [lang, setLang] = useState<Lang>('en');
 
   useEffect(() => {
-    fetchFinanceData().then((data) => {
-      setItems(data);
+    Promise.all([fetchFinanceData(), fetchInsurancePolicies()]).then(([financeData, policies]) => {
+      setItems(financeData);
+      setInsurancePolicies(policies);
       setLoading(false);
     });
   }, []);
@@ -225,7 +252,7 @@ export default function AfterILeavePage() {
             {loading ? (
               <div className="py-8 text-center text-slate-400">{t.summary.loading}</div>
             ) : (
-              <SummaryTable items={items} lang={lang} />
+              <SummaryTable items={items} insurancePolicies={insurancePolicies} lang={lang} />
             )}
           </CollapsibleSection>
 
@@ -316,58 +343,125 @@ export default function AfterILeavePage() {
           </CollapsibleSection>
 
           {/* 3c: Life Insurance */}
-          <CollapsibleSection
-            emoji="🛡️"
-            title={t.lifeInsurance.title}
-            subtitle={t.lifeInsurance.subtitle}
-          >
-            <DemoTag text={t.lifeInsurance.demoTag} />
-            <div className="space-y-3 text-sm mt-3">
-              <InfoRow label={t.lifeInsurance.labels.provider}>{t.lifeInsurance.provider}</InfoRow>
-              <InfoRow label={t.lifeInsurance.labels.sumInsured}>{t.lifeInsurance.sumInsured}</InfoRow>
-              <InfoRow label={t.lifeInsurance.labels.process}>
-                <ol className="list-decimal list-inside space-y-1.5 text-slate-300 pdf-light:text-gray-700">
-                  {t.lifeInsurance.processSteps.map((step, i) => (
-                    <li key={i}>{step}</li>
-                  ))}
-                </ol>
-              </InfoRow>
-              <InfoRow label={t.lifeInsurance.labels.website}>
-                <ExternalLink href="https://www.clalbit.co.il">www.clalbit.co.il</ExternalLink>
-              </InfoRow>
-              <div className="mt-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
-                <p className="text-amber-300 pdf-light:text-amber-700 text-sm">
-                  <strong>📝 {lang === 'he' ? 'הערה:' : 'Note:'}</strong> {t.lifeInsurance.note}
-                </p>
-              </div>
-            </div>
-          </CollapsibleSection>
+          {(() => {
+            const lifePolicies = insurancePolicies.filter((p) => p.type === 'Life');
+            const hasReal = lifePolicies.length > 0;
+            return (
+              <CollapsibleSection
+                emoji="🛡️"
+                title={t.lifeInsurance.title}
+                subtitle={t.lifeInsurance.subtitle}
+              >
+                {!hasReal && <DemoTag text={t.lifeInsurance.demoTag} />}
+                <div className="space-y-3 text-sm mt-3">
+                  {hasReal ? (
+                    lifePolicies.map((p) => (
+                      <div key={p.id} className="space-y-3 mb-4 last:mb-0">
+                        <InfoRow label={t.lifeInsurance.labels.provider}>{p.provider}</InfoRow>
+                        <InfoRow label={t.lifeInsurance.labels.sumInsured}>{p.sum_insured || '—'}</InfoRow>
+                        {p.policy_number && (
+                          <InfoRow label={lang === 'he' ? 'מספר פוליסה' : 'Policy #'}>{p.policy_number}</InfoRow>
+                        )}
+                        {p.beneficiaries && (
+                          <InfoRow label={lang === 'he' ? 'מוטבים' : 'Beneficiaries'}>{p.beneficiaries}</InfoRow>
+                        )}
+                        {p.website && (
+                          <InfoRow label={t.lifeInsurance.labels.website}>
+                            <ExternalLink href={p.website}>{p.website.replace(/^https?:\/\//, '')}</ExternalLink>
+                          </InfoRow>
+                        )}
+                        {p.notes && (
+                          <InfoRow label={lang === 'he' ? 'הערות' : 'Notes'}>{p.notes}</InfoRow>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <>
+                      <InfoRow label={t.lifeInsurance.labels.provider}>{t.lifeInsurance.provider}</InfoRow>
+                      <InfoRow label={t.lifeInsurance.labels.sumInsured}>{t.lifeInsurance.sumInsured}</InfoRow>
+                    </>
+                  )}
+                  <InfoRow label={t.lifeInsurance.labels.process}>
+                    <ol className="list-decimal list-inside space-y-1.5 text-slate-300 pdf-light:text-gray-700">
+                      {t.lifeInsurance.processSteps.map((step, i) => (
+                        <li key={i}>{step}</li>
+                      ))}
+                    </ol>
+                  </InfoRow>
+                  {!hasReal && (
+                    <>
+                      <InfoRow label={t.lifeInsurance.labels.website}>
+                        <ExternalLink href="https://www.clalbit.co.il">www.clalbit.co.il</ExternalLink>
+                      </InfoRow>
+                      <div className="mt-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                        <p className="text-amber-300 pdf-light:text-amber-700 text-sm">
+                          <strong>📝 {lang === 'he' ? 'הערה:' : 'Note:'}</strong> {t.lifeInsurance.note}
+                        </p>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </CollapsibleSection>
+            );
+          })()}
 
           {/* 3d: Mortgage Insurance */}
-          <CollapsibleSection
-            emoji="🏡"
-            title={t.mortgageInsurance.title}
-            subtitle={t.mortgageInsurance.subtitle}
-          >
-            <DemoTag text={t.mortgageInsurance.demoTag} />
-            <div className="space-y-3 text-sm mt-3">
-              <InfoRow label={t.mortgageInsurance.labels.provider}>{t.mortgageInsurance.provider}</InfoRow>
-              <InfoRow label={t.mortgageInsurance.labels.whatItCovers}>
-                {t.mortgageInsurance.whatItCovers}
-              </InfoRow>
-              <InfoRow label={t.mortgageInsurance.labels.process}>
-                {t.mortgageInsurance.process}
-              </InfoRow>
-              <InfoRow label={t.mortgageInsurance.labels.documents}>
-                {t.mortgageInsurance.documents}
-              </InfoRow>
-              <div className="mt-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
-                <p className="text-amber-300 pdf-light:text-amber-700 text-sm">
-                  <strong>📝 {lang === 'he' ? 'הערה:' : 'Note:'}</strong> {t.mortgageInsurance.note}
-                </p>
-              </div>
-            </div>
-          </CollapsibleSection>
+          {(() => {
+            const mortgagePolicies = insurancePolicies.filter((p) => p.type === 'Mortgage');
+            const hasReal = mortgagePolicies.length > 0;
+            return (
+              <CollapsibleSection
+                emoji="🏡"
+                title={t.mortgageInsurance.title}
+                subtitle={t.mortgageInsurance.subtitle}
+              >
+                {!hasReal && <DemoTag text={t.mortgageInsurance.demoTag} />}
+                <div className="space-y-3 text-sm mt-3">
+                  {hasReal ? (
+                    mortgagePolicies.map((p) => (
+                      <div key={p.id} className="space-y-3 mb-4 last:mb-0">
+                        <InfoRow label={t.mortgageInsurance.labels.provider}>{p.provider}</InfoRow>
+                        <InfoRow label={t.mortgageInsurance.labels.whatItCovers}>
+                          {p.sum_insured || t.mortgageInsurance.whatItCovers}
+                        </InfoRow>
+                        {p.policy_number && (
+                          <InfoRow label={lang === 'he' ? 'מספר פוליסה' : 'Policy #'}>{p.policy_number}</InfoRow>
+                        )}
+                        {p.website && (
+                          <InfoRow label={lang === 'he' ? 'אתר' : 'Website'}>
+                            <ExternalLink href={p.website}>{p.website.replace(/^https?:\/\//, '')}</ExternalLink>
+                          </InfoRow>
+                        )}
+                        {p.notes && (
+                          <InfoRow label={lang === 'he' ? 'הערות' : 'Notes'}>{p.notes}</InfoRow>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <>
+                      <InfoRow label={t.mortgageInsurance.labels.provider}>{t.mortgageInsurance.provider}</InfoRow>
+                      <InfoRow label={t.mortgageInsurance.labels.whatItCovers}>
+                        {t.mortgageInsurance.whatItCovers}
+                      </InfoRow>
+                    </>
+                  )}
+                  <InfoRow label={t.mortgageInsurance.labels.process}>
+                    {t.mortgageInsurance.process}
+                  </InfoRow>
+                  <InfoRow label={t.mortgageInsurance.labels.documents}>
+                    {t.mortgageInsurance.documents}
+                  </InfoRow>
+                  {!hasReal && (
+                    <div className="mt-3 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20">
+                      <p className="text-amber-300 pdf-light:text-amber-700 text-sm">
+                        <strong>📝 {lang === 'he' ? 'הערה:' : 'Note:'}</strong> {t.mortgageInsurance.note}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </CollapsibleSection>
+            );
+          })()}
 
           {/* 3e: Pension Funds */}
           <CollapsibleSection

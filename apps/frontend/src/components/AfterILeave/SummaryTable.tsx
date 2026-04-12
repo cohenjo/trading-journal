@@ -5,6 +5,15 @@ import { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
 import { formatCurrency } from '@/lib/currency';
 import { Lang, translations } from './translations';
 
+interface InsurancePolicyRow {
+  id?: string;
+  type: string;
+  provider: string;
+  sum_insured?: string;
+  owner: string;
+  notes?: string;
+}
+
 interface DemoInsuranceItem {
   name: string;
   institution: string;
@@ -23,6 +32,19 @@ function getDemoInsurance(lang: Lang): DemoInsuranceItem[] {
     { name: d.healthInsurance.name, institution: d.healthInsurance.institution, type: 'Health', value: '—', owner: 'Joint', notes: d.healthInsurance.notes, isDemo: true },
     { name: d.carInsurance.name, institution: d.carInsurance.institution, type: 'Vehicle', value: '—', owner: 'Joint', notes: d.carInsurance.notes, isDemo: true },
   ];
+}
+
+function mapInsurancePoliciesToRows(policies: InsurancePolicyRow[]): GroupedRow[] {
+  return policies.map((p) => ({
+    category: 'Insurance',
+    name: `${p.type} Insurance`,
+    institution: p.provider,
+    type: p.type,
+    value: p.sum_insured || '—',
+    owner: p.owner,
+    notes: p.notes || '',
+    isDemo: false,
+  }));
 }
 
 const CATEGORY_ORDER = ['Insurance', 'Pension', 'Savings', 'Investments', 'Assets', 'Liabilities'] as const;
@@ -65,13 +87,17 @@ function mapFinanceItems(items: FinanceItem[]): GroupedRow[] {
   });
 }
 
-export default function SummaryTable({ items, lang = 'en' }: { items: FinanceItem[]; lang?: Lang }) {
+export default function SummaryTable({ items, insurancePolicies = [], lang = 'en' }: { items: FinanceItem[]; insurancePolicies?: InsurancePolicyRow[]; lang?: Lang }) {
   const t = translations[lang].summary;
   const financeRows = mapFinanceItems(items);
-  const insuranceRows: GroupedRow[] = getDemoInsurance(lang).map((d) => ({
-    category: 'Insurance',
-    ...d,
-  }));
+
+  // Use real insurance data when available, fall back to demo
+  const insuranceRows: GroupedRow[] = insurancePolicies.length > 0
+    ? mapInsurancePoliciesToRows(insurancePolicies)
+    : getDemoInsurance(lang).map((d) => ({
+        category: 'Insurance',
+        ...d,
+      }));
 
   const allRows = [...insuranceRows, ...financeRows];
 

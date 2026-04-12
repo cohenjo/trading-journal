@@ -187,3 +187,5 @@ from .plan_models import Plan
 from .dividend_models import DividendPosition, DividendAccount, DividendTickerData
 # Import trading models for alembic registration
 from .trading_models import TradingAccountConfig
+# Import insurance models for alembic registration
+from .insurance_models import InsurancePolicy
