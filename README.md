@@ -1,5 +1,7 @@
 # Personal Options Trading Journal
 
+[![CI](https://github.com/cohenjo/trading-journal/actions/workflows/ci.yml/badge.svg)](https://github.com/cohenjo/trading-journal/actions/workflows/ci.yml)
+
 This project is a personal trading journal designed to help users track their options trades, analyze performance, and visualize their profit and loss over time.
 
 ## Getting Started
