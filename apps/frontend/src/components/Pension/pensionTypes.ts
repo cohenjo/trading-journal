@@ -63,3 +63,36 @@ export const getPensionFundName = (account: PensionAccount): string | null => {
 
 export const getPensionDisplayName = (account: PensionAccount): string =>
   account.display_name || getPensionProductName(account) || account.name;
+
+// --- Report History Types ---
+
+export type PensionReportFile = {
+  filename: string;
+  owner: string;
+  uploaded_at: string;
+  size_bytes: number;
+};
+
+export type PensionSnapshotAccount = {
+  id: string;
+  owner: string;
+  name: string;
+  value: number;
+  deposits: number;
+  earnings: number;
+  fees: number;
+  insurance_fees: number;
+};
+
+export type PensionSnapshotSummary = {
+  date: string;
+  total_value: number;
+  account_count: number;
+  accounts: PensionSnapshotAccount[];
+};
+
+export type PensionReportsResponse = {
+  status: string;
+  reports: PensionReportFile[];
+  snapshots: PensionSnapshotSummary[];
+};
