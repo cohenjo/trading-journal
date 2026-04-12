@@ -174,6 +174,13 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                                 Family
                             </div>
                             <Link
+                                href="/insurance"
+                                className="block px-6 py-3 text-base font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                onClick={() => setMenuOpen(false)}
+                            >
+                                🛡️ Insurance
+                            </Link>
+                            <Link
                                 href="/after-i-leave"
                                 className="block px-6 py-3 text-base font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                                 onClick={() => setMenuOpen(false)}
