@@ -1,9 +1,14 @@
+import json
+from decimal import Decimal
+
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.dal.database import create_db_and_tables
+from app.utils.decimal_encoder import decimal_default
 from app.api import (
     trades,
     day,
@@ -62,6 +67,20 @@ metrics.set_meter_provider(meter_provider)
 
 LoggingInstrumentor().instrument(set_logging_format=True)
 
+
+class DecimalSafeJSONResponse(JSONResponse):
+    """JSONResponse that serializes Decimal values as numbers (float)."""
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=None,
+            separators=(",", ":"),
+            default=decimal_default,
+        ).encode("utf-8")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("Creating tables..")
@@ -75,6 +94,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
+    default_response_class=DecimalSafeJSONResponse,
 )
 
 # Instrument FastAPI

@@ -1,7 +1,8 @@
 from datetime import datetime, date as date_type
+from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import BigInteger, Column
+from sqlalchemy import BigInteger, Column, Numeric
 from sqlmodel import Field, SQLModel
 
 
@@ -10,10 +11,10 @@ class ManualTrade(SQLModel, table=True):
     timestamp: datetime
     symbol: str
     side: str
-    size: float
-    entry_price: float
-    exit_price: float
-    pnl: float
+    size: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    entry_price: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    exit_price: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    pnl: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     notes: Optional[str] = None
 
 
@@ -23,7 +24,7 @@ class Trade(SQLModel, table=True):
     acctAlias: Optional[str] = None
     model: Optional[str] = None
     currency: str
-    fxRateToBase: float
+    fxRateToBase: Decimal = Field(sa_column=Column("fxRateToBase", Numeric(18, 6)))
     assetCategory: str
     subCategory: Optional[str] = None
     symbol: str
@@ -53,21 +54,21 @@ class Trade(SQLModel, table=True):
     settleDateTarget: Optional[date_type] = None
     transactionType: Optional[str] = None
     exchange: Optional[str] = None
-    quantity: float
-    tradePrice: float
-    tradeMoney: float
-    proceeds: float
-    taxes: float
-    ibCommission: float
+    quantity: Decimal = Field(sa_column=Column("quantity", Numeric(18, 6)))
+    tradePrice: Decimal = Field(sa_column=Column("tradePrice", Numeric(18, 6)))
+    tradeMoney: Decimal = Field(sa_column=Column("tradeMoney", Numeric(18, 6)))
+    proceeds: Decimal = Field(sa_column=Column("proceeds", Numeric(18, 6)))
+    taxes: Decimal = Field(sa_column=Column("taxes", Numeric(18, 6)))
+    ibCommission: Decimal = Field(sa_column=Column("ibCommission", Numeric(18, 6)))
     ibCommissionCurrency: Optional[str] = None
-    netCash: float
-    closePrice: float
+    netCash: Decimal = Field(sa_column=Column("netCash", Numeric(18, 6)))
+    closePrice: Decimal = Field(sa_column=Column("closePrice", Numeric(18, 6)))
     openCloseIndicator: Optional[str] = None
     notes: Optional[str] = None
-    cost: float
-    fifoPnlRealized: float
-    mtmPnl: float
-    origTradePrice: Optional[float] = None
+    cost: Decimal = Field(sa_column=Column("cost", Numeric(18, 6)))
+    fifoPnlRealized: Decimal = Field(sa_column=Column("fifoPnlRealized", Numeric(18, 6)))
+    mtmPnl: Decimal = Field(sa_column=Column("mtmPnl", Numeric(18, 6)))
+    origTradePrice: Optional[Decimal] = Field(default=None, sa_column=Column("origTradePrice", Numeric(18, 6)))
     origTradeDate: Optional[str] = None
     origTradeID: Optional[str] = None
     origOrderID: Optional[int] = Field(default=None, sa_column=Column(BigInteger))
@@ -90,28 +91,28 @@ class Trade(SQLModel, table=True):
     whenRealized: Optional[str] = None
     whenReopened: Optional[str] = None
     levelOfDetail: Optional[str] = None
-    changeInPrice: Optional[float] = None
-    changeInQuantity: Optional[float] = None
+    changeInPrice: Optional[Decimal] = Field(default=None, sa_column=Column("changeInPrice", Numeric(18, 6)))
+    changeInQuantity: Optional[Decimal] = Field(default=None, sa_column=Column("changeInQuantity", Numeric(18, 6)))
     orderType: Optional[str] = None
     traderID: Optional[str] = None
     isAPIOrder: Optional[str] = None
-    accruedInt: Optional[float] = None
+    accruedInt: Optional[Decimal] = Field(default=None, sa_column=Column("accruedInt", Numeric(18, 6)))
     initialInvestment: Optional[str] = None
     serialNumber: Optional[str] = None
     deliveryType: Optional[str] = None
     commodityType: Optional[str] = None
-    fineness: Optional[float] = None
-    weight: Optional[float] = None
+    fineness: Optional[Decimal] = Field(default=None, sa_column=Column("fineness", Numeric(18, 6)))
+    weight: Optional[Decimal] = Field(default=None, sa_column=Column("weight", Numeric(18, 6)))
 
 
 class DailySummary(SQLModel, table=True):
     date: date_type = Field(primary_key=True)
-    total_pnl: float
+    total_pnl: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     winning_trades: int
     losing_trades: int
-    win_rate: float
-    avg_win: float
-    avg_loss: float
+    win_rate: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    avg_win: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    avg_loss: Decimal = Field(sa_column=Column(Numeric(18, 6)))
 
 
 class Note(SQLModel, table=True):
@@ -121,28 +122,28 @@ class Note(SQLModel, table=True):
 
 class Ndx1m(SQLModel, table=True):
     timestamp: datetime = Field(primary_key=True)
-    open: float
-    high: float
-    low: float
-    close: float
+    open: Decimal = Field(sa_column=Column("open", Numeric(18, 6)))
+    high: Decimal = Field(sa_column=Column("high", Numeric(18, 6)))
+    low: Decimal = Field(sa_column=Column("low", Numeric(18, 6)))
+    close: Decimal = Field(sa_column=Column("close", Numeric(18, 6)))
     volume: int
 
 
 class Ndx1mChartData(SQLModel):
     time: float
-    open: float
-    high: float
-    low: float
-    close: float
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
 
 
 class DailyBar(SQLModel, table=True):
     symbol: str = Field(primary_key=True)
     date: date_type = Field(primary_key=True)
-    open: float
-    high: float
-    low: float
-    close: float
+    open: Decimal = Field(sa_column=Column("open", Numeric(18, 6)))
+    high: Decimal = Field(sa_column=Column("high", Numeric(18, 6)))
+    low: Decimal = Field(sa_column=Column("low", Numeric(18, 6)))
+    close: Decimal = Field(sa_column=Column("close", Numeric(18, 6)))
     volume: int
 
 
@@ -155,14 +156,14 @@ class Execution(SQLModel, table=True):
     acctNumber: str
     exchange: str
     side: str
-    shares: float
-    price: float
-    avgPrice: float
-    cumQty: float
+    shares: Decimal = Field(sa_column=Column("shares", Numeric(18, 6)))
+    price: Decimal = Field(sa_column=Column("price", Numeric(18, 6)))
+    avgPrice: Decimal = Field(sa_column=Column("avgPrice", Numeric(18, 6)))
+    cumQty: Decimal = Field(sa_column=Column("cumQty", Numeric(18, 6)))
     symbol: str
-    commission: float
+    commission: Decimal = Field(sa_column=Column("commission", Numeric(18, 6)))
     currency: str
-    realizedPNL: float | None = Field(default=None)
+    realizedPNL: Optional[Decimal] = Field(default=None, sa_column=Column("realizedPNL", Numeric(18, 6)))
 
 
 class MatchedTrade(SQLModel, table=True):
@@ -172,9 +173,9 @@ class MatchedTrade(SQLModel, table=True):
     open_date: datetime
     close_transaction_id: int = Field(sa_column=Column(BigInteger))
     close_date: datetime
-    open_price: float
-    close_price: float
-    pnl: float
+    open_price: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    close_price: Decimal = Field(sa_column=Column(Numeric(18, 6)))
+    pnl: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     notes: Optional[str] = None
 
 # Import backtest models to register them with SQLModel.metadata

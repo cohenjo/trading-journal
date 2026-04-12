@@ -115,7 +115,7 @@ class TestOptionsProjectionGrowth:
         projected = [p for p in result.data if p.type == "projected"]
         assert len(projected) == 3
         expected = 5000.0 * (1.10 ** 3)
-        assert projected[-1].amount == pytest.approx(expected, rel=1e-6)
+        assert float(projected[-1].amount) == pytest.approx(expected, rel=1e-6)
 
     def test_base_is_average_of_historical(self):
         """Base amount = average(2000, 4000, 6000) = 4000."""

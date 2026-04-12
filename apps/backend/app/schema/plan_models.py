@@ -1,4 +1,5 @@
 from datetime import datetime, date as date_type
+from decimal import Decimal
 from typing import List, Dict, Optional, Union
 from pydantic import BaseModel
 from sqlmodel import SQLModel, Field, Column, JSON
@@ -14,8 +15,8 @@ class PlanItem(BaseModel):
     currency: str = "ILS" # "USD", "ILS", "EUR"
     
     # Financials
-    value: float = 0.0 # Annual Amount or Current Value
-    growth_rate: float = 0.0 # Percentage
+    value: Decimal = Decimal("0") # Annual Amount or Current Value
+    growth_rate: Decimal = Decimal("0") # Percentage
     
     # Timing
     start_date: Optional[Union[date_type, str]] = None # specific date or "Today"
@@ -23,7 +24,7 @@ class PlanItem(BaseModel):
     frequency: str = "Yearly" # "Monthly", "Yearly", "OneTime"
     
     # New Fields matching Frontend types.ts
-    tax_rate: Optional[float] = 0.0
+    tax_rate: Optional[Decimal] = Decimal("0")
     start_condition: Optional[str] = None
     start_reference: Optional[str] = None
     end_condition: Optional[str] = None

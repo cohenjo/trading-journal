@@ -1,22 +1,23 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from pydantic import BaseModel
 
 
 class OptionsRecord(BaseModel):
     year: int
-    amount: float
+    amount: Decimal
 
 
 class OptionsProjectionParams(BaseModel):
-    growth_rate: float
+    growth_rate: Decimal
     cutoff_year: int
     final_year: int
 
 
 class OptionsProjectionPoint(BaseModel):
     year: int
-    amount: float
+    amount: Decimal
     type: str  # "historical" or "projected"
 
 
