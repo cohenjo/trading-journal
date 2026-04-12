@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 interface MacdData {
   macd_line: number;
@@ -37,6 +37,7 @@ interface UseTechnicalsResult {
   data: TechnicalsData | null;
   loading: boolean;
   error: string | null;
+  refetch: () => void;
 }
 
 export function useTechnicals(ticker: string): UseTechnicalsResult {
@@ -44,7 +45,7 @@ export function useTechnicals(ticker: string): UseTechnicalsResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     if (!ticker) return;
 
     setLoading(true);
@@ -65,5 +66,9 @@ export function useTechnicals(ticker: string): UseTechnicalsResult {
       });
   }, [ticker]);
 
-  return { data, loading, error };
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export interface OHLCVBar {
   time: string;
@@ -15,6 +15,7 @@ interface UsePriceHistoryResult {
   data: OHLCVBar[];
   loading: boolean;
   error: string | null;
+  refetch: () => void;
 }
 
 export function usePriceHistory(ticker: string): UsePriceHistoryResult {
@@ -22,7 +23,7 @@ export function usePriceHistory(ticker: string): UsePriceHistoryResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     if (!ticker) return;
 
     setLoading(true);
@@ -43,5 +44,9 @@ export function usePriceHistory(ticker: string): UsePriceHistoryResult {
       });
   }, [ticker]);
 
-  return { data, loading, error };
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData };
 }
