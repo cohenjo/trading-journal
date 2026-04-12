@@ -1,6 +1,5 @@
-from datetime import date
 from decimal import Decimal
-from typing import List, Dict, Union, Optional, Any
+from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
 from sqlalchemy import Column, Numeric
 from sqlmodel import SQLModel, Field, Column as SMColumn, JSON
@@ -8,13 +7,6 @@ from datetime import date as date_type
 
 # --- Pydantic Schemas for JSON Validation ---
 
-class FinanceItem(BaseModel):
-    id: str
-    category: str # 'Savings', 'Investments', 'Assets', 'Liabilities'
-    name: str
-    value: Decimal
-    type: str
-    owner: str
 class FinanceItem(BaseModel):
     id: str
     category: str # 'Savings', 'Investments', 'Assets', 'Liabilities'

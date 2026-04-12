@@ -31,7 +31,7 @@ def match_trades(trades: list[Trade]) -> list[MatchedTrade]:
     Matches opening and closing trades from a list of trades.
     """
     matched_trades = []
-    unmatched_opens = {}
+    unmatched_opens = {}  # noqa: F841 — TODO: implement unmatched tracking
 
     # Separate trades by symbol
     trades_by_symbol = {}

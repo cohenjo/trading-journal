@@ -2,9 +2,8 @@ from typing import List, Dict, Any, Optional, Union
 from sqlmodel import Session
 from datetime import datetime
 from pydantic import BaseModel
-from app.schema.plan_models import PlanData, PlanItem
 from app.schema.finance_models import FinanceSnapshot
-from app.services.plan_components import MilestoneManager, AccountManager, RealAssetManager, PlanInterfaces
+from app.services.plan_components import MilestoneManager, AccountManager, RealAssetManager
 
 class ProjectionPoint(BaseModel):
     year: int

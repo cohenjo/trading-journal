@@ -2,10 +2,9 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session, select
 from pydantic import BaseModel
-from datetime import date
 
 from app.dal.database import get_session
-from app.schema.dividend_models import DividendAccount, DividendPosition, DividendPositionCreate
+from app.schema.dividend_models import DividendAccount, DividendPosition
 from app.schema.finance_models import FinanceSnapshot
 
 router = APIRouter(prefix="/api/dividends/accounts", tags=["Dividend Accounts"])

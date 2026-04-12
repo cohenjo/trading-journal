@@ -6,8 +6,6 @@ from app.dal.database import get_session
 from app.schema.dividend_models import (
     DividendPosition,
     DividendPositionCreate,
-    DividendPositionStats,
-    DividendDashboardStats,
     DividendRecord, # Legacy
     DividendProjectionParams, # Legacy
     DividendProjectionResponse # Legacy

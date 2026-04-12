@@ -1,11 +1,10 @@
 import logging
-from datetime import date, datetime
-from typing import List, Dict, Any
+from datetime import date
+from typing import Dict, Any
 from sqlmodel import Session, select, func
 
 from app.dal.database import engine as db_engine
 from app.schema.models import DailyBar
-from app.schema.backtest_models import BacktestRun, BacktestTrade
 from app.services.data_ingestion import MarketDataSync
 from app.services.backtester.engine import BacktestEngine
 from app.services.backtester.strategy import TaxCondorStrategy

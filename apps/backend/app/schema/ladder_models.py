@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import List, Literal, Optional
+from typing import Literal, Optional
 
 
 @dataclass

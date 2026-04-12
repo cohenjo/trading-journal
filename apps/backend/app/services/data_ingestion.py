@@ -1,10 +1,10 @@
 import asyncio
 import logging
 from datetime import date, datetime, timedelta
-from typing import List, Optional
+from typing import Optional
 from dateutil.relativedelta import relativedelta
 
-from ib_async import IB, Contract, BarDataList
+from ib_async import IB, Contract
 from sqlmodel import Session, select
 
 from app.dal.database import engine

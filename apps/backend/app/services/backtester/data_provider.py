@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from datetime import date, datetime, timedelta
-from typing import List, Optional, Dict, Set
-from sqlmodel import Session, select
+from datetime import date, timedelta
+from typing import List, Optional, Dict
+from sqlmodel import Session
 from app.dal.database import engine
 from app.schema.models import DailyBar
 from app.services.tax_condor_tool.core.pricer import BlackScholesPricer

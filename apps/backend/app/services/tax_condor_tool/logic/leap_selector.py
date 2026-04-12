@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import Optional
 from datetime import date
-from ..models import OptionLeg, GreekVector
+from ..models import OptionLeg
 from ..interfaces import MarketDataProvider
 
 class LeapSelector:

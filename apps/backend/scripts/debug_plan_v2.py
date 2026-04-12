@@ -1,6 +1,5 @@
 
 from app.services.plan_service import PlanService
-import json
 
 # Mock Data
 plan_data = {

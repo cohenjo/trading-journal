@@ -1,7 +1,6 @@
-import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from ib_async import IB, Stock, Option, Index, Bond, Contract
+from ib_async import IB
 from app.schema.trading_models import TradingAccountConfig, TradingAccountSummary, TradingPosition
 from sqlmodel import Session, select, delete
 import logging
@@ -247,7 +246,6 @@ class TradingService:
         """
         Implements Schwab sync using schwab-py.
         """
-        import schwab
         from schwab.auth import client_from_token_file
         
         try:

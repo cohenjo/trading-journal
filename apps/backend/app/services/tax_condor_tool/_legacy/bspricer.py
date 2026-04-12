@@ -1,5 +1,4 @@
-import numpy as np
-from math import log, sqrt, exp
+from math import log, sqrt
 from scipy.stats import norm
 
 class BlackScholesPricer:
@@ -18,13 +17,10 @@ class BlackScholesPricer:
         
 
 
-from scipy.stats import norm
-import numpy as np
-from math import log, sqrt
 
 def bs_greeks(S, K, T, vol, is_call):
     d1 = (log(S / K) + 0.5 * vol**2 * T) / (vol * sqrt(T))
-    d2 = d1 - vol * sqrt(T)
+    _d2 = d1 - vol * sqrt(T)  # noqa: F841
 
     delta = norm.cdf(d1) if is_call else norm.cdf(d1) - 1
     theta = (

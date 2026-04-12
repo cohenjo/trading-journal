@@ -1,4 +1,3 @@
-from typing import List
 from datetime import date
 from ..models import OptionLeg, IronCondorStructure, GreekVector, PnLSimulation
 from ..core.pricer import BlackScholesPricer

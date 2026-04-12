@@ -19,7 +19,6 @@ from app.utils.bond_cashflows import (
     generate_all_cashflows,
 )
 from app.data.bonds_types import BondHolding
-from app.schema.ladder_models import BondCashflow
 
 
 class TestFrequencyPerYear:

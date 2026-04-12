@@ -2,8 +2,7 @@ import sys
 import os
 sys.path.append(os.getcwd())
 
-from sqlmodel import Session, select, create_engine
-from app.dal.database import get_session
+from sqlmodel import Session, select
 from app.schema.finance_models import FinanceSnapshot
 from datetime import date
 
@@ -32,7 +31,7 @@ def test_read():
         import traceback
         traceback.print_exc()
 
-from app.schema.finance_models import FinanceSnapshot, SnapshotData, FinanceItem
+from app.schema.finance_models import SnapshotData, FinanceItem
 
 def test_controller_logic():
     print("Testing Controller Logic...")

@@ -11,10 +11,9 @@ Tests cover:
 """
 
 from datetime import datetime, date
-import pytest
 
-from app.utils.trade_matcher import match_trades, get_trades_by_date
-from app.schema.models import Trade, MatchedTrade
+from app.utils.trade_matcher import match_trades
+from app.schema.models import Trade
 
 
 class TestMatchTrades:

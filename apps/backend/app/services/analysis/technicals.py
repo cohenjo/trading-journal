@@ -7,7 +7,7 @@ numpy is used only for standard-deviation in Bollinger Bands.
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 from pydantic import BaseModel
 import numpy as np
 

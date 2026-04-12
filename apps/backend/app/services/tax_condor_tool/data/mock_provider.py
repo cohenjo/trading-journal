@@ -1,6 +1,5 @@
 from typing import List
 from datetime import date, timedelta
-import random
 from ..interfaces import MarketDataProvider
 from ..models import OptionLeg, GreekVector
 from ..core.pricer import BlackScholesPricer
