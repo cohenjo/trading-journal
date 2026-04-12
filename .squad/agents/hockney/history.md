@@ -282,3 +282,29 @@ Added `migrate_pensions_to_savings()` to `apps/backend/app/api/pension.py` — a
 - `apps/backend/tests/test_pension_api.py` — migration tests
 
 📌 Team update (2026-04-10T08:19:59Z): Testing Sprint Phase 1-3 Complete — Phase 2 backend review completed: 62 endpoints identified (not 55), coverage 16% confirmed, depth-over-breadth strategy approved. Phase 3 implementation: 57 new tests delivered (conftest.py, test_currency 18 tests, test_bond_cashflows 21 tests, test_trade_matcher 18 tests). Backend tests increased 95 → 152 (+60%). Financial core testing bulletproof: currency, bonds, trades at 100% coverage. Branch squad/testing-backend-financial-core ready for merge. Orchestration, session logs, decisions merged. — Scribe (Team Orchestration)
+
+### 2025-07-22: Insurance Policies API (Issue #18)
+
+**What was built:**
+Full CRUD API for insurance policies at `/api/insurance` — list (with optional `?owner=` filter), create, update, delete.
+
+**Files created:**
+- `apps/backend/app/schema/insurance_models.py` — `InsurancePolicy` SQLModel with UUID PK, owner, type, provider, sum_insured, and optional fields (policy_number, monthly_premium, beneficiaries, expiry_date, website, notes, timestamps)
+- `apps/backend/app/api/insurance.py` — Router with Pydantic request models (`InsurancePolicyCreate`, `InsurancePolicyUpdate`), field validation for type/owner enums, `{status: "success", data: ...}` envelope
+- `apps/backend/alembic/versions/acadd4bc6806_add_insurance_policies_table.py` — Migration creating `insurance_policies` table
+
+**Files modified:**
+- `apps/backend/app/schema/models.py` — Added import for Alembic metadata registration
+- `apps/backend/main.py` — Registered insurance router
+
+**Design decisions:**
+- Used UUID string PK (not auto-increment int) — better for client-side generation and API references
+- `sum_insured` is string, not float — allows free-text like "₪2,000,000" or "Covers remaining mortgage"
+- `monthly_premium` is float (nullable) — straightforward numeric for calculations
+- `expiry_date` is string (nullable) — ISO date format, keeps model simple without date parsing complexity
+- Owner values match pension pattern: "You" or "Partner"
+- Type enum: life, mortgage, health, disability, other — validated server-side
+- Simpler than pension API (no snapshots, no file upload) — straightforward CRUD
+
+**Branch:** `squad/18-insurance-policies-api`
+**Tests:** 114 existing tests pass (1 pre-existing failure needs Postgres)
