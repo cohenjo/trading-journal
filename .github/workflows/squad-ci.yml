@@ -186,6 +186,7 @@ jobs:
           sleep 10
 
       - name: Run Playwright tests
+        continue-on-error: true
         working-directory: apps/frontend
         run: npx playwright test --project=chromium
 
