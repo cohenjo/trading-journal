@@ -680,6 +680,75 @@ async def upload_pension_report(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/reports")
+def list_pension_reports(db: Session = Depends(get_session)):
+    """Return a list of uploaded pension report files with metadata and snapshot totals."""
+    try:
+        root_dir = Path(__file__).parent.parent.parent.parent.parent
+        reports_root = root_dir / "reports"
+        report_files: list[dict[str, Any]] = []
+
+        for owner_dir in sorted(reports_root.iterdir()) if reports_root.exists() else []:
+            if not owner_dir.is_dir() or owner_dir.name.startswith("."):
+                continue
+            owner = owner_dir.name
+            for pdf in sorted(owner_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True):
+                stat = pdf.stat()
+                report_files.append({
+                    "filename": pdf.name,
+                    "owner": owner,
+                    "uploaded_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "size_bytes": stat.st_size,
+                })
+
+        # Compute per-snapshot pension totals for delta comparison
+        snapshots = db.exec(
+            select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())
+        ).all()
+
+        snapshot_totals: list[dict[str, Any]] = []
+        for snapshot in snapshots:
+            pension_items = [
+                item for item in snapshot.data.get("items", [])
+                if item.get("type") == "Pension"
+            ]
+            if not pension_items:
+                continue
+            total_value = sum(_safe_float(item.get("value")) for item in pension_items)
+            accounts = []
+            for item in pension_items:
+                details = item.get("details") or {}
+                accounts.append({
+                    "id": get_pension_identity(item) or item.get("id", ""),
+                    "owner": _safe_text(item.get("owner")) or "Unknown",
+                    "name": _safe_text(details.get("pension_display_name"))
+                    or _safe_text(item.get("name"))
+                    or "Unknown",
+                    "value": _safe_float(item.get("value")),
+                    "deposits": _safe_float(details.get("deposits")),
+                    "earnings": _safe_float(details.get("earnings")),
+                    "fees": _safe_float(details.get("fees")),
+                    "insurance_fees": _safe_float(details.get("insurance_fees")),
+                })
+            snapshot_totals.append({
+                "date": snapshot.date.isoformat(),
+                "total_value": total_value,
+                "account_count": len(pension_items),
+                "accounts": accounts,
+            })
+
+        return {
+            "status": "success",
+            "reports": report_files,
+            "snapshots": snapshot_totals,
+        }
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/dashboard")
 def get_pension_dashboard(db: Session = Depends(get_session)):
     """Return aggregated pension dashboard with history and plan data."""

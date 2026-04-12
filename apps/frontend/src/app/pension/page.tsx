@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PensionChart from '@/components/Pension/PensionChart';
 import PensionTable from '@/components/Pension/PensionTable';
+import ReportHistory from '@/components/Pension/ReportHistory';
+import SnapshotDetail from '@/components/Pension/SnapshotDetail';
+import type { PensionSnapshotSummary } from '@/components/Pension/pensionTypes';
 
 interface PensionUploadResponse {
     status: string;
@@ -18,6 +21,10 @@ export default function PensionPage() {
     const [result, setResult] = useState<PensionUploadResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [dashboardData, setDashboardData] = useState<any>(null);
+    const [selectedSnapshot, setSelectedSnapshot] = useState<PensionSnapshotSummary | null>(null);
+    const [previousSnapshot, setPreviousSnapshot] = useState<PensionSnapshotSummary | null>(null);
+    const [allSnapshots, setAllSnapshots] = useState<PensionSnapshotSummary[]>([]);
+    const [refreshKey, setRefreshKey] = useState(0);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -38,6 +45,28 @@ export default function PensionPage() {
     useEffect(() => {
         fetchDashboard();
     }, []);
+
+    const handleSelectSnapshot = useCallback((snapshot: PensionSnapshotSummary | null) => {
+        setSelectedSnapshot(snapshot);
+        if (snapshot && allSnapshots.length > 0) {
+            const idx = allSnapshots.findIndex((s) => s.date === snapshot.date);
+            setPreviousSnapshot(idx > 0 ? allSnapshots[idx - 1] : null);
+        } else {
+            setPreviousSnapshot(null);
+        }
+    }, [allSnapshots]);
+
+    // Keep allSnapshots in sync by fetching from reports endpoint
+    useEffect(() => {
+        fetch('/api/pension/reports')
+            .then((res) => res.ok ? res.json() : null)
+            .then((json) => {
+                if (json?.snapshots) {
+                    setAllSnapshots(json.snapshots);
+                }
+            })
+            .catch(() => {});
+    }, [refreshKey]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -87,8 +116,9 @@ export default function PensionPage() {
             const data = await response.json();
             setResult(data);
 
-            // Refresh dashboard after successful upload
+            // Refresh dashboard and report history after successful upload
             await fetchDashboard();
+            setRefreshKey((k) => k + 1);
         } catch (err: unknown) {
             console.error(err);
             if (err instanceof Error) {
@@ -144,7 +174,26 @@ export default function PensionPage() {
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Historical Snapshot Detail */}
+                {selectedSnapshot && (
+                    <SnapshotDetail
+                        snapshot={selectedSnapshot}
+                        previousSnapshot={previousSnapshot}
+                        onClose={() => handleSelectSnapshot(null)}
+                    />
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Report History Panel */}
+                    <div className="lg:col-span-1 lg:order-last">
+                        <ReportHistory
+                            onSelectSnapshot={handleSelectSnapshot}
+                            selectedDate={selectedSnapshot?.date ?? null}
+                            refreshKey={refreshKey}
+                        />
+                    </div>
+
+                    <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-8">
                     {/* Upload Form */}
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
                         <h2 className="text-xl font-semibold mb-4 text-white">Upload Report</h2>
@@ -342,6 +391,7 @@ export default function PensionPage() {
                                 </div>
                             </div>
                         )}
+                    </div>
                     </div>
                 </div>
             </div>
