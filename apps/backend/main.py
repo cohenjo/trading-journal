@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.dal.database import create_db_and_tables
 from app.api import (
     trades,
@@ -86,6 +87,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 @app.get("/")
 def read_root():
