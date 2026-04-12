@@ -1,8 +1,6 @@
 """Tests for authentication endpoints and JWT protection."""
 
-import pytest
 from app.auth.security import hash_password, verify_password, create_access_token, verify_token
-from app.schema.user_models import User
 
 
 # ---------------------------------------------------------------------------

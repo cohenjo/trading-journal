@@ -1,7 +1,6 @@
 import json
-from decimal import Decimal
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 import uvicorn
 from contextlib import asynccontextmanager

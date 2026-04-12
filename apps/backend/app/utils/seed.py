@@ -9,8 +9,8 @@ from sqlmodel import Session
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 
-from app.dal.database import engine, create_db_and_tables
-from app.schema.models import DailySummary, Trade, Note
+from app.dal.database import engine
+from app.schema.models import DailySummary
 
 
 def populate_sample_data():

@@ -1,5 +1,4 @@
 
-import pytest
 from app.services.plan_service import PlanService
 
 def test_granular_withdrawal_details():

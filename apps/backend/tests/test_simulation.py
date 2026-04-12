@@ -1,6 +1,5 @@
 
 from fastapi.testclient import TestClient
-from app.services.plan_service import PlanService
 from app.auth.dependencies import get_current_user
 from app.schema.user_models import User
 from main import app

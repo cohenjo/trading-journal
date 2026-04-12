@@ -1,5 +1,4 @@
 import numpy as np
-from numpy.linalg import lstsq
 
 class LeapICHedge:
     """

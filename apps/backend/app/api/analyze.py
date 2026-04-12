@@ -546,9 +546,9 @@ async def get_synthesis(ticker: str):
 
     name = info.get("longName", info.get("shortName", ticker))
     sector = info.get("sector", "Unknown")
-    market_cap = _safe_float(info.get("marketCap"))
+    _market_cap = _safe_float(info.get("marketCap"))  # noqa: F841 — reserved for future use
     forward_pe = _safe_float(info.get("forwardPE"))
-    trailing_pe = _safe_float(info.get("trailingPE"))
+    _trailing_pe = _safe_float(info.get("trailingPE"))  # noqa: F841 — reserved for future use
     revenue_growth = _safe_float(info.get("revenueGrowth"))
     earnings_growth = _safe_float(info.get("earningsGrowth"))
     profit_margins = _safe_float(info.get("profitMargins"))

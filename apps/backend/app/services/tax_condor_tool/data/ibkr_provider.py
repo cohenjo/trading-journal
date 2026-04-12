@@ -1,7 +1,6 @@
-import asyncio
 import math
 from datetime import datetime, date
-from typing import List, Optional, Set
+from typing import List
 import logging
 
 from ib_async import IB, Index, Option, Contract, Stock
@@ -92,7 +91,7 @@ class IBKRDataProvider(MarketDataProvider):
             logger.warning("Spot price is 0, cannot filter strikes.")
             return []
 
-        logger.info(f"Requesting opt params for chain generation...")
+        logger.info("Requesting opt params for chain generation...")
         chains = await self.ib.reqSecDefOptParamsAsync(
             contract.symbol, '', contract.secType, contract.conId
         )

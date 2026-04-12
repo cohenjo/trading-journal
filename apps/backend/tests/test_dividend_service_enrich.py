@@ -17,7 +17,6 @@ from app.services.dividend_service import (
 from app.schema.dividend_models import (
     DividendPosition,
     DividendTickerData,
-    DividendDashboardStats,
 )
 
 

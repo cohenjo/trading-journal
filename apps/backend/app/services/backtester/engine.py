@@ -1,10 +1,9 @@
 import logging
 from datetime import date, datetime, timedelta
-from typing import List
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.dal.database import engine as db_engine
-from app.schema.backtest_models import HistoricalOptionBar, BacktestRun, BacktestTrade
+from app.schema.backtest_models import BacktestRun, BacktestTrade
 from .portfolio import Portfolio
 from .strategy import Strategy
 from .data_provider import SyntheticDataProvider

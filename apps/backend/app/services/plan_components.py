@@ -1,6 +1,6 @@
-from typing import List, Dict, Any, Optional, Union, Set
+from typing import List, Dict, Any, Optional, Set
 from sqlmodel import Session
-from datetime import datetime, date
+from datetime import datetime
 
 class PlanInterfaces:
     @staticmethod
@@ -237,7 +237,7 @@ class AccountManager:
                                         snapshot_settings["dividend_mode"] = "Fixed"
                                         # Log it for transparency
                                         # print(f"DEBUG: Dashboard Fallback for {div_acc.name}: {div_amount} {f_item.get('currency')}")
-                        except Exception as e:
+                        except Exception:
                             # Silent failure for fallback, just log it
                             pass
 

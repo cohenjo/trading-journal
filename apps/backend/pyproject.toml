@@ -50,6 +50,28 @@ dev-dependencies = [
     "pytest>=9.0.2",
     "httpx>=0.28.1",
     "pytest-asyncio>=1.3.0",
+    "ruff>=0.15.10",
+    "mypy>=1.20.0",
+    "pytest-cov>=7.1.0",
 ]
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# Ignore pre-existing issues that are safe to suppress
+ignore = [
+    "E701",   # Multiple statements on one line (colon) — common in type stubs
+    "E702",   # Multiple statements on one line (semicolon)
+    "E722",   # Do not use bare 'except' — pre-existing patterns
+    "E741",   # Ambiguous variable name
+    "F821",   # Undefined name — forward references in type annotations
+    "F823",   # Local variable referenced before assignment
+]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/*" = ["E402"]     # Module-level imports not at top — alembic convention
+"scripts/*" = ["E402"]     # Scripts with sys.path manipulation
+"tests/*" = ["F841"]       # Unused variables in tests — common for fixtures
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

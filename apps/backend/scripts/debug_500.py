@@ -1,7 +1,6 @@
 
 import sys
 import os
-import json
 import traceback
 
 # Add backend to path
@@ -9,7 +8,6 @@ sys.path.append(os.getcwd())
 
 from app.services.plan_service import PlanService
 
-from app.schema.finance_models import FinanceSnapshot
 from app.api.plans import SimulationRequest
 
 fallback_finances_dict = { 

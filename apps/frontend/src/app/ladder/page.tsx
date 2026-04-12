@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Ladder } from "@/components/Ladder/Ladder";
 import { ExpectedIncomeChart } from "@/components/Ladder/ExpectedIncomeChart";
 import type { RungData, IncomePoint, DistributionRow, Bond } from "@/components/Ladder/types";
 
-export default function LadderPage() {
+export default function LadderPageWrapper() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <LadderPage />
+    </Suspense>
+  );
+}
+
+function LadderPage() {
   const [rungs, setRungs] = useState<RungData[]>([]);
   const [incomeSeries, setIncomeSeries] = useState<IncomePoint[]>([]);
   const [distributions, setDistributions] = useState<DistributionRow[]>([]);

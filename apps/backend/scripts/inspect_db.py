@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, inspect
 from app.dal.database import DATABASE_URL
-import os
 
 # Ensure we are in the right directory or have the right path context
 # Assuming run from apps/backend

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session, select
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 from app.dal.database import get_session
 from app.schema.trading_models import TradingAccountConfig, TradingAccountSummary, TradingPosition
 from app.services.trading_service import trading_service

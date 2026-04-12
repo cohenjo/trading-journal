@@ -1,6 +1,5 @@
 import math
 from scipy.stats import norm
-from datetime import date
 
 class BlackScholesPricer:
     @staticmethod

@@ -1,12 +1,11 @@
 import asyncio
-from datetime import datetime, timedelta
 import sys
 import os
 from dotenv import load_dotenv
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 from ib_async import IB, ExecutionFilter
-from sqlmodel import Session, select
+from sqlmodel import Session
 from app.dal.database import engine
 from app.schema.models import Execution
 

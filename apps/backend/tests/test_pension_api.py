@@ -4,7 +4,6 @@ from sqlmodel import SQLModel, Session, create_engine, select
 
 import copy
 
-from sqlalchemy.orm.attributes import flag_modified
 
 from app.api.pension import (
     _safe_float,
@@ -534,8 +533,7 @@ def test_two_reports_same_owner_different_products() -> None:
     assert len(dashboard["accounts"]) == 2
 
 
-def test_upload_propagates_to_latest_snapshot() -> None:
-    """Bug 1: uploading a report for an older date must also upsert into the latest snapshot."""
+def test_upload_propagates_to_latest_snapshot_via_extract() -> None:
     report_date = date(2025, 9, 30)
     later_date = date(2025, 12, 31)
 

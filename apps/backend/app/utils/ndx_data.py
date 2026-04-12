@@ -2,7 +2,7 @@ import yfinance as yf
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from sqlmodel import Session, delete, select
+from sqlmodel import Session, select
 from app.dal.database import engine
 from app.schema.models import Ndx1m
 from datetime import datetime, timedelta

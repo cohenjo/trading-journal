@@ -10,7 +10,6 @@ Tests cover:
 - Currency normalization logic
 """
 
-import pytest
 from app.utils.currency import convert_currency, normalize_currency, RATES
 
 

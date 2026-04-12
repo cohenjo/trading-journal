@@ -1,6 +1,6 @@
 import os
 from urllib.parse import quote_plus
-from sqlmodel import SQLModel, create_engine, Session
+from sqlmodel import create_engine, Session
 
 
 def _normalize_database_url(raw_url: str) -> str:

@@ -1,6 +1,6 @@
 from typing import List
 from datetime import date
-from ..models import IronCondorStructure, OptionLeg
+from ..models import IronCondorStructure
 from ..core.structures import StructureFactory
 from ..interfaces import MarketDataProvider
 

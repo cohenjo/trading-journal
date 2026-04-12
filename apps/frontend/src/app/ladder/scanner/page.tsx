@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
 type BondCandidate = {
@@ -197,4 +197,12 @@ const ScannerPage: React.FC = () => {
   );
 };
 
-export default ScannerPage;
+function ScannerPageWrapper() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <ScannerPage />
+    </Suspense>
+  );
+}
+
+export default ScannerPageWrapper;

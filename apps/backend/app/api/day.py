@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select, or_
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from typing import Optional
 from app.dal.database import get_session
 from app.schema.models import Trade, DailySummary, Note, MatchedTrade, date_type, SQLModel, DailyBar

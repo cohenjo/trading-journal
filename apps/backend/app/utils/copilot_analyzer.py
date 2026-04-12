@@ -1,9 +1,7 @@
-import asyncio
 import os
 import json
 from copilot import CopilotClient
 from copilot.tools import define_tool
-from copilot.generated.session_events import SessionEventType
 from pydantic import BaseModel, Field
 import pdfplumber
 from typing import Dict, Any
