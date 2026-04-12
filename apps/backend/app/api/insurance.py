@@ -64,6 +64,7 @@ def list_policies(
     owner: Optional[str] = None,
     db: Session = Depends(get_session),
 ):
+    """List all insurance policies, optionally filtered by owner."""
     statement = select(InsurancePolicy)
     if owner:
         statement = statement.where(InsurancePolicy.owner == owner)
@@ -77,6 +78,7 @@ def create_policy(
     body: InsurancePolicyCreate,
     db: Session = Depends(get_session),
 ):
+    """Create a new insurance policy."""
     _validate_policy_fields(body.model_dump())
     policy = InsurancePolicy(**body.model_dump())
     db.add(policy)
@@ -92,6 +94,7 @@ def update_policy(
     body: InsurancePolicyUpdate,
     db: Session = Depends(get_session),
 ):
+    """Update fields of an existing insurance policy."""
     policy = db.get(InsurancePolicy, policy_id)
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
@@ -115,6 +118,7 @@ def delete_policy(
     policy_id: str,
     db: Session = Depends(get_session),
 ):
+    """Delete an insurance policy by ID."""
     policy = db.get(InsurancePolicy, policy_id)
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")

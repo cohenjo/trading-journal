@@ -42,10 +42,12 @@ def get_dividend_dashboard(
 
 @router.post("/dividends/position", response_model=DividendPosition)
 def create_dividend_position(position: DividendPositionCreate, db: Session = Depends(get_session)):
+    """Create a new dividend position."""
     return dividend_service.create_position(db, position)
 
 @router.put("/dividends/position/{position_id}", response_model=DividendPosition)
 def update_dividend_position(position_id: int, position: DividendPositionCreate, db: Session = Depends(get_session)):
+    """Update an existing dividend position."""
     updated = dividend_service.update_position(db, position_id, position)
     if not updated:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -53,6 +55,7 @@ def update_dividend_position(position_id: int, position: DividendPositionCreate,
 
 @router.delete("/dividends/position/{position_id}", response_model=bool)
 def delete_dividend_position(position_id: int, db: Session = Depends(get_session)):
+    """Delete a dividend position by ID."""
     success = dividend_service.delete_position(db, position_id)
     if not success:
         raise HTTPException(status_code=404, detail="Position not found")
@@ -62,17 +65,20 @@ def delete_dividend_position(position_id: int, db: Session = Depends(get_session
 
 @router.get("/dividends", response_model=List[DividendRecord])
 def get_dividends():
+    """Return all legacy dividend records."""
     return load_dividends()
 
 
 @router.post("/dividends", response_model=List[DividendRecord])
 def update_dividends(records: List[DividendRecord]):
+    """Replace all legacy dividend records."""
     save_dividends(records)
     return records
 
 
 @router.post("/dividends/projection", response_model=DividendProjectionResponse)
 def get_dividend_projection(params: DividendProjectionParams):
+    """Project future dividend income with reinvestment and withdrawal phases."""
     from app.schema.dividend_models import DividendProjectionPoint # Import locally to avoid circular if any
     
     historical = load_dividends()

@@ -22,12 +22,14 @@ class ImportRequest(BaseModel):
 
 @router.get("", response_model=List[str])
 def get_accounts(session: Session = Depends(get_session)):
+    """List all dividend account names."""
     accounts = session.exec(select(DividendAccount)).all()
     # Return list of names
     return [a.name for a in accounts]
 
 @router.get("/importable", response_model=List[ImportableAccount])
 def get_importable_accounts(session: Session = Depends(get_session)):
+    """List investment accounts available for import from finance snapshots."""
     # 1. Get existing linked IDs
     existing_accounts = session.exec(select(DividendAccount)).all()
     linked_ids = {a.linked_id for a in existing_accounts if a.linked_id}
@@ -54,6 +56,7 @@ def get_importable_accounts(session: Session = Depends(get_session)):
 
 @router.post("/import", response_model=str)
 def import_account(req: ImportRequest, session: Session = Depends(get_session)):
+    """Import a finance snapshot investment as a dividend account."""
     # Check if name exists
     if session.get(DividendAccount, req.name):
         raise HTTPException(status_code=400, detail="Account name already exists")
@@ -101,6 +104,7 @@ def import_account(req: ImportRequest, session: Session = Depends(get_session)):
 
 @router.post("", response_model=str)
 def create_account(name: str, session: Session = Depends(get_session)):
+    """Create a new empty dividend account."""
     # Check if exists
     existing = session.get(DividendAccount, name)
     if existing:
@@ -113,6 +117,7 @@ def create_account(name: str, session: Session = Depends(get_session)):
 
 @router.delete("/{name}")
 def delete_account(name: str, session: Session = Depends(get_session)):
+    """Delete a dividend account and its positions."""
     account = session.get(DividendAccount, name)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")

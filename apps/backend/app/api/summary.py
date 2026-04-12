@@ -8,6 +8,7 @@ router = APIRouter()
 
 @router.get("/summary/latest-month")
 def get_latest_summary_month(session: Session = Depends(get_session)):
+    """Return year and month of the most recent daily summary."""
     latest_date = session.exec(select(DailySummary.date).order_by(DailySummary.date.desc())).first()
     if latest_date is None:
         return None
@@ -15,6 +16,7 @@ def get_latest_summary_month(session: Session = Depends(get_session)):
 
 @router.get("/summary/{year}/{month}", response_model=list[DailySummary])
 def get_summary_for_month(year: int, month: int, session: Session = Depends(get_session)):
+    """Return all daily summaries for a given year and month."""
     start_date = date_type(year, month, 1)
     end_date = start_date.replace(day=28) + timedelta(days=4)
     end_date = end_date - timedelta(days=end_date.day - 1)

@@ -68,7 +68,14 @@ async def lifespan(app: FastAPI):
     create_db_and_tables()
     yield
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Trading Journal API",
+    description="API for managing trades, portfolios, pensions, insurance, and financial analysis",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
+)
 
 # Instrument FastAPI
 FastAPIInstrumentor.instrument_app(app)
@@ -92,6 +99,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 @app.get("/")
 def read_root():
+    """Health-check root endpoint."""
     return {"Hello": "World"}
 
 # Include routers

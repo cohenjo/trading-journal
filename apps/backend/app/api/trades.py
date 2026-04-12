@@ -8,6 +8,7 @@ router = APIRouter()
 
 @router.post("/trades", response_model=Trade)
 def create_trade(trade: Trade, session: Session = Depends(get_session)):
+    """Create a new trade and recalculate the daily summary."""
     if not trade.dateTime:
         raise HTTPException(status_code=422, detail="Trade dateTime cannot be null")
     trade_date = trade.dateTime.date()

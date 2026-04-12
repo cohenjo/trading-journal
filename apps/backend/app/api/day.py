@@ -17,6 +17,7 @@ class DayDetails(SQLModel):
 
 @router.get("/day/{date}", response_model=DayDetails)
 async def get_trades_for_day(date: date_type, session: Session = Depends(get_session)):
+    """Return trades, summary, notes, and market data for a single day."""
     summary_statement = select(DailySummary).where(DailySummary.date == date)
     summary = session.exec(summary_statement).first()
 
