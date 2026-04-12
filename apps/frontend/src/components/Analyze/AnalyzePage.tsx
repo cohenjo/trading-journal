@@ -5,6 +5,7 @@ import TickerSearch from "./TickerSearch";
 import SplitBrainToggle, { type AnalysisMode } from "./SplitBrainToggle";
 import LongTermView from "./LongTermView";
 import ShortTermView from "./ShortTermView";
+import { SectionErrorBoundary, EmptyState } from "./shared";
 
 export default function AnalyzePage() {
     const [ticker, setTicker] = useState<string | null>(null);
@@ -27,19 +28,17 @@ export default function AnalyzePage() {
 
                 {ticker && (
                     <div className="mt-8">
-                        {mode === "long-term" ? (
-                            <LongTermView ticker={ticker} />
-                        ) : (
-                            <ShortTermView ticker={ticker} />
-                        )}
+                        <SectionErrorBoundary sectionName={mode === "long-term" ? "Long-Term View" : "Short-Term View"}>
+                            {mode === "long-term" ? (
+                                <LongTermView ticker={ticker} />
+                            ) : (
+                                <ShortTermView ticker={ticker} />
+                            )}
+                        </SectionErrorBoundary>
                     </div>
                 )}
 
-                {!ticker && (
-                    <div className="flex items-center justify-center min-h-[300px]">
-                        <p className="text-slate-600 text-lg">Enter a ticker symbol above to start analyzing.</p>
-                    </div>
-                )}
+                {!ticker && <EmptyState />}
             </div>
         </div>
     );

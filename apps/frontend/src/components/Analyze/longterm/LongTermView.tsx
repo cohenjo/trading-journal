@@ -10,6 +10,10 @@ import ValuationBenchmarks from "./ValuationBenchmarks";
 import DCFCalculator from "./DCFCalculator";
 import AISynthesis from "./AISynthesis";
 import GrowthStory from "./GrowthStory";
+import {
+  ErrorBanner,
+  SectionErrorBoundary,
+} from "../shared";
 
 interface LongTermViewProps {
   ticker: string;
@@ -46,18 +50,22 @@ export default function LongTermView({ ticker }: LongTermViewProps) {
 
   const currentPrice = fundamentals.data?.current_price ?? 0;
 
-  // Show error state
-  if (fundamentals.error) {
+  // Full-page error only for invalid/unknown tickers (404)
+  if (fundamentals.error && !fundamentals.loading) {
     return (
       <div className="space-y-6">
         <h2 className="text-lg font-semibold text-slate-300">
           Long-Term Analysis — <span className="text-white font-mono">{ticker}</span>
         </h2>
-        <div className="bg-red-950/30 border border-red-900/50 rounded-xl p-6 text-center">
-          <p className="text-red-400">{fundamentals.error}</p>
+        <div className="bg-red-950/30 border border-red-900/50 rounded-xl p-8 text-center">
+          <div className="text-4xl mb-3">&#x1F50D;</div>
+          <p className="text-red-400 font-medium mb-1">{fundamentals.error}</p>
+          <p className="text-slate-500 text-sm mb-4">
+            Check the ticker symbol and try again. If the issue persists, the data source may be temporarily unavailable.
+          </p>
           <button
             onClick={fundamentals.refetch}
-            className="mt-3 px-4 py-2 text-sm bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors"
+            className="px-5 py-2.5 text-sm bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors"
           >
             Retry
           </button>
@@ -77,10 +85,15 @@ export default function LongTermView({ ticker }: LongTermViewProps) {
         )}
       </h2>
 
+      {/* Per-section errors for non-critical data */}
+      {priceHistory.error && <ErrorBanner message={priceHistory.error} onRetry={priceHistory.refetch} />}
+      {synthesis.error && <ErrorBanner message={synthesis.error} onRetry={synthesis.refetch} />}
+
       {/* Top row: Price chart + AI Synthesis / Growth Story */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <PriceChartWithFairValue
+          <SectionErrorBoundary sectionName="Price Chart">
+            <PriceChartWithFairValue
             priceData={priceHistory.data}
             fairValue={dcfFairValue}
             currentPrice={currentPrice}
@@ -88,8 +101,10 @@ export default function LongTermView({ ticker }: LongTermViewProps) {
             period={period}
             onPeriodChange={setPeriod}
           />
+          </SectionErrorBoundary>
         </div>
         <div>
+          <SectionErrorBoundary sectionName="AI Synthesis">
           {!showGrowthStory ? (
             <div className="space-y-3">
               <AISynthesis data={synthesis.data} loading={synthesis.loading} />
@@ -103,26 +118,33 @@ export default function LongTermView({ ticker }: LongTermViewProps) {
           ) : (
             <GrowthStory ticker={ticker} />
           )}
+          </SectionErrorBoundary>
         </div>
       </div>
 
       {/* Middle row: Financial Scorecard */}
-      <FinancialScorecard
-        financials={fundamentals.data?.financials ?? null}
-        loading={fundamentals.loading}
-      />
-
-      {/* Bottom row: Valuation + DCF Calculator */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ValuationBenchmarks
+      <SectionErrorBoundary sectionName="Financial Scorecard">
+        <FinancialScorecard
           financials={fundamentals.data?.financials ?? null}
           loading={fundamentals.loading}
         />
-        <DCFCalculator
-          dcfInputs={fundamentals.data?.dcf_inputs ?? null}
-          currentPrice={currentPrice}
-          loading={fundamentals.loading}
-        />
+      </SectionErrorBoundary>
+
+      {/* Bottom row: Valuation + DCF Calculator */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <SectionErrorBoundary sectionName="Valuation Benchmarks">
+          <ValuationBenchmarks
+            financials={fundamentals.data?.financials ?? null}
+            loading={fundamentals.loading}
+          />
+        </SectionErrorBoundary>
+        <SectionErrorBoundary sectionName="DCF Calculator">
+          <DCFCalculator
+            dcfInputs={fundamentals.data?.dcf_inputs ?? null}
+            currentPrice={currentPrice}
+            loading={fundamentals.loading}
+          />
+        </SectionErrorBoundary>
       </div>
     </div>
   );

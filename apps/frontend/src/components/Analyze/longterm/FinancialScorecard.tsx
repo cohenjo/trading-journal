@@ -44,7 +44,7 @@ export default function FinancialScorecard({ financials, loading }: FinancialSco
     return (
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
         <h3 className="text-lg font-semibold text-white mb-4">Financial Scorecard</h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {[1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
         </div>
       </div>
@@ -67,7 +67,7 @@ export default function FinancialScorecard({ financials, loading }: FinancialSco
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
       <h3 className="text-lg font-semibold text-white mb-4">Financial Scorecard</h3>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <MetricCard
           label="ROIC vs WACC"
           value={roicSpread !== null ? `${roicSpread > 0 ? "+" : ""}${fmt(roicSpread, "pp")}` : "N/A"}

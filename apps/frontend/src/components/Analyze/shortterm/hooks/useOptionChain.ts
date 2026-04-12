@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export interface PutOption {
   strike: number;
@@ -28,6 +28,7 @@ interface UseOptionChainResult {
   error: string | null;
   expiry: string | null;
   setExpiry: (expiry: string) => void;
+  refetch: () => void;
 }
 
 export function useOptionChain(ticker: string): UseOptionChainResult {
@@ -36,7 +37,7 @@ export function useOptionChain(ticker: string): UseOptionChainResult {
   const [error, setError] = useState<string | null>(null);
   const [expiry, setExpiry] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchData = useCallback(() => {
     if (!ticker) return;
 
     setLoading(true);
@@ -64,5 +65,9 @@ export function useOptionChain(ticker: string): UseOptionChainResult {
       });
   }, [ticker, expiry]);
 
-  return { data, loading, error, expiry, setExpiry };
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, expiry, setExpiry, refetch: fetchData };
 }
