@@ -552,3 +552,131 @@ This separation allows backend teams to reorganize financial categories without 
 - **Diagrams:** `docs/design-hosting/diagrams/` (6 Excalidraw files)
 - **Reviews:** `docs/design-hosting/reviews/` (5 review files)
 - **Related:** `.squad/agents/*/history.md` for researcher learnings
+
+---
+
+### 2026-05-01: Supabase Setup Runbook & Local Development Workflow
+**By:** Kujan (DevOps/Platform), requested by Jony Vesterman Cohen
+**Category:** Infrastructure, Documentation
+**Status:** Implemented
+
+**What:** Split the original combined hosting runbook into focused agent deliverables. Kujan owns Supabase setup and operations; Hockney will handle Vercel deployment separately. The trading journal application uses Supabase for Postgres + Auth with household-based sharing model and RLS enforcement.
+
+**Key Decisions:**
+
+1. **Local Development via Supabase CLI:** Use `supabase start` for local Docker-based development stack instead of standalone Postgres container.
+   - Single command boots Postgres, GoTrue (auth), PostgREST, Storage, Studio, and Inbucket
+   - Automatic migrations replay on `supabase db reset`
+   - Consistent local/remote schema via `supabase link` + `supabase db push`
+   - Studio web UI at `http://127.0.0.1:54323` for schema inspection
+
+2. **Connection String Strategy:** Use **direct connection** (port 54322 local, 5432 remote) for migrations and long-running jobs. Use **transaction pooler** (port 6543) for production web traffic with `?statement_cache_size=0`.
+   - Alembic/SQLAlchemy migrations fail through PgBouncer transaction pooler
+   - Direct connections support session-level features and long transactions
+   - Transaction pooler optimizes short-lived serverless/web requests
+
+3. **Migration Workflow:** SQL-first migrations via `supabase migration new` with manual review. Avoid Studio UI diff tool for financial schema.
+   - Financial applications require explicit control over constraints, indexes, and RLS policies
+   - SQL migrations are reviewable, testable, and version-controlled
+   - Studio diff tool can miss security-critical policies or generate verbose/redundant DDL
+
+4. **Three-Environment Strategy:** Provision three Supabase projects: `trading-journal-dev`, `trading-journal-preview`, `trading-journal-prod`.
+   - **Dev:** Integration testing, schema experimentation, safe to break
+   - **Preview:** PR validation, stakeholder review, matches production config
+   - **Prod:** Live user data, strict change control
+
+5. **Region Selection:** Recommend `eu-central-1` (Frankfurt) for Israel-based primary developer.
+   - Frankfurt offers ~80-120 ms latency to Israel (verified via cloudping.info)
+   - **Cannot change region post-creation** — must choose correctly upfront
+
+6. **Free-Tier Monitoring:** Defer PDF file uploads until paid tier. Monitor database size before Phase 1 schema deployment.
+   - 500 MB database storage, 1 GB file storage, 5 GB monthly egress bandwidth
+   - Upgrade trigger: DB > 400 MB OR egress > 80% of quota
+
+7. **OAuth Configuration Pattern:** Configure Google OAuth for both local (`http://127.0.0.1:54321/auth/v1/callback`) and remote (`https://<project-ref>.supabase.co/auth/v1/callback`).
+   - Google Console: Add both callback URIs to Authorized redirect URIs
+   - Supabase: Configure in Dashboard → Authentication → Providers → Google
+   - Preview deploy OAuth requires explicit Vercel preview URLs in Google Console OR Supabase wildcard support (must verify)
+
+8. **RLS Helper Function Pattern:** Use `is_household_member(hid uuid)` security definer function + policies on every user-data table.
+   - Centralized authorization logic (DRY)
+   - `security definer` grants function access to `household_members` table
+   - Simplifies per-table policies to single `using (public.is_household_member(household_id))` clause
+
+**Verification Checklist (⚠️ items):**
+- Region selection (`eu-central-1` latency acceptable)
+- Management API field names (verify `region` vs. `region_id`)
+- Free-tier quotas (50k MAU / 500 MB DB / 5 GB egress)
+- Backup retention (7-day free tier)
+- Project pause policy (~7 days inactivity)
+- OAuth preview URL behavior (wildcard support)
+- Local DB size check before TJ-005 schema deploy
+- PgBouncer parameter (`statement_cache_size=0`) in production pooler URL
+
+**Outcomes:**
+- Runbook Delivered: `docs/design-hosting/setup-supabase.md` (498 lines, 11 sections)
+- Cross-References: Links to Hockney's Vercel runbook, design docs, and GitHub issues TJ-001/004/005/007
+- Verification Items: 8 ⚠️-flagged items requiring user confirmation before Phase 1
+- CLI Commands: Quick reference appendix with 15+ common operations
+- Troubleshooting: 7 common issues + solutions
+
+---
+
+### 2026-04-30: Supabase 2-Project Topology (Free Tier)
+**By:** Keaton (Lead), requested by Jony Vesterman Cohen
+**Category:** Architecture, Infrastructure
+**Status:** Approved — reflects Kujan's verified finding against live Supabase docs
+
+**Context:** The approved hosting design (`docs/design-hosting/design.md`) assumed three Supabase environments mapped to three remote projects. Kujan's remote runbook (`docs/design-hosting/runbooks/supabase-02-remote.md`) verified against live Supabase pricing that the **free tier allows a maximum of 2 active projects per organisation**. A 3-project topology therefore requires a paid plan from day one.
+
+**Decision:** Adopt a **2-project topology** that stays within the free tier:
+
+| Slot | Supabase project | Serves |
+|---|---|---|
+| 1 | **Production** | Vercel production deployments only |
+| 2 | **Dev/Preview** | Local development + all Vercel preview deployments (shared state) |
+| — | **Local Docker** (`supabase start`) | Fully offline iteration; no remote project slot consumed |
+
+**Rationale:**
+- Free tier = 2 projects max. Using 3 costs $25/mo on Pro immediately.
+- Dev and preview share enough characteristics (non-production data, seed-able, ephemeral) that sharing a single remote project is acceptable for a small team.
+- Local Docker (`supabase start`) gives any developer a fully isolated environment without touching the remote project count.
+
+**Trade-offs:**
+
+**Risk:** Preview branches share Dev/Preview state. Two PRs that mutate the same database row (e.g., both seeding the same household fixture) can collide or produce confusing test results.
+
+**Mitigations (in priority order):**
+1. **Opt-in per-PR seed reset** — a CI step that truncates and re-seeds the Dev/Preview project when a PR opts in via a label or workflow flag. Cheap and sufficient for a solo/duo team.
+2. **Upgrade to Supabase Pro ($25/mo)** — adds a third project slot, allowing true per-environment isolation. Appropriate when team size reaches 3+ active contributors or when preview-state collisions become frequent.
+
+**Affected Artefacts:**
+- `docs/design-hosting/design.md` — Phase 1 topology, Acceptance Criteria §15 item 3, Edge Case §13 "Preview deploys hitting prod data", top-of-doc changelog note.
+- `docs/design-hosting/runbooks/supabase-02-remote.md` — already correct per Kujan's runbook; no changes needed.
+
+---
+
+### 2026-04-30: Issue Decomposition: Hosting Migration
+**By:** Keaton (Lead), requested by Jony Vesterman Cohen
+**Category:** Planning, Architecture
+**Status:** Ready for review
+
+**What:** Decomposed the approved hosting design (design.md v2) into 31 GitHub issues across 6 phases (Prep → Foundation → Data → Frontend → Sharing → Cutover).
+
+**Key metrics:**
+- **Total issues:** 31
+- **Total phases:** 6
+- **Critical path depth:** 9 (TJ-000 → TJ-004 → TJ-005 → TJ-007 → TJ-018 → TJ-025 → TJ-026 → TJ-029 → TJ-030)
+- **Most work:** Kujan (10 issues — heavy infra/DevOps load), Fenster (7 issues — frontend + sharing UX)
+- **@copilot-suitable:** 9 issues (TJ-002, TJ-009, TJ-014, TJ-015, TJ-017, TJ-019, TJ-024, TJ-027, TJ-028)
+
+**Design.md insufficiencies flagged:**
+1. **Table classification not fully specified:** design.md §6 surveys tables but doesn't produce a definitive classification table. TJ-003 creates this as a prerequisite for TJ-005.
+2. **Email delivery for invites unspecified:** design.md §5 mentions email but doesn't specify provider. TJ-021 defers to logging invite URLs with email integration as follow-up.
+3. **Custom domain decision still pending:** design.md §17 lists this as a Jony decision. TJ-026 (prod deploy) notes the dependency.
+4. **Preview OAuth strategy needs spike:** design.md §4.1 describes three options but doesn't pick one. TJ-025 validates whichever approach is chosen.
+5. **Audit log schema not detailed:** design.md §5 describes audit requirements but doesn't provide DDL. TJ-024 creates this.
+
+**Artifacts:**
+- `docs/design-hosting/issue-manifest.json`
+- `docs/design-hosting/issue-manifest.md`

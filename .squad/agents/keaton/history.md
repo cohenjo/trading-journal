@@ -6,121 +6,47 @@
 - **Agent:** Keaton (Lead)
 - **Created:** 2026-02-23T22:46:19Z
 
-## Learnings
+## Core Context Summary
 
-- Team initialized with shared focus on financial data integrity, security, and maintainable AI-assisted workflows.
+**Application scope:** Trading journal with options tracking, bond/dividend calculations, tax optimization, portfolio holdings, pension planning, financial analysis, and Interactive Brokers integration (optional).
 
-### 2026-02-23T23:45:00Z: Codebase Review Completed
-**Context:** Comprehensive review of trading journal application structure, architecture, and implementation quality.
+**Architecture:** Next.js 15.3 (React 19, TypeScript 5) frontend + FastAPI (Python 3.10+, SQLAlchemy, SQLModel) backend. PostgreSQL 13 with Alembic migrations. Docker Compose + Aspire 13.1 orchestration. OpenTelemetry instrumentation (Prometheus, Jaeger, Grafana).
 
-**Architecture Findings:**
-- **Stack:** Next.js 15.3 (React 19, TypeScript 5) frontend + FastAPI (Python 3.10+, SQLAlchemy, SQLModel) backend
-- **Database:** PostgreSQL 13 with Alembic migrations (10+ migration files detected)
-- **Deployment:** Dual orchestration support (Docker Compose + Aspire 13.1)
-- **Observability:** Full OpenTelemetry instrumentation with Prometheus, Jaeger, Grafana
-- **Trading Integration:** Interactive Brokers Gateway integration (optional, opt-in via `RUN_IB_GATEWAY=true`)
+**Code quality:** 78 TypeScript/TSX files, 82 Python files, 13 Playwright E2E tests, 10+ pytest tests. Minimal technical debt (3 TODOs). Modern stack (uv for Python, lightweight-charts, Copilot SDK integrated).
 
-**Code Quality Assessment:**
-- **Frontend:** 78 TypeScript/TSX files, clean component structure, TypeScript strict mode enabled
-- **Backend:** 82 Python files, well-organized API routes (18 routers), strong schema separation (11 model files)
-- **Testing:** Good coverage - 13 Playwright E2E tests (frontend), 10+ pytest tests (backend), includes performance benchmarks
-- **Technical Debt:** Minimal - only 3 TODOs found (loan balance, debt tracking, backtest parameters)
-- **Dependencies:** Modern stack - uv for Python, lightweight-charts for visualization, GitHub Copilot SDK integrated
+**Critical issues resolved:**
+- ✅ Financial Precision: Decimal/BigNumber type safety (decision approved)
+- ✅ Security Hardening: JWT auth, CORS restriction, credentials rotation (decision approved)
+- ✅ API & DevOps: FastAPI OpenAPI generation, GitHub Actions CI (decision approved)
+- ✅ Testing infrastructure: 110 new tests across Kujan/Hockney/Fenster teams
+- ✅ Release planning: v0.0.1 milestone with 13 structured issues
 
-**Architecture Strengths:**
-- Clean separation of concerns (schema, API, services, utils)
-- Proper CORS, OpenTelemetry instrumentation from the start
-- Dual deployment strategy (Docker + Aspire) provides flexibility
-- IB Gateway isolation pattern (disabled by default, opt-in when needed)
-- Test coverage includes both functional and performance validation
+**For detailed historical context prior to 2026-05-01, see `history-archive.md`.**
 
-**Risk Areas:**
-- **Security:** `.env` files present in both apps (VERIFY they're in .gitignore - confirmed ✓)
-- **CORS:** Currently `allow_origins=["*"]` - should restrict in production
-- **Database:** Hardcoded credentials in docker-compose.yml (acceptable for dev, needs env vars for prod)
-- **Financial Calculations:** No explicit Decimal type usage verified in sample code review - needs deeper audit
+---
 
-**Domain Coverage:**
-The application supports comprehensive trading workflows:
-- Options trading tracking and P&L analysis
-- Bond cashflow calculations
-- Dividend tracking and estimations
-- Tax optimization (tax-condor strategy)
-- Portfolio holdings and ladder strategies
-- Financial planning and pension calculations
-- Backtesting engine
-- Real-time market data integration (via IB Gateway)
+## Recent Learnings
 
-**Gaps Identified:**
-1. No explicit security hardening documentation (CSP, rate limiting, auth implementation status unclear)
-2. No CI/CD workflows for testing/deployment (only Squad-related workflows found)
-3. Financial calculation precision not verified (Decimal vs float usage needs audit)
-4. Production deployment guide missing (docker-compose has hardcoded secrets)
-5. API documentation not found (consider adding OpenAPI/Swagger auto-generation)
+📌 **Company Analysis Page Architecture (2025-07-18):**
+- Split-Brain page design: Long-Term (business owner) vs Short-Term (income mechanic) views
+- 5 backend API endpoints, 17 frontend components, 4-phase delivery
+- yfinance sufficient for all data; AI synthesis via Copilot SDK Phase 2
 
-**Recommendations:**
-1. **Immediate:** Audit all monetary calculations for Decimal/BigNumber usage (financial accuracy critical)
-2. **Security:** Implement rate limiting, restrict CORS origins, add CSP headers, document auth strategy
-3. **DevOps:** Add CI/CD workflows (lint, test, build validation on PR)
-4. **Documentation:** Generate OpenAPI docs from FastAPI, create production deployment guide
-5. **Monitoring:** Validate OpenTelemetry dashboards exist and alert thresholds configured
+📌 **Hosting Design v1 Approved (2026-04-30):**
+- Default architecture: Vercel + Supabase + local Docker (Hybrid/Option C)
+- Household sharing with RLS, JWT auth, phased migration across 6 phases
+- 31 GitHub issues decomposed from design document
+- 9 issues @copilot-suitable for automation
 
-## Team Updates
+📌 **Supabase 2-Project Topology Correction (2026-04-30):**
+- Free-tier limit: 2 active projects per organization (not 3)
+- Topology: Production + Dev/Preview (shared), local Docker (offline)
+- Trade-off: Preview branches share state; mitigations: per-PR seed reset or Pro upgrade ($25/mo)
+- Architectural decision cascaded to design.md §1, Acceptance Criteria §15, Edge Case §13
 
-📌 **Team update (2026-02-23T22:59:59Z):** Financial Precision and Type Safety - Frontend and backend both use unsafe numeric types. Critical quality gate: all PRs must use Decimal/BigNumber for monetary calculations. Breaking change requiring 1-2 weeks implementation and database migration. — Fenster, Hockney
-
-📌 **Team update (2026-02-23T22:59:59Z):** Security Hardening CRITICAL - Credentials exposed in version control, zero authentication across all 17 API endpoints, unrestricted CORS. Week 1 actions: rotate credentials, implement JWT, restrict CORS, add security headers. Blocks production deployment. — Keaton, Hockney, Rabin
-
-📌 **Team update (2026-02-23T22:59:59Z):** API Documentation and DevOps - No OpenAPI documentation, missing CI/CD workflows, no security architecture documentation. Add FastAPI OpenAPI generation, create GitHub Actions workflows for lint/test/build, document production hardening checklist. — Keaton
-
-### 2025-07-18: Company Analysis Page Architecture Decision
-**Context:** Jony requested a "Split-Brain" Company Analysis page with Long-Term (business owner) and Short-Term (income mechanic) views, covering fundamentals, charting, DCF, options Greeks, and AI synthesis.
-
-**Decision:** Architected full page at `/analyze` route with 5 backend API endpoints (`/api/analyze/fundamentals`, `/price-history`, `/technicals`, `/options`, `/synthesis`), 17 frontend components across longterm/shortterm view folders, and a 4-phase delivery plan (Foundation → Long-Term → Short-Term → Polish). All financial calculations server-side in a new `analyze_service.py`. yfinance covers all data needs — no new deps required. AI synthesis starts as template-based (Phase 1) with Copilot SDK integration planned for Phase 2.
-
-**Key routing insight:** Existing TRADING-section pages (`/options`, `/ladder`, `/holdings`) use top-level paths despite being in the TRADING nav group — so `/analyze` follows established convention rather than nesting under `/trading/`.
-
-**Decomposition:** 17 tasks across 4 phases, parallelizable at each phase. Hockney (API), McManus (financial math), Fenster (UI) can all start Phase 1 simultaneously. Plan written to `.squad/decisions/inbox/keaton-analyze-page-architecture.md`.
-
-### 2026-03-04: v0.0.1 Project Board Created
-**Context:** Set up release tracking using GitHub milestone + labeled issues (gh project command requires unauthorized scope).
-
-**What was created:**
-- **14 labels:** 5 stage labels (backlog→done workflow), 3 priority levels (critical/high/medium), 5 domain labels (frontend/backend/security/testing/infra), plus `squad` label
-- **Milestone:** v0.0.1 — "First release — core trading journal with analysis page, pension tracking, and financial planning"
-- **13 issues** across 3 priority tiers:
-  - **Critical (3):** #1 API authentication, #2 credential cleanup from git history, #3 CORS restriction — all security, all block release
-  - **High (5):** #4 frontend tests, #5 backend financial calc tests, #6 analysis page polish, #7 yfinance caching, #8 CI/CD pipeline
-  - **Medium (5):** #9 Decimal migration, #10 security headers, #11 Growth Story AI Phase 2, #12 OpenAPI docs, #13 pension history browser
-
-**Routing:** Each issue tagged with owner (Rabin=auth/security, Kujan=infra/cleanup, Hockney=backend/CORS, Redfoot=testing, Fenster=frontend, McManus=data, Kobayashi=AI).
-
-**Board URL:** https://github.com/cohenjo/trading-journal/milestone/1
-
-**Learning:** `gh project` requires project scope not available in our token. Milestone + labels gives us equivalent workflow columns (stage:backlog → stage:done) with native GitHub filtering. Filter by `milestone:v0.0.1 label:priority:critical` to see release blockers.
-
-📌 Team update (2026-04-10T08:19:59Z): Testing Sprint Phase 1-3 Complete — Phase 2d synthesis & approval: 5 executive decisions approved overriding original plan. Financial core priority, infrastructure P0, depth-over-breadth APIs, database models P0, PostgreSQL Phase 1 all approved. Phase 3 authorization given. 110 new tests delivered across 3 branches (Kujan CI, Hockney backend, Fenster frontend). Orchestration logs created for all 8 agents. Session log and decision merges completed. 3 branches ready for merge with 14 commits total. Success metrics tracked. — Scribe (Team Orchestration)
-
-### 2026-04-30: Hosting Architecture Overview Drafted
-**Context:** Jony requested an architecture overview and alternatives matrix for moving trading-journal from laptop-only local services to free/cheap hosted services for a few trusted users, including spouse/couple sharing.
-
-**Recommendation:** Default to **Option A: Lean** — Vercel-hosted Next.js, Supabase Auth/Postgres/RLS, and local Docker for heavy compute writing raw/computation tables. Keep **Option B: Decoupled API** as a fallback if Hockney finds required FastAPI endpoints that should remain Python-hosted for the first shared release.
-
-**Artifacts:** Wrote `docs/design-hosting/sections/01-architecture-overview.md`, created system-context diagram at `docs/design-hosting/diagrams/01-system-context.excalidraw`, and drafted decision `./.squad/decisions/inbox/keaton-hosting-architecture.md`.
-
-**Team dependencies:** Rabin owns auth/RLS/invites, Kujan owns deployment/CI, Hockney owns backend endpoint inventory, McManus owns sharing/data-table boundaries, and Fenster owns frontend auth/invite/data access.
-
-### 2026-05-01: Unified Design Document Synthesized
-
-**Context:** Six researchers wrote section drafts covering architecture overview, frontend strategy, auth/sharing/security, deployment/CI-CD, backend strategy, and data architecture. Keaton synthesized all six into a single unified design document.
-
-**Key reconciliation decisions:**
-- Adopted Hockney's "Hybrid (Option C)" as the single recommended architecture, resolving the Option A vs Option B split from Section 01.
-- Standardized on Rabin's `household_role` enum name and stricter RLS helper functions (with `left_at is null` and `deleted_at is null` checks) over McManus's simpler versions.
-- Clarified that Kujan's Fly.io backend hosting recommendation becomes a future escalation path, not the initial deployment — aligning with the hybrid/local-worker model.
-- Flagged Kujan's `CLERK_SECRET_KEY` as stale (we use Supabase Auth); flagged missing connection-pooling env var split.
-- Default invite role set to `viewer` (least privilege, Rabin's approach) over McManus's `member` default.
-
-**Artifacts:** Wrote `docs/design-hosting/design.md` (unified design doc) and `.squad/decisions/inbox/keaton-hosting-final.md` (architecture decision record).
-
-📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
+📌 **Hosting Runbook Split & Coordination (2026-04-30T19:30):**
+- Orchestrated parallel delivery of 7 runbook files across 5 agents
+- Supabase: 3-part deep-dives (local dev, remote provisioning, auth+RLS)
+- Vercel: 3-part deep-dives (project setup, deploys+DNS, policy+CI)
+- Coordination output: 1 runbooks index, 8 ⚠️-flagged verification items, orchestration logs
+- Role: Issue decomposition (critical path analysis), topology fix, vercel-03 runbook authorship, consolidation

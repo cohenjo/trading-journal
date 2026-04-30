@@ -43,3 +43,15 @@
 - **Deliverable:** Wrote `docs/design-hosting/reviews/rabin-review.md` with corrected canonical RLS helper/policy snippet and owner assignments for Keaton, Rabin, Hockney, Kujan, and McManus.
 
 📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
+
+### 2026-04-30: First Supabase Migration Files (TJ-005)
+- **Context:** Turned runbook §4–§5 SQL into three ready-to-apply migration files under `supabase/migrations/`.
+- **Deliverables:** `20260430120000_households_and_members.sql`, `20260430120100_rls_helpers.sql`, `20260430120200_rls_policies_households.sql`, `supabase/migrations/README.md`.
+- **Key choices:** ON DELETE CASCADE on both `households` and `household_members` FK refs to `auth.users`; hard-delete policies use `using (false)` to enforce soft-delete discipline (deviation from task spec); enum named `household_role` (runbook) not `household_member_role` (data-arch doc).
+- **Security note:** Helper functions are `security definer` with explicit `SET search_path = public, auth` to prevent search-path injection; EXECUTE revoked from PUBLIC and granted to `authenticated` only.
+- **Status:** Schema not yet locally tested — must run `supabase db reset` before remote push.
+
+### 2026-05-03: Supabase Auth + RLS Runbook
+- **Context:** Narrowly scoped implementation runbook covering Google OAuth wiring, Households+Members schema, RLS helper functions and policies, invite flow schema and token-hash pattern, and common pitfalls.
+- **Deliverable:** `docs/design-hosting/runbooks/supabase-03-auth-rls.md` (~300 lines, copy-pasteable SQL migration block included).
+- **Flags:** Google Console does not support wildcard authorized origins — each preview URL must be registered explicitly. Supabase redirect-URL wildcard syntax should be verified against current docs. Free-tier email rate limit (3/hr) may constrain invite emails at scale.

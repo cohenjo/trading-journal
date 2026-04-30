@@ -35,6 +35,33 @@
 
 ---
 
+## Learnings
+
+📌 **Supabase Local Dev Runbook (2026-05-01 — supabase-01-local-dev.md):**
+- CLI auth key naming changed: newer versions output `Publishable`/`Secret` (`sb_publishable_...`/`sb_secret_...`) instead of `anon key`/`service_role key` — always copy from `supabase status`, never hardcode.
+- Mailpit (not Inbucket) is the mail catcher label in current `supabase start` output; both refer to port 54324.
+- `?statement_cache_size=0` is only needed for the prod transaction-mode pooler (port 6543), NOT local direct (54322) or remote direct (5432) — confirmed from prior runbook work.
+- `supabase login` / PAT only required for remote platform operations (`link`, `db push`); local stack works fully offline.
+- No native down-migration support in Supabase CLI — manual undo migrations are the documented pattern.
+
+📌 **Supabase Remote Provisioning Runbook (2026-05-02):** Free plan caps at **2 active projects** per org (verified from pricing.md) — dev + prod only unless org upgrades to Pro. PITR is Pro-only add-on at $100/month per 7-day window; free tier has zero automated backups. Region `eu-central-1` (Frankfurt) confirmed valid exact AWS region ID. Free-tier projects pause after 1 week of inactivity; data is preserved on pause (⚠️ verify resume-on-request behavior). Transaction pooler (port 6543) requires `?statement_cache_size=0` for SQLAlchemy/asyncpg; direct connections (port 5432) do not.
+
 ## Recent Learnings
 
 📌 **Team update (2026-04-30T15:00:37Z):** Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
+
+📌 **Supabase Runbook Delivery (2026-05-01):**
+- **CLI Workflow Confirmed:** `supabase init` → local stack with `supabase start` → migrations via `supabase migration new` → test with `supabase db reset` → link remote with `supabase link` → deploy with `supabase db push`
+- **Local Dev Stack:** Docker-based with Postgres (54322), API (54321), Studio (54323), Inbucket mail catcher (54324)
+- **PgBouncer Gotcha:** SQLAlchemy requires `?statement_cache_size=0` ONLY for transaction-mode pooler (port 6543), NOT for local direct connections (port 54322) or remote direct (port 5432)
+- **RLS Pattern:** `is_household_member(hid uuid)` security definer function + policies on every user-data table
+- **OAuth Flow:** Google → Supabase `/auth/v1/callback` → app `/auth/callback` — both redirect URIs must be configured
+- **Migration Safety:** Always test locally (`supabase db reset`) before remote push; no native down-migration support (manual undo migrations required)
+- **Free-Tier Watchpoints:** 500 MB DB, 50k MAU, 5 GB egress, 7-day backup retention, project auto-pause after ~7 days inactivity (all marked for verification)
+- **Region Choice:** `eu-central-1` (Frankfurt) recommended for Israel-based dev; cannot change post-creation
+- **Runbook Location:** `docs/design-hosting/setup-supabase.md` (498 lines, references TJ-001/004/005/007)
+
+📌 **Runbook Split & Free-Tier Topology Fix (2026-04-30):**
+- **Critical Finding:** Free-tier topology corrected to 2 projects (dev/preview shared + prod) — was 3 in original design. Verified against live Supabase pricing; switching from 3 to 2 saves $25/mo and stays within Hobby budget.
+- **Architecture Impact:** Dev and preview environments now share a single remote project. Mitigations: per-PR seed reset (cheap) or upgrade to Pro when team grows.
+- **Runbook Split:** Combined setup-supabase.md (498 lines) split into 3 deep-dives: supabase-01-local-dev (202), supabase-02-remote (315), supabase-03-auth-rls (385).

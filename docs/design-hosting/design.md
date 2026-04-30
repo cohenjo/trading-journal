@@ -1,5 +1,7 @@
 # Hosting Design: Trading Journal
 
+> 🔄 **Topology Revision (2026-04-30):** Supabase free tier allows only 2 active projects per organisation, so the previously assumed 3-project topology (local/dev + preview + prod) is not free-tier compatible; revised to 2 remote projects (Production + Dev/Preview) with local Docker for offline iteration.
+
 **Status:** Recommended — revised after Rabin/Redfoot/Kujan reviews  
 **Author:** Keaton (Lead), revised by Hockney under reviewer-rejection protocol  
 **Date:** 2026-05-01
@@ -376,7 +378,13 @@ Add triggers/column grants so clients cannot mutate `household_id`, `created_by`
 
 **Entry:** Phase 0 complete; Supabase project created.  
 **Work:**
-1. Create separate Supabase projects for local/dev, preview, and production; CI fails if preview env vars point at production project refs.
+1. Provision **two** remote Supabase projects (free tier: 2 active projects per organisation):
+   - **Production** project — targeted exclusively by Vercel production deployments.
+   - **Dev/Preview** project — shared by local development *and* all Vercel preview deployments.
+   - **Local** developers may additionally run `supabase start` (Docker stack) for fully offline iteration without consuming a remote project slot.
+   - **Trade-off:** preview branches share Dev/Preview state; two PRs mutating the same row can collide. Mitigate with (a) opt-in per-PR seed reset, or (b) upgrade to Supabase Pro ($25/mo) for a third isolated project when team size warrants.
+   - CI fails if preview env vars point at the production project ref.
+   - See `docs/design-hosting/runbooks/supabase-02-remote.md` for provisioning details.
 2. Drain/disable local workers, acquire a Postgres advisory migration lock, then run Alembic against Supabase using the **direct** connection URL (not PgBouncer).
 3. Load sanitized snapshot from local Postgres; validate row counts and financial totals.
 4. Create `raw`, `compute`, `cooked` schemas and initial tables.
@@ -476,7 +484,7 @@ Each phase exits only when these executable proofs pass:
 - **Google → email account collision:** Initial migration supports Google OAuth only. Any email magic-link/password fallback is blocked until Supabase identity-linking is configured so the same verified email maps to one canonical `auth.users` id and Playwright proves household access is not split.
 - **Supabase project pause + local Docker mid-write:** Workers treat connection refusal/timeouts as retryable, keep raw writes idempotent, and never publish partial cooked data. > ⚠️ User to verify against current Supabase docs: pause, unpause, backup retention, and restore guarantees.
 - **Migration during raw ingestion:** Migrations require worker drain plus advisory lock. Workers must check the lock before claim/write and finish or fail current transactions before DDL starts.
-- **Preview deploys hitting prod data:** Preview Vercel env vars must target preview/dev Supabase projects. CI fails if preview refs equal production refs or OAuth state can write production household data.
+- **Preview deploys hitting prod data:** Preview Vercel env vars must target the Dev/Preview Supabase project. CI fails if preview refs equal production refs or OAuth state can write production household data.
 - **Concurrent household edits:** High-value records use optimistic concurrency (`updated_at`/version) so stale spouse edits fail with a conflict message rather than silently overwriting.
 - **Cooked refresh succeeds with wrong totals:** Reconciliation SQL must pass before `compute_runs.status='succeeded'`; otherwise the run is failed and the old cooked snapshot remains active.
 - **Service-role misuse:** CI/import tests fail if service-role clients are imported into user request handlers; privileged writes require audit rows.
@@ -489,7 +497,7 @@ Each phase exits only when these executable proofs pass:
 
 1. Every household-scoped table has `household_id` or a documented exemption; RLS is enabled/forced and automated tests prove anonymous denied, non-member denied, viewer write denied, member write allowed, owner admin allowed, and ex-member denied.
 2. Sanitized migration fixture upgrades and rehearsed downgrades pass with row counts and financial totals matching approved baselines.
-3. Production, preview, development, and local environments use separate Supabase projects or verified isolated schemas; CI fails if preview targets production credentials.
+3. Production and preview/development use **two** remote Supabase projects (free tier limit); local runs use `supabase start` (Docker). CI fails if preview targets production credentials.
 4. Supabase Auth signin, signout, session refresh, invite accept, expired invite, wrong-account invite, and leave/remove household flows pass Playwright.
 5. Each migrated CRUD endpoint has contract/parity tests, Server Action tests, workflow coverage, and a documented rollback switch.
 6. Local Docker workers are idempotent under interruption, network loss, and Supabase pause/resume; partial compute output never publishes to cooked tables.
@@ -575,3 +583,4 @@ Each phase exits only when these executable proofs pass:
 
 - 2026-05-01: v1 — initial synthesis by Keaton
 - 2026-05-01: v2 — revision by Hockney addressing Rabin/Redfoot/Kujan reviews
+- 2026-04-30: v3 — topology revision by Keaton: 3-project assumption replaced with 2-project topology (Production + Dev/Preview) to comply with Supabase free-tier 2-project limit; local dev uses `supabase start` Docker stack
