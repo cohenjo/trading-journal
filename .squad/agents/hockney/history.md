@@ -379,3 +379,41 @@ Full CRUD API for insurance policies at `/api/insurance` — list (with optional
 
 **Branch:** `squad/70-backend-jwt-validation`
 **PR:** Closes #70
+
+### 2026-05-01: Prod RLS Migration (Issue #97, PR #98)
+
+**Context:** Rabin's PR #98 merged to main (9ec4d2b), implementing RLS on 21 public tables + dropping trading_account_secrets. Migrations applied to dev but not prod. Jony delegated prod rollout to Hockney via autopilot.
+
+**Task:** Apply all 18 migrations to prod Supabase (`jaesiklybkbmzpgipvea`).
+
+**Execution:**
+1. Inspected PR changes: 1 modified migration (120100), 2 new migrations (160100, 160200)
+2. Confirmed prod state: 0 migrations applied initially (REST API + CLI check)
+3. Applied migrations via `supabase db push --linked`
+4. Encountered policy conflicts: 3 migrations lacked `DROP POLICY IF EXISTS` (120200, 130300, 130400)
+5. Fixed idempotency: added `DROP POLICY IF EXISTS` before all `CREATE POLICY` statements
+6. Retry successful: all 18 migrations applied
+7. Verified: 0 `rls_disabled_in_public` advisor errors, RLS enabled on all target tables
+8. Closed issue #97 (already closed by coordinator)
+
+**Outcome:**
+- ✅ All 18 migrations applied to prod
+- ✅ RLS enabled on 21 public tables (trade, execution, manualtrade, dailysummary, etc.)
+- ✅ 0 advisor errors on both dev and prod
+- ✅ Issue #97 resolved
+
+**Lessons:**
+- **Idempotency is critical for prod migrations:** Always use `IF [NOT] EXISTS` for CREATE/DROP operations, including policies.
+- **Partial schema state is common:** Prod had tables but no RLS from earlier testing. Migrations must handle this.
+- **Supabase CLI workflow:** `link` → `migration list` → `db push` is clean when migrations are idempotent.
+- **Pre-flight verification:** Should have checked prod policy state before first push attempt.
+
+**Files modified:**
+- Fixed 3 migrations: 120200, 130300, 130400 (added DROP POLICY IF EXISTS)
+- Created decision doc: `.squad/decisions/inbox/hockney-prod-rls-applied.md`
+- Updated history: this entry
+
+**Time investment:** ~15 minutes (including fixes)
+
+---
+

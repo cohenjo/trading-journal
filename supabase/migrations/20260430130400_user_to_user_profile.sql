@@ -81,6 +81,7 @@ create trigger trg_user_profile_updated_at
 alter table public.user_profile enable row level security;
 
 -- Users can only read their own profile.
+drop policy if exists user_profile_owner_select on public.user_profile;
 create policy user_profile_owner_select
   on public.user_profile
   for select
@@ -89,12 +90,14 @@ create policy user_profile_owner_select
 -- Users can insert their own profile row.
 -- (The auth trigger in Step 5 handles the typical creation path;
 --  this policy also permits direct INSERT from application code.)
+drop policy if exists user_profile_owner_insert on public.user_profile;
 create policy user_profile_owner_insert
   on public.user_profile
   for insert
   with check (id = auth.uid());
 
 -- Users can update their own profile.
+drop policy if exists user_profile_owner_update on public.user_profile;
 create policy user_profile_owner_update
   on public.user_profile
   for update
@@ -102,6 +105,7 @@ create policy user_profile_owner_update
 
 -- Users can delete their own profile row.
 -- auth.users ON DELETE CASCADE will also clean up when the Supabase account is deleted.
+drop policy if exists user_profile_owner_delete on public.user_profile;
 create policy user_profile_owner_delete
   on public.user_profile
   for delete

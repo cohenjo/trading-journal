@@ -71,6 +71,7 @@ alter table public.trading_account_config enable row level security;
 -- ================================================================
 
 -- Active household members can read all account configs for their household.
+drop policy if exists trading_account_config_member_read on public.trading_account_config;
 create policy trading_account_config_member_read
   on public.trading_account_config
   for select
@@ -80,6 +81,7 @@ create policy trading_account_config_member_read
   );
 
 -- Active household members may create new account configs within their household.
+drop policy if exists trading_account_config_member_insert on public.trading_account_config;
 create policy trading_account_config_member_insert
   on public.trading_account_config
   for insert
@@ -89,6 +91,7 @@ create policy trading_account_config_member_insert
   );
 
 -- Active household members may update account configs in their household.
+drop policy if exists trading_account_config_member_update on public.trading_account_config;
 create policy trading_account_config_member_update
   on public.trading_account_config
   for update
@@ -99,6 +102,7 @@ create policy trading_account_config_member_update
 
 -- Only the household owner (role='owner') may hard-delete account configs.
 -- Per Decision #1: hard-delete is permitted for the household owner.
+drop policy if exists trading_account_config_owner_delete on public.trading_account_config;
 create policy trading_account_config_owner_delete
   on public.trading_account_config
   for delete

@@ -13,6 +13,7 @@ alter table public.household_members enable row level security;
 -- ============================================================
 
 -- Any active member can read the household row
+drop policy if exists households_member_read on public.households;
 create policy households_member_read
   on public.households
   for select
@@ -20,12 +21,14 @@ create policy households_member_read
 
 -- Any authenticated user may create a household
 -- (trigger below auto-inserts the creator as owner)
+drop policy if exists households_authed_insert on public.households;
 create policy households_authed_insert
   on public.households
   for insert
   with check (auth.uid() is not null);
 
 -- Only the owner may rename or soft-delete (set deleted_at)
+drop policy if exists households_owner_update on public.households;
 create policy households_owner_update
   on public.households
   for update
@@ -34,6 +37,7 @@ create policy households_owner_update
 -- Hard deletes are blocked for all users; use deleted_at for soft-delete.
 -- Deviation from task spec ("owner only") intentional: the runbook §5 explicitly
 -- uses `using (false)` to enforce soft-delete discipline on this table.
+drop policy if exists households_no_hard_delete on public.households;
 create policy households_no_hard_delete
   on public.households
   for delete
@@ -67,6 +71,7 @@ create trigger trg_households_add_creator
 -- ============================================================
 
 -- Members can see the full membership list of their own household
+drop policy if exists household_members_read on public.household_members;
 create policy household_members_read
   on public.household_members
   for select
@@ -74,12 +79,14 @@ create policy household_members_read
 
 -- Only owners may add new members
 -- (invite acceptance runs under service-role after token verification)
+drop policy if exists household_members_owner_insert on public.household_members;
 create policy household_members_owner_insert
   on public.household_members
   for insert
   with check (public.is_household_owner(household_id));
 
 -- Only owners may update roles or set left_at
+drop policy if exists household_members_owner_update on public.household_members;
 create policy household_members_owner_update
   on public.household_members
   for update
@@ -87,6 +94,7 @@ create policy household_members_owner_update
 
 -- Hard deletes blocked; owners use left_at to remove members.
 -- Same soft-delete discipline as the households table.
+drop policy if exists household_members_no_hard_delete on public.household_members;
 create policy household_members_no_hard_delete
   on public.household_members
   for delete
