@@ -113,6 +113,9 @@ Dependency: `20260430140000` must run before `140100`–`140300`. Batch 3 depend
 20260430140100  raw_tables                        ← depends on 140000
 20260430140200  compute_tables                    ← depends on 140000
 20260430140300  cooked_tables                     ← depends on 140000, 140200 (pnl_runs FK)
+20260430150000  sharing_rls_policies              ← canonical p_household_id helpers + sharing policies
+20260430160100  drop_account_secrets_table        ← idempotent drop safety-net for #97
+20260430160200  enable_rls_on_public_tables       ← closes rls_disabled_in_public for public legacy tables
 ```
 
 ## ⚠️ Known deviations from task spec
@@ -120,3 +123,4 @@ Dependency: `20260430140000` must run before `140100`–`140300`. Batch 3 depend
 - ~~DELETE policies use `using (false)` (hard-delete blocked)~~ — **Resolved by Decision #1** (2026-04-30). Hard-delete is now allowed for household owners. See `20260430130500_relax_delete_policies.sql`.
 - Enum is named `household_role` (runbook) not `household_member_role` (data-architecture doc §06). **Decision #2 confirmed** `household_role` as canonical. `docs/design-hosting/sections/06-data-architecture.md` updated.
 - `household_id` and `owner_user_id` columns added as nullable (not `NOT NULL`). Existing rows must be backfilled before the NOT NULL constraint can be enforced. A follow-up migration (TJ-006 or later) will add the constraint post-backfill.
+- Issue #97 RLS rollout intentionally hides legacy rows with NULL ownership columns rather than guessing tenancy. Backfill must assign `household_id` or `owner_user_id` before those rows are visible to authenticated users under RLS.
