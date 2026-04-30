@@ -86,7 +86,42 @@ class DecimalSafeJSONResponse(JSONResponse):
 async def lifespan(app: FastAPI):
     print("Creating tables..")
     create_db_and_tables()
+    await _warmup_jwks_cache()
     yield
+
+
+async def _warmup_jwks_cache() -> None:
+    """Pre-populate the Supabase JWKS cache at startup (non-fatal on failure)."""
+    import asyncio
+
+    try:
+        from app.supabase_auth import SupabaseAuthSettings, init_jwks_cache
+
+        sb_settings = SupabaseAuthSettings()
+        cache = init_jwks_cache(sb_settings)
+
+        async def _prefetch() -> None:
+            try:
+                # Trigger a fetch by requesting any key (uses the public _refresh path)
+                import httpx
+
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(sb_settings.jwks_url)
+                    resp.raise_for_status()
+                    data = resp.json()
+                import time
+
+                for key_data in data.get("keys", []):
+                    kid = key_data.get("kid", "default")
+                    cache._keys[kid] = key_data  # type: ignore[attr-defined]
+                cache._last_fetch = time.monotonic()  # type: ignore[attr-defined]
+                print(f"JWKS cache warmed: {cache.key_count} key(s)")
+            except Exception as exc:  # noqa: BLE001
+                print(f"JWKS pre-fetch skipped (non-fatal): {type(exc).__name__}: {exc}")
+
+        asyncio.create_task(_prefetch())
+    except Exception as exc:  # noqa: BLE001
+        print(f"Supabase auth settings not configured (non-fatal): {type(exc).__name__}: {exc}")
 
 app = FastAPI(
     title="Trading Journal API",
@@ -126,6 +161,25 @@ PUBLIC_PATHS = {"/", "/docs", "/redoc", "/openapi.json", "/api/auth/register", "
 def read_root():
     """Health-check root endpoint."""
     return {"Hello": "World"}
+
+
+@app.get("/health/auth", tags=["health"])
+def health_auth():
+    """Supabase JWKS cache diagnostics — no authentication required.
+
+    Returns the current state of the JWKS signing-key cache so operators
+    can verify the cache is populated after deployment.
+    """
+    from app.supabase_auth import get_jwks_cache
+
+    cache = get_jwks_cache()
+    if cache is None:
+        return {"status": "not_initialized", "key_count": 0, "populated": False}
+    return {
+        "status": "ok",
+        "key_count": cache.key_count,
+        "populated": cache.is_populated,
+    }
 
 # Auth router (public endpoints — registered first, no auth dependency)
 app.include_router(auth_router_module.router)
