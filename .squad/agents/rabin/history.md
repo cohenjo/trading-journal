@@ -56,3 +56,10 @@
 - **Deliverable:** `docs/design-hosting/runbooks/supabase-03-auth-rls.md` (~300 lines, copy-pasteable SQL migration block included).
 - **Flags:** Google Console does not support wildcard authorized origins — each preview URL must be registered explicitly. Supabase redirect-URL wildcard syntax should be verified against current docs. Free-tier email rate limit (3/hr) may constrain invite emails at scale.
 - 2026-04-30: Phase 1 foundation batch shipped — see .squad/log/2026-04-30T17-00-00Z-phase1-foundation-batch.md
+
+### 2026-04-30 — YOLO Direct-Apply Round: TJ-022 Sharing RLS + 581 pgTAP Tests
+
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Work:** Implemented 5 SECURITY DEFINER helper functions with `SET search_path = public, pg_temp` (stricter than design spec) to prevent temp-table injection. Built comprehensive 581-line pgTAP test suite validating all RLS scenarios. Documented 4 key tradeoffs: search_path convention, household hard-delete limits, cooked-table write-access coexistence, trigger firing order safety.
+
+**Key Insight:** Strict search_path configuration provides defense-in-depth; pgTAP is essential for RLS correctness validation at scale.

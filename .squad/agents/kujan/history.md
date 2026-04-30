@@ -98,3 +98,10 @@
 
 📌 Team update (2026-04-10T08:19:59Z): Testing Sprint Phase 1-3 Complete — Phase 2 DevOps review: CI broken (critical blocker), pre-commit hooks missing, PostgreSQL integration needed Phase 1 (not Phase 2), Docker health checks required. Phase 3 implementation: 5 commits delivered: squad-ci.yml fixed, .pre-commit-config.yaml created, docker-compose.yml health checks added, dependabot.yml configured, all validation passing. Infrastructure P0 complete. Branch squad/testing-ci-infrastructure ready for merge. All CI/CD, pre-commit, health checks verified working. Orchestration, session logs, decisions merged. — Scribe (Team Orchestration)
 - 2026-04-30: Phase 1 foundation batch shipped — see .squad/log/2026-04-30T17-00-00Z-phase1-foundation-batch.md
+
+### 2026-04-30 — YOLO Direct-Apply Round: TJ-001 Local Supabase Dev Runbook Finalization
+
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Work:** Completed TJ-001 local Supabase development runbook with full Docker Compose setup, CLI workflow, migration strategy, RLS pattern guide, OAuth setup, and 12-item free-tier watchlist (all for team verification). PR #91 merged (commit 9cf168e).
+
+**Key Insight:** Supabase CLI tooling is fast-evolving; key output labeling changed (anon key → publishable key); always verify against `supabase status` not docs.

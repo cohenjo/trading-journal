@@ -985,3 +985,93 @@ Added 94 focused pytest tests across 6 new test files:
 - Total test count: ~136 → ~230 (94 new)
 - All financial calculations now have baseline coverage
 - No pre-existing tests were modified or broken
+
+---
+
+## 2026-04-30: Baseline Legacy Schema Migration Strategy
+
+**By:** McManus (Data/Finance Dev)  
+**Related:** TJ-005, PR #90  
+
+### Decision
+
+Create a **single baseline migration** (`20260430115000_baseline_legacy_schema.sql`) that consolidates 22 Alembic migrations into one idempotent SQL file for fresh Supabase instances.
+
+### What
+
+1. **Consolidated 22 Alembic migrations** into single baseline SQL file
+2. **Created all 21 legacy tables** in final schema form (after all evolutions)
+3. **Used CREATE TABLE IF NOT EXISTS** for safety and idempotency
+4. **Applied NUMERIC(18,6)** for all monetary fields (per Decision from PR #85)
+5. **Created stub `trading_account_secrets`** so migration 130300 can drop it cleanly
+6. **Did NOT add** household_id, owner_user_id, audit columns, or RLS — handled by subsequent migrations
+
+### Why
+
+- Alembic migrations have incremental schema transformations unsuitable for fresh Supabase instances
+- 22 sequential migrations vs. 1 baseline significantly simplifies deployment
+- Migration 335418ec68e3 was incomplete; reconstructed missing `trade` table from downgrade/upgrade logic
+- Timestamp 115000 runs before 120000 (household bootstrap), maintaining clear dependency order
+- Stub `trading_account_secrets` ensures 130300 can run cleanly
+
+### Implementation Details
+
+- Reconstructed missing `trade` table creation from downgrade/upgrade logic of d869bcf363dc
+- Fixed SQL reserved word conflict: quoted `optioncontract.right` column
+- DEV (zvbwgxdgxwgduhhzdwjj): 24 tables total (21 legacy + 3 household)
+- PROD (jaesiklybkbmzpgipvea): 24 tables total (21 legacy + 3 household)
+
+---
+
+## 2026-04-30: Sharing RLS Policy Tradeoffs (TJ-022)
+
+**By:** Rabin (Database/RLS Dev)  
+**Related:** PR #92  
+
+### Decision
+
+Implement sharing RLS policies with 5 SECURITY DEFINER helper functions using `SET search_path = public, pg_temp` convention.
+
+### Tradeoffs Documented
+
+1. **search_path convention:** Uses stricter `SET search_path = public, pg_temp` (vs. Design.md §5 which shows `SET search_path = public`) to prevent temp-table injection attacks
+2. **Household hard-delete:** `households_delete` requires `has_active_other_owner` — single-owner households cannot hard-delete via authenticated RLS; must use soft-delete instead
+3. **Cooked table write access:** Both service_role-only writes (compute worker) and authenticated `is_household_writer` policies coexist for FORCE-RLS safety
+4. **Trigger firing order:** `trg_household_members_bump_version` fires before `trg_household_members_guard` (alphabetical); safe by design (guard abort discards version bump)
+
+### Outcome
+
+- 5 SECURITY DEFINER helpers deployed with `p_household_id` signature (dev+prod)
+- 581-line pgTAP test suite validating all RLS scenarios
+- PR #92 merged (commit `d975dac`)
+
+---
+
+## 2026-04-30: TJ-005 — Supabase Migrations as Schema Source of Truth
+
+**By:** Keaton (Lead)  
+**Related:** #58, Design.md §4  
+
+### Decision
+
+Phase 1 schema work (household columns, audit columns) **must** be written as Supabase SQL migrations under `supabase/migrations/`, NOT as new Alembic versions.
+
+### Rationale
+
+- Design.md §4.3 establishes Supabase Postgres as schema source of truth
+- `supabase/migrations/` already follows `YYYYMMDDHHMMSS_<slug>.sql` convention
+- Adding a 23rd Alembic version would create split migration history, breaking `supabase db reset` and reproducibility
+- Design §4.5 retains `alembic upgrade head` in CI only for FastAPI ORM model sync; it does not govern hosted-schema evolution
+
+### Scope
+
+- **Frozen for Phase 1:** Alembic (no new versions)
+- **Active for Phase 1:** `supabase/migrations/YYYYMMDDHHMMSS_*.sql`
+- **Alembic future:** SQLAlchemy models should eventually be updated to match, but does not block Phase 1
+
+### Impact
+
+- TJ-005 (Hockney) must produce Supabase SQL migration, not Alembic version
+- Dependency chain: TJ-003 → TJ-005 → TJ-006 → TJ-007
+
+

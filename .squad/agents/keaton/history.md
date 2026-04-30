@@ -55,3 +55,12 @@
 - Ruled out Alembic for Phase 1 household-column work; Supabase migrations (`supabase/migrations/`) are the source of truth per design §4.3
 - Updated issue #58 title, posted blocking verdict, documented TJ-003→TJ-005→TJ-006→TJ-007 dependency chain
 - Hockney stays assigned; must pair with McManus post TJ-003; decision filed to inbox
+
+### 2026-04-30 — YOLO Direct-Apply Round: PR #90 Review + TJ-005 Migration Strategy Verdict
+
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Work:** Conducted detailed code review of McManus baseline schema work (PR #90). Identified 3 findings: tradingaccounttype enum, missing columns, FK coverage. Submitted APPROVE verdict. All findings addressed in subsequent commit 5a8367e.
+
+**TJ-005 verdict:** Documented that Phase 1 schema work must use Supabase SQL migrations, not Alembic versions, per design §4.3. Blocking verdict recorded; dependency chain clarified (TJ-003→TJ-005→TJ-006→TJ-007).
+
+**Key Insight:** Architectural decisions must be recorded early to prevent split migration histories across tools; Supabase CLI is the single source of truth for hosted schema.

@@ -66,3 +66,12 @@ Closed GH #56 (TJ-003). PR #85 comment posted at https://github.com/cohenjo/trad
 **Applied:** Successfully applied to both DEV (zvbwgxdgxwgduhhzdwjj) and PROD (jaesiklybkbmzpgipvea). All 5 migrations (115000, 130000, 130100, 130200, 130300) now working. Both environments have 24 tables total (21 legacy + 3 household).
 
 PR #90 opened and ready for review.
+
+### 2026-04-30 — YOLO Direct-Apply Round: Baseline + Keaton Review
+
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Work (Round 1):** Consolidated 22 Alembic migrations into single idempotent baseline migration (20260430115000_baseline_legacy_schema.sql) for fresh Supabase instances. Reconstructed missing trade table creation from d869bcf363dc logic. Fixed SQL reserved word quoting (`right` column). Applied baseline successfully to both DEV+PROD.
+
+**Work (Round 2):** Addressed all 3 code review findings from Keaton on PR #90: added `tradingaccounttype` enum, filled missing column additions, ensured FK constraint coverage. Commit 5a8367e merged.
+
+**Key Insight:** Alembic migrations cannot be replayed directly on fresh Supabase instances; baseline consolidation + idempotent CREATE TABLE IF NOT EXISTS pattern is the right approach for cloud deployment.
