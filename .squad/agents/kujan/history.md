@@ -105,3 +105,37 @@
 **Work:** Completed TJ-001 local Supabase development runbook with full Docker Compose setup, CLI workflow, migration strategy, RLS pattern guide, OAuth setup, and 12-item free-tier watchlist (all for team verification). PR #91 merged (commit 9cf168e).
 
 **Key Insight:** Supabase CLI tooling is fast-evolving; key output labeling changed (anon key → publishable key); always verify against `supabase status` not docs.
+
+📌 **PR Board Triage — Dependabot + Stale Draft (2026-07-25):**
+
+**Requested by:** Jony Vesterman Cohen (autopilot)
+
+**Context:** Full PR board cleanup post-Supabase+Vercel migration. 12 open PRs evaluated.
+
+**Merged (8 PRs):**
+- **#52** cachetools >=7.0.5→>=7.0.6 — safe minor, cachetools used in analyze endpoints
+- **#51** pypdf >=6.10.0→>=6.10.2 — safe patch, pypdf in active use
+- **#50** @eslint/eslintrc 3.3.1→3.3.5 — safe patch
+- **#47** @playwright/test 1.57.0→1.59.1 — safe minor (1.x)
+- **#46** bcrypt <4.1→<5.1 — safe range expansion; bcrypt IS still used via passlib/CryptContext in `app/auth/security.py` even after Supabase JWT migration. Local auth endpoints (register/login) still hash passwords with bcrypt.
+- **#44** setup-python v4→v6 — only breaking change is Node 24 runner (v2.327.1+); GitHub-hosted runners support this; brings copilot-setup-steps.yml into alignment with other workflows already on v5
+- **#28** react-dom 19.1.0→19.2.5 — safe minor within React 19 family already in use
+- **#24** python-multipart >=0.0.22→>=0.0.27 — safe patch; required manual merge conflict resolution with pyproject.toml (pypdf update landed first)
+
+**Deferred (3 PRs — needs human validation):**
+- **#49** @types/node 20→25 — 5 major versions; must align with Node runtime target; test `npm run build && npm test` before merging
+- **#48** jsdom 28→29 — major vitest test environment bump; run full test suite first
+- **#45** upload-artifact v4→v7 — 3 major versions, affects 5 workflows; v5/v6 changelogs not reviewed
+
+**Closed as obsolete (1 PR):**
+- **#84** TJ-014 draft — docker-compose POSTGRES_* vars, Alembic env config, and `app/dal/database.py` are all dead post-Supabase migration. Root `.env.example` was already delivered by TJ-002 (PR #55). Left detailed comment explaining what was obsolete and why.
+
+**Conflict resolution pattern:** Sequential dependabot merges modifying the same pyproject.toml require manual conflict resolution. Pattern: `gh pr checkout N → git merge origin/main → resolve → push --force-with-lease → gh pr merge --admin`. Trigger `@dependabot rebase` on other pending PRs before attempting their merges to minimize conflicts.
+
+**Key Learnings for Future Triage:**
+- Always grep for dep usage before closing bcrypt/passlib PRs — Supabase JWT replaced token _validation_ but local auth hashing is still alive.
+- `@types/node` major bumps (following Node.js versions) should be validated against the project's target Node version in CI (currently Node 20).
+- jsdom major bumps need full vitest suite run — it's the test DOM environment.
+- upload-artifact major bumps need changelog review for each version in the jump range.
+- setup-python major bumps are usually safe if the only change is the action's own Node runtime version.
+- Dependabot PRs touching the same file (pyproject.toml, package.json) conflict cascade when merged sequentially — merge them in rapid succession or trigger `@dependabot rebase` proactively.
