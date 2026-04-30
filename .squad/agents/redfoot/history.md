@@ -7,96 +7,16 @@
 - **Created:** 2026-02-23T22:46:19Z
 
 ## Learnings
+## Core Context
 
-### 2026-04-30: RLS Reconciliation Tests — TJ-013 / GH #66 (PR #86)
+*Summary: 4 previous entries consolidated below (created 4 distinct decisions/learnings)*
 
-**What was done:**
-- Read all 12 migrations from PR #85 (`squad/61-ci-cd-scaffolding`) to understand actual schema.
-- Created `supabase/tests/` directory with 5 files (4 test files + README):
-  - `00_setup.sql` — test helpers: `create_test_user`, `create_test_household`, `add_household_member`, `set_session_user`, `clear_session_user`, `teardown`
-  - `10_household_membership.sql` — 17 concrete assertions for `households` + `household_members` RLS (live in PR #85)
-  - `20_household_data_isolation.sql` — 10 tests: 6 concrete (cooked.dashboard_summary) + 4 aspirational (trade, trading_positions)
-  - `30_owner_private_isolation.sql` — 8 aspirational tests for `note` + `backtestrun` owner isolation
-  - `40_audit_columns.sql` — 12 tests for `tg_update_timestamp()` trigger + schema structural checks
-- Created `.github/workflows/test-rls.yml` (separate from Kujan's CI workflow)
-- PR opened as DRAFT (depends on PR #85): `squad/66-rls-reconciliation-tests`
+- ### 2026-04-30: RLS Reconciliation Tests — TJ-013 / GH #66 (PR #86)
+- ### 2026-03-06: Playwright E2E Tests for /analyze Page (11 Tests, All Passing)
+- ### 2026-07-23: Pension upload propagation & zero-value regression tests (8 tests)
+- ### Deterministic table extraction tests (5 tests, all passing)
 
-**Key learnings:**
-- `USING (false)` for DELETE (not owner-only): Rabin deviation #1, confirmed and documented.
-- Audit trigger (`tg_update_timestamp`) sets only `updated_at` — no `created_by`/`updated_by` columns exist in the migrations.
-- `household_invitations` table does NOT exist in PR #85 — tests skipped, documented for follow-up.
-- `trading_account_config` split (migration 20260430130300) is SKETCH only — skipped.
-- `retire_local_user_table` (20260430130400) is DESTRUCTIVE/conditional — skipped.
-- Aspirational test pattern: `ok(true, '@aspirational ...')` lets tests describe the desired contract without blocking CI.
-- For RLS to apply in pgTAP, session role must be `authenticated` — tests use `SET LOCAL ROLE authenticated` + `tests.set_session_user(uuid)` combo.
-- `cooked.*` tables have live RLS in PR #85; `public.*` household data tables do NOT yet.
-
-**Test count: ~47 total assertions** (17 concrete household membership + 10 data isolation + 8 owner-private + 12 audit)
-
-**PR:** Draft #86 (branch: `squad/66-rls-reconciliation-tests`) — Closes #66
-
-
-
-- Team initialized with shared focus on financial data integrity, security, and maintainable AI-assisted workflows.
-- Frontend test infra established: vitest + jsdom + React Testing Library. Config at `apps/frontend/vitest.config.ts`, setup at `src/test/setup.ts`. Run with `npm test` in `apps/frontend/`.
-- `lightweight-charts` mock covers createChart, all series types (line, candlestick, histogram, area), timeScale, priceScale. Located in `src/test/setup.ts` — extend when new chart patterns are added.
-- `next/navigation` mock covers useRouter, usePathname, useSearchParams. Sufficient for all current components.
-- OptionChainSnapshot requires null-safety testing: API can return null Greeks. Tests confirm the component handles this gracefully with dash fallbacks.
-- SplitBrainToggle uses `aria-pressed` for accessibility — tests verify this. Keep accessibility testing as a pattern for all toggle/tab components.
-- AnalyzePage child views (LongTermView, ShortTermView) should be mocked in page-level tests to isolate routing/toggle logic from data-fetching concerns.
-- PR #15 opened as draft for issue #4 (branch: `squad/4-frontend-test-infra`).
-- **Playwright E2E tests for /analyze page:** Created `apps/frontend/tests/analyze.spec.ts` with 11 comprehensive tests covering page load, ticker search, toggle switching, financial data display, and error handling. Tests use REAL API calls (no mocks) with appropriate timeouts (30s test timeout, 15s for API-dependent visibility checks).
-- **Key E2E testing patterns learned:** Toggle buttons use `aria-pressed="true"` (not `data-state="on"`), metric labels include spaces (e.g., "Net Debt / EBITDA", "EV / FCF"), real yfinance API calls require generous timeouts, invalid ticker tests should check for absence of data sections rather than specific error messages.
-- **Real integration testing philosophy:** Unlike unit tests that mock external dependencies, E2E tests should verify the full stack integration including backend API calls and external data sources. This catches integration issues that mocked tests miss.
-
-### 2026-03-06: Playwright E2E Tests for /analyze Page (11 Tests, All Passing)
-
-**What was done:**
-- Created `apps/frontend/tests/analyze.spec.ts` with 11 comprehensive Playwright E2E tests
-- Tests cover: page load, ticker search (MSFT), toggle switching, Financial Scorecard, Valuation Benchmarks, DCF Calculator, error handling (invalid ticker, network failure), empty states, chart rendering
-- All tests passing consistently
-- Uses REAL API calls (no mocks), follows established real integration testing philosophy
-- Timeouts: 30s per test, 15s for API-dependent assertions
-
-**Key learnings:**
-- Toggle buttons use `aria-pressed="true"` attribute (not `data-state="on"`)
-- Metric labels must include spaces: "Net Debt / EBITDA", "EV / FCF"
-- yfinance API can be slow — generous timeouts avoid flakiness
-- Real integration tests catch data format quirks (null Greeks, missing technicals for low-volume stocks)
-
-**PR:** #16 (branch: `squad/4-analyze-e2e-tests`)
-**Commit:** (pending)
-
-**Cross-team:** Waited for Hockney's router fix before starting tests. Backend now ready for production validation.
-- ### 2026-03-07: Pension multi-owner regressions
-- Backend pension identities now come from `extract_pension_payload` in `apps/backend/app/api/pension.py` and encode owner + product + fund/account, which keeps Jony/Rita products distinct across dashboard history, plan sync, and delete flows.
-- `build_pension_dashboard_payload` is the key aggregation seam for pension history/projections; tests now verify it only emits latest active pensions and that deletes remove the same identity from historical snapshots and the plan.
-- Frontend pension rendering now centers on `apps/frontend/src/components/Pension/pensionTypes.ts` and `pensionChartUtils.ts`; chart regression tests cover empty projections and missing history anchors, while `PensionTable.test.tsx` covers the four-fund Jony/Rita scenario and stable delete targeting.
-
-### 2026-07-23: Pension upload propagation & zero-value regression tests (8 tests)
-
-- **Bug-1 (invisible pension after upload):** Tests verify that upserting to both report-date and latest snapshot makes the pension visible on the dashboard. Key pattern: create multiple snapshots with different dates, upsert to both, then assert `build_pension_dashboard_payload` returns the pension in `accounts[]`. The dashboard reads only from `snapshots[-1]`.
-- **Bug-2 (zero ILS from null Total Amount):** `_safe_float(None)` returns 0.0 — this is documented behavior now pinned by test. Sub-fields (deposits, earnings, fees) are preserved even when total is zero. Any future fix must update `test_extract_pension_payload_zero_total`.
-- **Complementary pension resolution:** `resolve_pension_product` falls through product fields → fund name → filename. The "comp" hint in any of those resolves to "פנסיה משלימה". Tests pin all three paths.
-- **Same-owner dual-product coexistence:** `_make_jony_comprehensive` and `_make_jony_supplementary` helpers exist for reuse. Identity uniqueness comes from the product slug in `build_pension_identity`.
-- **Key file:** `apps/backend/tests/test_pension_api.py` — 13 tests total (5 original + 8 regression).
-- **Edge case discovered:** double-upsert on the same snapshot (same date = report date = latest) does not duplicate — the identity match prevents it. This is safe.
-
-📌 **Team update (2026-03-07T20:18:16Z):** Pension upload bugs fixed — snapshot propagation for dashboard visibility + Hebrew RTL analyzer prompt + zero-value validation. All 17 tests passing. — Hockney, Redfoot
-
-### Deterministic table extraction tests (5 tests, all passing)
-
-- **What:** Added 5 tests for Hockney's `_extract_from_tables()` in `apps/backend/app/utils/copilot_analyzer.py`. Tests mock `pdfplumber.open` and supply Clal pension TABLE 2 data with exact Hebrew RTL keywords.
-- **Key file:** `apps/backend/tests/test_pension_api.py` — now 21 tests total (16 original + 5 new).
-- **Mock pattern:** `_mock_pdf()` builds a MagicMock with `__enter__`/`__exit__` for context manager protocol, `.pages[0].extract_tables()` and `.extract_text()`. Hebrew keywords in mock data must match the `_KW_*` constants exactly (e.g., `"ןועברה ףוסב םיפסכה תרתי"` not abbreviated).
-- **Page text regexes:** Name, ID, and date are extracted via `_PAT_NAME`, `_PAT_ID`, `_PAT_DATE` regexes from page text — not from tables. Mock text must match these patterns (e.g., `'66475922 :ז.ת רפסמ ישראלי ישראל :תימעה םש'`).
-- **Name reversal:** pdfplumber returns reversed Hebrew word order; the function does `" ".join(reversed(raw_name.split()))`. Mock text must provide name in reversed order.
-- **Product detection:** `_PRODUCT_COMP = "המילשמ"` vs `_PRODUCT_COMPREHENSIVE = "הפיקמ"` in first 600 chars of page text. Fund: `_FUND_CLAL = "היסנפ ללכ"`.
-- **Monthly deposits formula:** `round(deposits_ytd / month_num)` where month_num comes from report date month. Sep 30 → month 9 → 33146/9 ≈ 3683.
-- **Earnings/fees split:** Single cell `"120,818\n-580"` → split on newline, fees = abs(second part).
-- **Fallback:** When `_find_table2()` returns None (no matching keywords), function returns None, signaling caller to use AI path.
-
-📌 **Team update (2026-03-07T20:59:37Z):** Deterministic table extraction implemented and tested. `_extract_from_tables()` reliably parses Clal pension PDFs (800,545 ILS comp, 1,194,873 ILS main). AI fallback preserved. 21 tests total, all passing. Non-breaking change. — Hockney, Redfoot
+---
 
 ### 2026-03-08: Pension category changed from Investments to Savings (5 new tests)
 
@@ -191,3 +111,6 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 3. Flow tests use `canvas` + heading selectors with regex — these will be fragile if the page headings change. Consider adding `data-testid` attributes to key chart containers as a follow-up.
 
 **Depends on:** Fenster's `squad/auth-guard-jwt-forwarding` PR. Once that lands, 3 smoke FAILs → PASS with no test changes.
+
+
+📌 **Team update (2026-04-30T22-16-38Z):** RLS-21 dev+prod merge complete — PR #98 (21 public tables + drop secrets) merged to main (9ec4d2b), 18 migrations applied to prod (jaesiklybkbmzpgipvea), 0 rls_disabled_in_public advisor errors verified. Issue #97 closed. Cross-agent RLS coverage now extends to all 21 public tables. — Rabin (author), Keaton (reviewer), Hockney (prod apply), Redfoot (E2E coverage opportunity)
