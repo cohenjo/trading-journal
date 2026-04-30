@@ -157,3 +157,37 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 **`--list` result:** 9 new smoke tests enumerated across chromium/firefox/webkit with no TypeScript errors. Existing `tests/` specs still enumerate correctly.
 
 **PR:** (pending — this round is scaffold only; running tests against dev Supabase is next round after Kujan confirms env)
+
+### 2026-07-25: Smoke baseline established + P0 flow scaffold (PR #95)
+
+**Branch:** `squad/p0-test-scaffold` (from main @ 870d3d1)
+
+**Smoke baseline result: 7/10 PASS** (3 expected failures)
+
+| Spec | Result |
+|------|--------|
+| `e2e/smoke/healthcheck.spec.ts` (3 tests) | ✅ 3/3 PASS |
+| `e2e/smoke/home.spec.ts` (3 tests) | ✅ 3/3 PASS |
+| `e2e/smoke/settings.spec.ts` (2 tests) | ⚠️ 1/2 — "redirects away from /settings" FAIL (no auth guard on main) |
+| `e2e/smoke/holdings.spec.ts` (2 tests) | ❌ 0/2 — both FAIL (no auth guard; table IS rendered without auth) |
+
+**Baseline log:** `apps/frontend/e2e/BASELINE.md`
+
+**P0 routes covered (from Fenster's page-audit.md):**
+- `/` → `/summary` — `e2e/flows/root.spec.ts`
+- `/current-finances` — `e2e/flows/current-finances.spec.ts`
+- `/plan` — `e2e/flows/plan.spec.ts`
+- `/summary` — `e2e/flows/summary.spec.ts`
+
+**Infrastructure added:**
+- `e2e/fixtures/admin.ts` — service-role client with prod-guard (checks Supabase URL slug)
+- `e2e/fixtures/auth.ts` — `authenticatedUser` + `householdOwner` Playwright fixtures
+- `e2e/scripts/cleanup-stale-users.ts` — purge `e2e_*` Supabase users >1h old
+- `playwright.config.ts` — `testMatch` covers `tests/**` + `e2e/**`; `BASE_URL` env var added
+
+**Selector fragility noticed:**
+1. `settings.spec.ts` test "does not render planning mode toggle" uses `[data-testid="planning-mode-toggle"]` — this attribute doesn't exist on the component yet, so the test passes for the wrong reason. Must add the `data-testid` when the auth guard ships.
+2. `/summary` chart assertion uses broad `canvas, [class*="chart"]` selector — works today but will need tightening once the exact chart DOM structure is confirmed in production.
+3. Flow tests use `canvas` + heading selectors with regex — these will be fragile if the page headings change. Consider adding `data-testid` attributes to key chart containers as a follow-up.
+
+**Depends on:** Fenster's `squad/auth-guard-jwt-forwarding` PR. Once that lands, 3 smoke FAILs → PASS with no test changes.
