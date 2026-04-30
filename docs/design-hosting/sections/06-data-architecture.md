@@ -65,12 +65,14 @@ create table public.households (
   created_at timestamptz not null default now()
 );
 
-create type public.household_member_role as enum ('owner', 'member', 'viewer');
+-- Decision #2 (2026-04-30): enum is canonical `household_role` (not household_member_role).
+-- Matches the implementation in migration 20260430120000_households_and_members.sql.
+create type public.household_role as enum ('owner', 'member', 'viewer');
 
 create table public.household_members (
   household_id uuid not null references public.households(id) on delete cascade,
   user_id uuid not null references public.users(id) on delete cascade,
-  role public.household_member_role not null default 'member',
+  role public.household_role not null default 'viewer',
   joined_at timestamptz not null default now(),
   primary key (household_id, user_id)
 );
@@ -93,10 +95,9 @@ Default rule: if a row contributes to family net worth, retirement, taxes, incom
 
 | Data set | Existing table(s) | Scope | Reason |
 |---|---|---|---|
-| Supabase/app profile | `users` | `id` = user | Identity row, not shared. |
+| Supabase/app profile | `user_profile` | `id` = user | Identity row; 1:1 with `auth.users`. Created by trigger on auth.users INSERT. |
 | Household registry | new `households`, `household_members` | Household membership | Tenant boundary. |
-| Broker/trading account metadata | `trading_account_config`, `dividend_accounts` | `household_id` | Spouses need shared balance/planning visibility. |
-| Broker credentials/tokens | fields currently in `trading_account_config` (`app_secret`, `tokens_path`, etc.) | `owner_user_id` or external secret store | Secrets should not become household-readable table data. Prefer Supabase Vault/env/local broker connector. |
+| Broker/trading account metadata | `trading_account_config`, `dividend_accounts` | `household_id` | Spouses need shared balance/planning visibility. No credential columns — manual entry only. |
 | Imported trades and executions | `trade`, `manualtrade`, `execution` | `household_id` | Trading P&L affects household wealth and dashboards. |
 | Positions/account summaries | `trading_positions`, `trading_account_summary`, `dividend_positions` | `household_id` | Shared current holdings and income view. |
 | Finance snapshots | `finance_snapshots` | `household_id` | Net worth and cash-flow planning are household-level. Keep nested item `owner` for attribution. |
@@ -127,7 +128,7 @@ with h as (
   returning id
 ), m as (
   insert into public.household_members (household_id, user_id, role)
-  select id, :'app_user_id'::uuid, 'owner'::public.household_member_role
+  select id, :'app_user_id'::uuid, 'owner'::public.household_role
   from h
   returning household_id
 )
