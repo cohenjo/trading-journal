@@ -308,3 +308,25 @@ Full CRUD API for insurance policies at `/api/insurance` — list (with optional
 
 **Branch:** `squad/18-insurance-policies-api`
 **Tests:** 114 existing tests pass (1 pre-existing failure needs Postgres)
+
+
+### 2026-04-30: Backend Hosting Strategy Draft
+
+**What was produced:**
+- Wrote `docs/design-hosting/sections/05-backend-strategy.md` with a practical hybrid backend strategy for Supabase + Vercel.
+- Created `docs/design-hosting/diagrams/05-data-flow.excalidraw` showing source ingestion, raw/compute/cooked layers, local Docker compute worker, and Vercel/Next.js Server Actions.
+- Drafted `.squad/decisions/inbox/hockney-backend-strategy.md` for Scribe/Keaton review.
+
+**Recommendation:**
+Use the Hybrid end state: frontend-direct CRUD/read paths through Supabase Auth/RLS, with FastAPI retained as a compute/integration worker for broker sync, PDF parsing, backtests, market data, options analytics, and analysis jobs.
+
+**Key backend notes:**
+- UI should read `cooked_*` tables/materialized views rather than raw or compute tables.
+- Heavy jobs should write `raw_*`, `compute_*`, and publish `cooked_*` only after successful `compute_runs`.
+- Use Supabase direct DB connections for Alembic and long jobs; use PgBouncer transaction pooling for short web/API transactions with prepared statement caching disabled where relevant.
+
+## 2026-05-01 — Hosting design revision
+
+Revised `docs/design-hosting/design.md` in place after Rabin, Redfoot, and Kujan reviews. Added canonical RLS/invite/lifecycle controls, phase test gates, rollback rehearsal, edge-case catalogue, cooked-refresh observability, env/connection-pooling guidance, migration acceptance criteria, decisions/open questions cleanup, and changelog v2. Wrote `docs/design-hosting/reviews/hockney-revision.md` with finding-by-finding disposition.
+
+📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.

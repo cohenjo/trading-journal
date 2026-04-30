@@ -30,3 +30,16 @@
 📌 **Team update (2026-02-23T22:59:59Z):** Financial Precision and Type Safety - Both frontend and backend use unsafe numeric types causing precision risks. Quality gate required: all PRs must use Decimal/BigNumber for monetary operations. — Fenster, Hockney
 
 📌 **Team update (2026-02-23T22:59:59Z):** Testing and Quality Assurance - CI/CD pipeline and comprehensive test suite needed for financial calculations and security validation. — Fenster, Hockney, Keaton
+
+### 2026-04-30: Supabase Auth and Household Sharing Design
+- **Context:** Auth migration design for Google OAuth and spouse/household sharing in a sensitive personal finance and trading app.
+- **Recommendation:** Use Supabase Auth with Google OAuth and Postgres RLS, backed by `households`, `household_members`, single-use invite tokens, and role-based owner/member/viewer permissions.
+- **Security guardrails:** No tokens in localStorage; prefer server-managed secure cookies via `@supabase/ssr`; use anon-key + per-request JWT for user-scoped data so RLS applies; reserve service-role key for audited backend-only jobs.
+- **Deliverables:** Wrote `docs/design-hosting/sections/03-auth-sharing-security.md`, generated `docs/design-hosting/diagrams/03-auth-sharing-flow.excalidraw`, and drafted `.squad/decisions/inbox/rabin-auth-sharing.md`.
+
+### 2026-05-01: Unified Hosting Design Security Review
+- **Context:** Reviewed `docs/design-hosting/design.md` against Rabin's auth/security section, data architecture RLS coordination, and backend service-role handling guidance.
+- **Verdict:** Approved with conditions; no fatal architecture blocker, but implementation readiness depends on tightening service-role/direct DB credential wording, household lifecycle controls, invite revocation/replay details, threat model coverage, and free-tier backup/pausing guarantees.
+- **Deliverable:** Wrote `docs/design-hosting/reviews/rabin-review.md` with corrected canonical RLS helper/policy snippet and owner assignments for Keaton, Rabin, Hockney, Kujan, and McManus.
+
+📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.

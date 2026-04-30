@@ -107,3 +107,18 @@ Completed all P0 tasks for Week 1 of the testing plan. Added comprehensive test 
 **Branch ready for review and merge.**
 
 📌 Team update (2026-04-10T08:19:59Z): Testing Sprint Phase 1-3 Complete — Phase 2 frontend review completed: E2E coverage corrected to 30%, currency.ts flagged P0, 8 custom hooks identified. Phase 3 implementation: 53 new tests delivered (lib/currency 18 tests, SettingsContext 20 tests, custom hooks 15 tests). Frontend coverage improved 4% → ~8%. Vitest coverage configured. Branch squad/testing-frontend-utilities ready for merge. Orchestration, session logs, and decisions merged. — Scribe (Team Orchestration)
+
+---
+
+## 2026-04-30 — Frontend Strategy & Supabase Auth UX
+
+**Requested by:** Jony Vesterman Cohen  
+**Status:** Complete
+
+Auth/hosting strategy documentation completed for the move from FastAPI-auth-like flows to Supabase Google OAuth with a hybrid backend. Wrote `docs/design-hosting/sections/02-frontend-strategy.md` covering Vercel native Next.js 15 deployment, env var boundaries, preview deployment auth constraints, Supabase SSR middleware/client helper skeletons, auth and household UX flows, Server Actions vs API Routes vs FastAPI decision rules, long-running FastAPI job patterns, state management, and accessibility/error requirements.
+
+Also created `docs/design-hosting/diagrams/02-auth-ux-flow.excalidraw` with two swimlanes: first sign-in and spouse invite acceptance. Current frontend inspection found no existing Supabase auth wiring or middleware; most data access still goes through browser `fetch('/api/...')` backed by the broad Next rewrite in `apps/frontend/next.config.ts`, so the migration plan starts with adding the SSR auth layer before moving CRUD to Server Actions/RLS.
+
+Decision draft created at `.squad/decisions/inbox/fenster-frontend-strategy.md` for Scribe consolidation.
+
+📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.

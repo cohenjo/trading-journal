@@ -100,3 +100,27 @@ The application supports comprehensive trading workflows:
 **Learning:** `gh project` requires project scope not available in our token. Milestone + labels gives us equivalent workflow columns (stage:backlog → stage:done) with native GitHub filtering. Filter by `milestone:v0.0.1 label:priority:critical` to see release blockers.
 
 📌 Team update (2026-04-10T08:19:59Z): Testing Sprint Phase 1-3 Complete — Phase 2d synthesis & approval: 5 executive decisions approved overriding original plan. Financial core priority, infrastructure P0, depth-over-breadth APIs, database models P0, PostgreSQL Phase 1 all approved. Phase 3 authorization given. 110 new tests delivered across 3 branches (Kujan CI, Hockney backend, Fenster frontend). Orchestration logs created for all 8 agents. Session log and decision merges completed. 3 branches ready for merge with 14 commits total. Success metrics tracked. — Scribe (Team Orchestration)
+
+### 2026-04-30: Hosting Architecture Overview Drafted
+**Context:** Jony requested an architecture overview and alternatives matrix for moving trading-journal from laptop-only local services to free/cheap hosted services for a few trusted users, including spouse/couple sharing.
+
+**Recommendation:** Default to **Option A: Lean** — Vercel-hosted Next.js, Supabase Auth/Postgres/RLS, and local Docker for heavy compute writing raw/computation tables. Keep **Option B: Decoupled API** as a fallback if Hockney finds required FastAPI endpoints that should remain Python-hosted for the first shared release.
+
+**Artifacts:** Wrote `docs/design-hosting/sections/01-architecture-overview.md`, created system-context diagram at `docs/design-hosting/diagrams/01-system-context.excalidraw`, and drafted decision `./.squad/decisions/inbox/keaton-hosting-architecture.md`.
+
+**Team dependencies:** Rabin owns auth/RLS/invites, Kujan owns deployment/CI, Hockney owns backend endpoint inventory, McManus owns sharing/data-table boundaries, and Fenster owns frontend auth/invite/data access.
+
+### 2026-05-01: Unified Design Document Synthesized
+
+**Context:** Six researchers wrote section drafts covering architecture overview, frontend strategy, auth/sharing/security, deployment/CI-CD, backend strategy, and data architecture. Keaton synthesized all six into a single unified design document.
+
+**Key reconciliation decisions:**
+- Adopted Hockney's "Hybrid (Option C)" as the single recommended architecture, resolving the Option A vs Option B split from Section 01.
+- Standardized on Rabin's `household_role` enum name and stricter RLS helper functions (with `left_at is null` and `deleted_at is null` checks) over McManus's simpler versions.
+- Clarified that Kujan's Fly.io backend hosting recommendation becomes a future escalation path, not the initial deployment — aligning with the hybrid/local-worker model.
+- Flagged Kujan's `CLERK_SECRET_KEY` as stale (we use Supabase Auth); flagged missing connection-pooling env var split.
+- Default invite role set to `viewer` (least privilege, Rabin's approach) over McManus's `member` default.
+
+**Artifacts:** Wrote `docs/design-hosting/design.md` (unified design doc) and `.squad/decisions/inbox/keaton-hosting-final.md` (architecture decision record).
+
+📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.

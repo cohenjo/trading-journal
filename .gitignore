@@ -42,6 +42,8 @@ MANIFEST
 memory-bank/
 .roo/
 docs/
+!docs/design-hosting/
+!docs/design-hosting/**
 sample images/
 sample/
 reports/

@@ -92,3 +92,15 @@
 📌 Team update (2026-03-07T21:49:50Z): Pension category reclassification testing completed. 26 tests passing (21 updated + 5 new). All three team layers verified through orchestration. Decisions merged and documented. — Scribe (Team Orchestration)
 
 📌 Team update (2026-04-10T08:19:59Z): Testing Sprint Phase 1-3 Complete — Full testing coverage audit completed (D+ grade, 850 lines). Phase 2 feedback from all specialists incorporated. Phase 3 implementation: 110 new tests (57 backend, 53 frontend) delivered across 3 branches. Financial core testing, infrastructure P0, PostgreSQL integration, and database models now prioritized. Orchestration logs created for all 8 agent spawns. Decisions merged: keaton-testing-plan-approved.md, redfoot-testing-audit.md, fenster-i18n.md. Session log and cross-agent updates completed. Ready for PR merge. — Scribe (Team Orchestration)
+
+### 2026-05-01: Unified hosting design test/risk review
+
+Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote `docs/design-hosting/reviews/redfoot-review.md` with **CHANGES REQUESTED** focused on executable phase gates, RLS/auth edge cases, preview/prod isolation, worker retry/idempotency, rollback rehearsals, observability, and migration-complete acceptance criteria.
+
+### 2026-05-01: Hosting design re-review
+
+- Re-reviewed `docs/design-hosting/design.md` v2 against prior Redfoot findings.
+- Verdict: **APPROVED WITH CONDITIONS**. Blocking findings landed; only remaining ask is a concrete local/dev bug-reproduction runbook before Phase 1 execution.
+- Output saved to `docs/design-hosting/reviews/redfoot-rereview.md`.
+
+📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
