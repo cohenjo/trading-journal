@@ -308,3 +308,11 @@ Full CRUD API for insurance policies at `/api/insurance` — list (with optional
 
 **Branch:** `squad/18-insurance-policies-api`
 **Tests:** 114 existing tests pass (1 pre-existing failure needs Postgres)
+
+### 2026-07: TJ-019 — Vercel Project Config + Setup Runbook (GH #72)
+
+**Deliverables:** Created `apps/frontend/vercel.json` (framework, buildCommand, security headers, `preferredRegion: fra1` via functions config), `apps/frontend/.vercelignore`, updated `apps/frontend/next.config.ts` (added `images.remotePatterns` for Supabase CDN), and runbooks `vercel-04-project-link-and-env.md` + `vercel-05-deployment-flow.md`.
+**Key decisions:** Used `functions.preferredRegion` instead of top-level `regions` (Hobby-incompatible per vercel-01); `SUPABASE_SERVICE_ROLE_KEY` scoped Production-only; `experimental.serverActions` not added (stable in Next.js 15); CSP header allows `*.supabase.co` for storage CDN and WebSocket realtime.
+**User actions required:** Run `vercel login` + `vercel link` from `apps/frontend/`, add env vars via `vercel env add` per runbook §2, and assign custom domain via `vercel domains add`.
+**Branch:** `squad/72-vercel-project-setup`
+**PR:** Closes #72
