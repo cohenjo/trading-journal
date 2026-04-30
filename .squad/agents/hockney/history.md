@@ -359,3 +359,23 @@ Full CRUD API for insurance policies at `/api/insurance` — list (with optional
 **User actions required:** Run `vercel login` + `vercel link` from `apps/frontend/`, add env vars via `vercel env add` per runbook §2, and assign custom domain via `vercel domains add`.
 **Branch:** `squad/72-vercel-project-setup`
 **PR:** Closes #72
+
+### 2026-07: TJ-017 — Backend Supabase JWT Validation Middleware (GH #70)
+
+**Deliverables:**
+- `apps/backend/app/supabase_auth.py` — Core JWT validation: `SupabaseAuthSettings` (pydantic-settings), `JWKSCache` (async-safe, TTL, rotation), `SupabaseClaims`, `verify_supabase_jwt()`
+- `apps/backend/app/dependencies.py` — FastAPI dep providers: `get_current_user`, `get_current_user_id`, `require_role()`
+- `apps/backend/main.py` — Startup JWKS warm-up + `/health/auth` diagnostics endpoint
+- `apps/backend/tests/test_supabase_auth.py` — 13 async unit tests (respx-mocked JWKS, real RSA keypairs)
+- `apps/backend/README-supabase-auth.md` — Usage guide, env vars, migration plan
+- `apps/backend/pyproject.toml` — Added `pydantic-settings>=2.7.0`, `pydantic[email]`, `respx>=0.21.0` (dev)
+
+**Key decisions:**
+- JWKS (RS256/ES256) is preferred path; HS256 secret fallback only on JWKS network failure
+- `SUPABASE_URL` is canonical backend env var; `NEXT_PUBLIC_SUPABASE_URL` accepted as alias
+- `SecretStr` for JWT secret — never logged; auth failures audit-logged at WARNING
+- Existing `app/auth/` (local-user JWT) intentionally NOT removed — future cutover ticket
+- Runtime dependency on PR #85 (auth.users table), not build-time
+
+**Branch:** `squad/70-backend-jwt-validation`
+**PR:** Closes #70
