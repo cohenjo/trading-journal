@@ -39,3 +39,13 @@
 
 📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
 - 2026-04-30: Phase 1 foundation batch shipped — see .squad/log/2026-04-30T17-00-00Z-phase1-foundation-batch.md
+
+## 2026-04-30 — Phase 1 migration consolidation (PR #85)
+
+Resolved all 4 user-pending decisions on PR #85 by rewriting Hockney's sketch migrations into final form.
+
+**Decision #1 (hard-delete):** Added `20260430130500_relax_delete_policies.sql` — dropped `USING (false)` DELETE policies on `households` and `household_members`; replaced with `is_household_owner()` policies.
+**Decision #2 (enum):** Confirmed `household_role` canonical. Fixed 3 occurrences of `household_member_role` in `docs/design-hosting/sections/06-data-architecture.md`.
+**Decision #3 (secrets):** Rewrote `20260430130300` — dropped broker credential columns from `trading_account_config`, added `household_id`, enabled household-scoped RLS.
+**Decision #4 (user_profile):** Rewrote `20260430130400` — destructive DROP of `public.user` + CREATE `public.user_profile` with auth.users trigger (SECURITY DEFINER), RLS, backfill. Added `20260430130600` (FK audit no-op).
+Closed GH #56 (TJ-003). PR #85 comment posted at https://github.com/cohenjo/trading-journal/pull/85#issuecomment-4355234613.
