@@ -5,6 +5,7 @@ import shutil
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
+from uuid import UUID
 
 import dateutil.relativedelta
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -12,6 +13,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
 
 from app.dal.database import get_session
+from app.dependencies import get_current_user_id
 from app.schema.finance_models import FinanceSnapshot
 from app.schema.plan_models import Plan
 from app.utils.copilot_analyzer import analyze_report
@@ -573,8 +575,9 @@ async def upload_pension_report(
     owner: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
-    """Upload and analyze a pension report PDF, updating snapshots and plans."""
+    """Upload and analyze a pension report PDF, updating snapshots and plans (user-scoped)."""
     try:
         root_dir = Path(__file__).parent.parent.parent.parent.parent
         reports_dir = root_dir / "reports" / owner
@@ -590,15 +593,22 @@ async def upload_pension_report(
 
         upload_warnings = _validate_pension_payload(payload)
 
+        # Query user-scoped snapshot
         snapshot = db.exec(
-            select(FinanceSnapshot).where(FinanceSnapshot.date == target_date)
+            select(FinanceSnapshot).where(
+                FinanceSnapshot.user_id == user_id,
+                FinanceSnapshot.date == target_date
+            )
         ).first()
         snapshot_updated = False
 
         if not snapshot:
             closest_past = db.exec(
                 select(FinanceSnapshot)
-                .where(FinanceSnapshot.date < target_date)
+                .where(
+                    FinanceSnapshot.user_id == user_id,
+                    FinanceSnapshot.date < target_date
+                )
                 .order_by(FinanceSnapshot.date.desc())
                 .limit(1)
             ).first()
@@ -606,6 +616,7 @@ async def upload_pension_report(
             if closest_past:
                 new_data = copy.deepcopy(closest_past.data) if closest_past.data else copy.deepcopy(EMPTY_SNAPSHOT_DATA)
                 snapshot = FinanceSnapshot(
+                    user_id=str(user_id),
                     date=target_date,
                     data=new_data,
                     net_worth=closest_past.net_worth,
@@ -614,6 +625,7 @@ async def upload_pension_report(
                 )
             else:
                 snapshot = FinanceSnapshot(
+                    user_id=str(user_id),
                     date=target_date,
                     data=copy.deepcopy(EMPTY_SNAPSHOT_DATA),
                     net_worth=0.0,
@@ -631,6 +643,7 @@ async def upload_pension_report(
         # appears on the dashboard immediately, even when later snapshots exist.
         latest_snapshot = db.exec(
             select(FinanceSnapshot)
+            .where(FinanceSnapshot.user_id == user_id)
             .order_by(FinanceSnapshot.date.desc())
             .limit(1)
         ).first()
@@ -681,8 +694,11 @@ async def upload_pension_report(
 
 
 @router.get("/reports")
-def list_pension_reports(db: Session = Depends(get_session)):
-    """Return a list of uploaded pension report files with metadata and snapshot totals."""
+def list_pension_reports(
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Return a list of uploaded pension report files with metadata and snapshot totals (user-scoped)."""
     try:
         root_dir = Path(__file__).parent.parent.parent.parent.parent
         reports_root = root_dir / "reports"
@@ -701,9 +717,11 @@ def list_pension_reports(db: Session = Depends(get_session)):
                     "size_bytes": stat.st_size,
                 })
 
-        # Compute per-snapshot pension totals for delta comparison
+        # Compute per-snapshot pension totals for delta comparison (user-scoped)
         snapshots = db.exec(
-            select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())
+            select(FinanceSnapshot)
+            .where(FinanceSnapshot.user_id == user_id)
+            .order_by(FinanceSnapshot.date.asc())
         ).all()
 
         snapshot_totals: list[dict[str, Any]] = []
@@ -750,10 +768,17 @@ def list_pension_reports(db: Session = Depends(get_session)):
 
 
 @router.get("/dashboard")
-def get_pension_dashboard(db: Session = Depends(get_session)):
-    """Return aggregated pension dashboard with history and plan data."""
+def get_pension_dashboard(
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Return aggregated pension dashboard with history and plan data (user-scoped)."""
     try:
-        snapshots = db.exec(select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())).all()
+        snapshots = db.exec(
+            select(FinanceSnapshot)
+            .where(FinanceSnapshot.user_id == user_id)
+            .order_by(FinanceSnapshot.date.asc())
+        ).all()
         plan = db.exec(select(Plan).order_by(Plan.updated_at.desc()).limit(1)).first()
         return build_pension_dashboard_payload(snapshots, plan)
     except Exception as exc:
@@ -764,10 +789,18 @@ def get_pension_dashboard(db: Session = Depends(get_session)):
 
 
 @router.delete("/{pension_id}")
-def delete_pension(pension_id: str, db: Session = Depends(get_session)):
-    """Remove a pension from all snapshots and the active plan."""
+def delete_pension(
+    pension_id: str,
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Remove a pension from all snapshots and the active plan (user-scoped)."""
     try:
-        snapshots = db.exec(select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())).all()
+        snapshots = db.exec(
+            select(FinanceSnapshot)
+            .where(FinanceSnapshot.user_id == user_id)
+            .order_by(FinanceSnapshot.date.asc())
+        ).all()
         for snapshot in snapshots:
             items = snapshot.data.get("items", [])
             filtered_items = remove_pension_identity(items, pension_id)

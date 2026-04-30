@@ -1,0 +1,53 @@
+[
+  {
+    "path": "/dividends",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:32.308Z",
+    "loadTimeMs": 988,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/holdings",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:35.916Z",
+    "loadTimeMs": 810,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/insurance",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:39.167Z",
+    "loadTimeMs": 675,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  }
+]

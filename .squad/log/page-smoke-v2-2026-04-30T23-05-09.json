@@ -1,0 +1,70 @@
+[
+  {
+    "path": "/",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:04:57.037Z",
+    "loadTimeMs": 1267,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/after-i-leave",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:01.569Z",
+    "loadTimeMs": 1106,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/analyze",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:05.469Z",
+    "loadTimeMs": 796,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/auth",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:08.951Z",
+    "loadTimeMs": 817,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  }
+]
