@@ -125,7 +125,7 @@ inactivity_timeout = "0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # External auth providers
-# Toggle these on in Supabase Dashboard for local testing; see runbook §9.
+# Toggle in Supabase Dashboard for local testing; see runbook §9.
 # ─────────────────────────────────────────────────────────────────────────────
 [auth.external.google]
 enabled = false
@@ -134,7 +134,7 @@ secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
 skip_nonce_check = false
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Edge Functions (Deno — not used yet, included for completeness)
+# Edge Functions (Deno — not used yet)
 # ─────────────────────────────────────────────────────────────────────────────
 [edge_runtime]
 enabled = false
