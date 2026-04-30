@@ -55,3 +55,4 @@
 - **Context:** Narrowly scoped implementation runbook covering Google OAuth wiring, Households+Members schema, RLS helper functions and policies, invite flow schema and token-hash pattern, and common pitfalls.
 - **Deliverable:** `docs/design-hosting/runbooks/supabase-03-auth-rls.md` (~300 lines, copy-pasteable SQL migration block included).
 - **Flags:** Google Console does not support wildcard authorized origins — each preview URL must be registered explicitly. Supabase redirect-URL wildcard syntax should be verified against current docs. Free-tier email rate limit (3/hr) may constrain invite emails at scale.
+- 2026-04-30: Phase 1 foundation batch shipped — see .squad/log/2026-04-30T17-00-00Z-phase1-foundation-batch.md

@@ -680,3 +680,308 @@ This separation allows backend teams to reorganize financial categories without 
 **Artifacts:**
 - `docs/design-hosting/issue-manifest.json`
 - `docs/design-hosting/issue-manifest.md`
+# Decision: Analyze Page — Shared Components & Error Resilience
+
+**Author:** Fenster (Frontend)
+**Date:** 2025-07-24
+**Issue:** #6 — Company Analysis polish for v0.0.1
+
+## Context
+
+The Analyze page had duplicated skeleton/error UI across ShortTermView and LongTermView, no per-section error isolation, no retry support in shortterm hooks, and rigid grid layouts on mobile.
+
+## Decisions
+
+1. **Extracted `shared/` component library** — SkeletonCard, ErrorBanner (with optional `onRetry`), SectionErrorBoundary (React class error boundary), and EmptyState live under `Analyze/shared/` with a barrel export. Both views now import from this single source.
+
+2. **Per-section error boundaries** — Every data-driven section in both views is wrapped in `<SectionErrorBoundary>`. A crash in one section (e.g. chart rendering) no longer takes down the entire page.
+
+3. **Retry on all hooks** — All 4 shortterm hooks (`useTechnicals`, `usePriceHistory`, `useSynthesis`, `useOptionChain`) now expose `refetch` via `useCallback`. Longterm hooks already had this. Each section's ErrorBanner wires to the relevant hook's `refetch`.
+
+4. **Mobile-responsive grids** — FinancialScorecard changed from `grid-cols-2` to `grid-cols-1 sm:grid-cols-2`. ShortTermView grids changed from `md:grid-cols-2` to `sm:grid-cols-2` for earlier breakpoint.
+
+5. **Improved empty & error states** — No-ticker-selected now shows an EmptyState with suggestions. Invalid-ticker errors show a descriptive message with icon and retry button.
+
+## Trade-offs
+
+- SectionErrorBoundary is a class component (React requirement for error boundaries). This is the only class component in the codebase.
+- The `shared/` folder is scoped to Analyze. If other pages need these components later, they can be promoted to a top-level `shared/` or `ui/` directory.
+### 2026-07-23: Insurance Page API Contract & After I Leave Integration
+**By:** Fenster
+**Category:** Frontend Architecture, API Contract
+**Status:** Implemented (pending backend)
+
+**What:** Created frontend for insurance policies with API contract:
+- `GET /api/insurance` → `{ status: "success", data: InsurancePolicy[] }`
+- `POST /api/insurance` → body: `InsurancePolicy` → `{ status: "success", data: InsurancePolicy }`
+- `PUT /api/insurance/{id}` → body: partial `InsurancePolicy` → `{ status: "success", data: InsurancePolicy }`
+- `DELETE /api/insurance/{id}` → `{ status: "success" }`
+
+**InsurancePolicy shape:**
+```typescript
+{
+  id?: string;
+  type: 'Life' | 'Mortgage' | 'Health' | 'Disability' | 'Other';
+  provider: string;
+  policy_number?: string;
+  sum_insured?: string;  // flexible text, not numeric
+  monthly_premium?: number | null;
+  beneficiaries?: string;
+  expiry_date?: string;  // ISO date
+  website?: string;
+  notes?: string;
+  owner: string;  // 'You' or 'Partner'
+}
+```
+
+**Why:** `sum_insured` is text (not number) because insurance can be "₪2,000,000" or "Covers remaining mortgage" — flexible format for different policy types. `monthly_premium` is numeric for future aggregation.
+
+**After I Leave integration:** Life and Mortgage sections replace demo data with real policies when `/api/insurance` returns matching type. SummaryTable also swaps demo insurance rows for real data.
+
+**Impact:** Hockney needs to implement the backend matching this contract. Frontend gracefully handles API unavailability (empty state).
+# Decision: Pension Historical Report Browser
+
+**Author:** Fenster (Frontend Dev)
+**Date:** 2025-07-22
+**Issue:** #13
+
+## Context
+
+The pension page only showed the latest uploaded report. Users need to browse historical reports to track retirement progress over time and compare changes between periods.
+
+## Decision
+
+### Backend
+- Added `GET /api/pension/reports` endpoint that returns:
+  - List of uploaded PDF files with metadata (filename, owner, upload timestamp, size)
+  - Per-snapshot pension totals derived from `FinanceSnapshot` records, including per-account breakdowns
+
+### Frontend
+- **ReportHistory** component: timeline sidebar showing all pension snapshots with total values, delta badges comparing to previous snapshot, expandable per-account details, and a collapsible uploaded files list
+- **SnapshotDetail** component: full-width detail view when a snapshot is clicked, showing per-account table with value, deposits, earnings, fees, and delta vs previous period
+- Layout changed from 2-col to 3-col grid (lg breakpoint) to accommodate history panel alongside upload + results
+
+### Architecture Notes
+- No new DB models — reports endpoint reads existing `FinanceSnapshot` records and scans the `reports/` directory for file metadata
+- No i18n added (pension page doesn't use i18n patterns)
+- Currency formatting follows existing `he-IL` / `ILS` convention
+- All new components are `'use client'` to match existing pension page pattern
+
+## Alternatives Considered
+
+1. **Store reports in DB**: Adds model complexity; filesystem scan is sufficient for MVP since files are already saved on upload
+2. **Separate page for history**: Rejected — inline panel provides faster context switching without losing dashboard view
+# Decision: Insurance Policies API Design
+
+**Date:** 2025-07-22
+**Author:** Hockney (Backend Dev)
+**Issue:** #18
+
+## Context
+
+Insurance policies page needs a backend API. This is a new standalone entity, not embedded in the finance snapshots system like pensions.
+
+## Decisions
+
+1. **Standalone table, not snapshot-embedded**: Insurance policies are CRUD entities stored in their own `insurance_policies` table with UUID PKs. Unlike pensions (which live inside `FinanceSnapshot.data` as JSON items), insurance policies don't need time-series tracking or net-worth calculations. They're reference data.
+
+2. **sum_insured as string**: Kept as free-text (`str`) instead of `float` because coverage descriptions vary — some are monetary ("₪2,000,000"), some are descriptive ("Covers remaining mortgage balance"). Frontend can display as-is.
+
+3. **Owner values: "You" / "Partner"**: Matches the existing pension pattern for household-level ownership.
+
+4. **Type enum validated server-side**: Accepted values are `life`, `mortgage`, `health`, `disability`, `other`. Validated in the API layer, not at the DB level, so the enum can be extended without migrations.
+
+## Impact
+
+- Frontend team: API is at `/api/insurance` with standard CRUD + `?owner=` filter
+- No impact on existing finance/pension systems
+- Migration `acadd4bc6806` needs to run on deploy
+# Decision: Add OpenAPI metadata and route docstrings
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2025-07-22
+**Issue:** #12
+
+## Context
+
+FastAPI auto-generates `/docs` (Swagger UI) and `/redoc` endpoints, but the generated spec lacked proper API metadata and many route handlers had no docstrings — resulting in a bare, undocumented schema.
+
+## Decision
+
+1. Added OpenAPI metadata to the `FastAPI()` constructor: title, description, version, and explicit `docs_url`/`redoc_url`.
+2. Added concise docstrings to all route handler functions across 17 router files that were missing them.
+3. No `response_model` additions were needed — all typed routes already had them; untyped routes return dynamic dicts where adding a model would change behavior.
+4. No business logic was changed.
+
+## Rationale
+
+- Docstrings automatically populate the OpenAPI operation summaries, making `/docs` and `/redoc` immediately useful for frontend devs and future API consumers.
+- Keeping docstrings to 1–2 lines avoids clutter while giving each endpoint a clear purpose statement.
+- Explicit `docs_url`/`redoc_url` makes the configuration self-documenting even though they match FastAPI defaults.
+
+## Impact
+
+- `/docs` and `/redoc` now show a titled, described API with per-endpoint summaries.
+- No runtime behavior change. All 238 passing tests remain green (2 pre-existing failures require PostgreSQL).
+# Decision: Add Security Headers Middleware
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2025-07-18
+**Status:** Accepted
+**Issue:** #10
+
+## Context
+
+The trading journal backend had no security headers on HTTP responses. This leaves the application vulnerable to clickjacking, MIME-type sniffing, and other client-side attacks.
+
+## Decision
+
+Added a Starlette `BaseHTTPMiddleware` that injects six security headers on **every** response:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| X-Frame-Options | DENY | Prevent clickjacking |
+| X-Content-Type-Options | nosniff | Stop MIME-type sniffing |
+| Strict-Transport-Security | max-age=31536000; includeSubDomains | Enforce HTTPS |
+| Referrer-Policy | strict-origin-when-cross-origin | Limit referrer leakage |
+| Content-Security-Policy | default-src 'self' | Restrict resource origins |
+| Permissions-Policy | camera=(), microphone=(), geolocation=() | Disable sensitive browser APIs |
+
+Headers are defined as a constant dict in `security_headers.py` so tests and future middleware can reference the single source of truth.
+
+## Consequences
+
+- All responses (including errors) now carry these headers.
+- The CSP `default-src 'self'` is intentionally strict; if the frontend needs to load external resources it should be relaxed per-directive rather than weakening the default.
+- HSTS assumes HTTPS in production; harmless over plain HTTP in dev.
+# Decision: Migrate monetary float fields to Decimal
+
+**Author:** McManus (Data/Finance)  
+**Date:** 2025-07-25  
+**Status:** Accepted  
+**Issue:** #9
+
+## Context
+
+All monetary fields across the trading-journal backend were stored as Python `float`
+(IEEE 754 double-precision). This introduces rounding errors in financial calculations
+(e.g., `0.1 + 0.2 != 0.3`), which is unacceptable for a trading journal tracking
+real P&L, commissions, and portfolio values.
+
+## Decision
+
+Migrate every monetary `float` field to `decimal.Decimal` in Python and
+`Numeric(18, 6)` in PostgreSQL. This covers ~80+ fields across 9 schema files.
+
+### Key design choices
+
+| Choice | Rationale |
+|--------|-----------|
+| `Numeric(18,6)` precision | 18 digits total, 6 fractional — sufficient for equity/options prices and large portfolio values |
+| `sa_column=Column(Numeric(18,6))` for table fields | SQLModel requires explicit SQLAlchemy column for Numeric mapping |
+| Plain `Decimal` for Pydantic-only models | No database column needed; Pydantic validates the type |
+| `ENCODERS_BY_TYPE[Decimal] = float` in FastAPI | Ensures JSON responses emit numbers, not strings — backward compatible with frontend |
+| `DecimalSafeJSONResponse` as default | Belt-and-suspenders for any Decimal that bypasses `jsonable_encoder` |
+| Manual Alembic migration | Autogenerate requires live DB; hand-written migration is safer and reviewable |
+
+## Scope
+
+- **Migrated:** All SQLModel table fields, Pydantic API models, and dataclass models
+  with monetary semantics across models.py, trading_models.py, finance_models.py,
+  dividend_models.py, plan_models.py, insurance_models.py, options_models.py,
+  backtest_models.py, ladder_models.py
+- **Not migrated:** `plan_service.py` and `plan_components.py` simulation engine
+  (uses dict-based float arithmetic — separate refactor)
+- **Intentionally kept as float:** `Ndx1mChartData.time` (Unix timestamp)
+
+## Consequences
+
+- Financial calculations gain exact decimal precision
+- Frontend receives numbers (not strings) — no breaking change
+- Alembic migration safely casts existing float data via `::numeric(18,6)`
+- Test assertions updated to use `float()` wrapper for `pytest.approx` compatibility
+# Decision: JWT Authentication for API Endpoints
+
+**Author:** Rabin (Security Specialist)  
+**Date:** 2025-07-26  
+**Status:** Implemented  
+**Issue:** #1 — Add authentication to API endpoints
+
+## Context
+
+All 18+ API endpoints lacked authentication. Anyone with network access could view, modify, or delete financial data. This was the #1 blocker for non-localhost deployment.
+
+## Decision
+
+Implement JWT-based authentication using `python-jose` + `passlib[bcrypt]`.
+
+### Key choices:
+
+| Decision | Rationale |
+|----------|-----------|
+| JWT Bearer tokens | Stateless, no server-side session storage needed |
+| bcrypt password hashing | Industry standard, resistant to brute-force |
+| Router-level `dependencies=` | Clean separation — auth applied per router include in main.py |
+| Public paths: `/`, `/api/auth/register`, `/api/auth/login` | Minimum surface area for unauthenticated access |
+| No roles/permissions | Single-user personal app — authenticated = authorized |
+| `JWT_SECRET_KEY` env var with dev default | Safe for local dev, forces explicit config for production |
+| 60-minute token expiry | Balance between convenience and security |
+| bcrypt < 4.1 pinned | passlib incompatible with bcrypt 5.x |
+
+## Files Changed
+
+- `app/schema/user_models.py` — User model + Pydantic schemas
+- `app/auth/security.py` — JWT + bcrypt helpers
+- `app/auth/dependencies.py` — `get_current_user` FastAPI dependency
+- `app/api/auth.py` — Register, login, me endpoints
+- `main.py` — Auth router + `dependencies=auth_dep` on all data routers
+- `alembic/versions/acfa0cdeaae7_add_users_table.py` — Migration
+- `tests/conftest.py` — Auth-aware test fixtures
+- `tests/test_auth.py` — 13 auth-specific tests
+
+## Risks
+
+- `passlib` is unmaintained; may need replacement if Python 3.13+ drops `crypt` module
+- Dev default secret key must never reach production — document in deployment guide
+# Decision: Backend Financial Test Coverage (Issue #5)
+
+**Author:** Redfoot (Tester)  
+**Date:** 2025-07-25  
+**Status:** Proposed
+
+## Context
+
+The backend had ~136 passing tests but major gaps in financial calculation coverage. Core money-handling logic — daily PnL summaries, dividend/options projections, XLSX data import, and Decimal precision in options analytics — had zero tests.
+
+## Decision
+
+Added 94 focused pytest tests across 6 new test files:
+
+| Test File | Tests | What It Covers |
+|-----------|-------|----------------|
+| `test_daily_summary.py` | 16 | PnL aggregation, win rate, avg win/loss, edge cases |
+| `test_dividend_projection.py` | 14 | Reinvest/withdrawal phases, compounding, phase transitions |
+| `test_options_projection.py` | 10 | Growth/flat phases, base averaging, cutoff transitions |
+| `test_options_analytics_edge_cases.py` | 24 | IV percentile/rank boundaries, CSP Decimal precision, Greeks formatting |
+| `test_xlsx_data_loaders.py` | 13 | Bonds/dividends/options XLSX load/save, invalid data handling |
+| `test_dividend_service_enrich.py` | 17 | CAGR edge cases, position enrichment, portfolio yield, DGR averaging |
+
+## Key Principles
+
+1. **Self-contained**: All tests use mocks for DB and file I/O — no external dependencies
+2. **Known expected values**: Financial calculations verified with hand-computed results
+3. **Decimal verification**: CSP breakeven tests confirm Decimal rounding (ROUND_HALF_UP)
+4. **Projection logic extracted**: Dividend/options projection math replicated as pure functions for isolated testing (original logic is embedded in FastAPI endpoints)
+
+## Gaps Remaining
+
+- **API integration tests** for `POST /trades` (requires DB session, existing conftest supports it)
+- **Finance snapshot enrichment** (`GET /api/finances/latest`) — complex currency conversion flow
+- **Dividend service `resolve_dividend_data`** — only basic tests; yfinance edge cases need more coverage
+- Projection logic should ideally be extracted from endpoints into utility functions (refactor candidate)
+
+## Impact
+
+- Total test count: ~136 → ~230 (94 new)
+- All financial calculations now have baseline coverage
+- No pre-existing tests were modified or broken
