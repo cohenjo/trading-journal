@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from logging.config import fileConfig
@@ -12,6 +13,13 @@ sys.path.append(str(Path(__file__).parent.parent))
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# Override sqlalchemy.url from environment variables so that alembic.ini
+# never needs to contain real credentials.  DIRECT_DATABASE_URL is preferred
+# for migrations because it must bypass any connection pooler.
+_db_url = os.getenv("DIRECT_DATABASE_URL") or os.getenv("DATABASE_URL")
+if _db_url:
+    config.set_main_option("sqlalchemy.url", _db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

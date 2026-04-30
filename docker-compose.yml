@@ -4,9 +4,9 @@ services:
     image: postgres:13
     container_name: trading_journal_db
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: trading_journal
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-trading_journal}
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     ports:
@@ -14,7 +14,7 @@ services:
     networks:
       - trading-journal-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d trading_journal"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,7 +30,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: "postgresql://user:password@db:5432/trading_journal"
+      # DATABASE_URL can be set explicitly in .env for full control.
+      # When absent, it is assembled from the individual POSTGRES_* vars so
+      # that developers only need to set credentials once.
+      DATABASE_URL: "${DATABASE_URL:-postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@db:5432/${POSTGRES_DB:-trading_journal}}"
+      DIRECT_DATABASE_URL: "${DIRECT_DATABASE_URL:-}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:3000}"
       OTEL_SERVICE_NAME: "trading-journal-backend"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
@@ -60,7 +65,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: "http://localhost:8000"
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://backend:8000}"
     depends_on:
       backend:
         condition: service_healthy

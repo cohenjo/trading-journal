@@ -1,9 +1,10 @@
 
+import os
 import json
 import urllib.request
 import urllib.error
 
-BASE_URL = "http://localhost:8001/api/finances"
+BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8001") + "/api/finances"
 
 def migrate_rsu_currency():
     # 1. Get the latest snapshot
