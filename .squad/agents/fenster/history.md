@@ -141,3 +141,30 @@ Completed all P0 tasks for Week 1 of the testing plan. Added comprehensive test 
 7. **Duplicate utility functions** — `fetchLatestPlan()` and `fetchFinances()` are copy-pasted identically in `/plan/page.tsx` and `/cash-flow/page.tsx`. A shared `src/lib/api.ts` module does not exist yet.
 
 8. **Named API endpoint groups:** `/api/finances/*`, `/api/plans/*`, `/api/options/*`, `/api/dividends/*`, `/api/ladder/*`, `/api/holdings`, `/api/bonds/*`, `/api/pension/*`, `/api/trading/*`, `/api/backtest/*`, `/api/analyze/*`, `/api/insurance`, `/api/tax-condor/*`, `/api/day/*` — 14 route groups, all FastAPI.
+
+## Learnings — Auth Guard + JWT Forwarding (2026-07-29) — PR #96
+
+### apiFetch pattern
+- Created `src/lib/api-client.ts` as the canonical FastAPI client. Exports `apiFetch(input, init)` and `ApiAuthError`.
+- Key design: uses `await import('@/lib/supabase/browser')` (dynamic import) inside `buildAuthHeaders()`, NOT a static import. Static import of `browser.ts` triggers the module-level `supabaseBrowser = createBrowserClient(...)` singleton at bundle evaluation time, which throws during Next.js static generation because `NEXT_PUBLIC_SUPABASE_URL` is absent. Dynamic import defers evaluation to actual function call time (browser-only, at runtime).
+- Same pattern required in `login/page.tsx` — all Supabase calls inside event handlers/effects use `await import(...)` rather than a top-level static import.
+- `export const dynamic = 'force-dynamic'` does NOT help for 'use client' components — it only works in server components. The dynamic import approach is the correct solution.
+
+### Middleware allowlist pattern
+- Public routes stored as two `readonly string[]` consts at the top of `middleware.ts`: `PUBLIC_ROUTES` (exact matches) and `PUBLIC_PREFIXES` (startsWith). This makes it easy to extend without touching auth logic.
+- Auth guard reads `getClaims()` result — `data?.claims` is truthy when a valid session exists. DO NOT use `getUser()` for this (it makes an extra network round-trip to Supabase). `getClaims()` reads from cookies set by the middleware itself, so it's local.
+- IMPORTANT: after building the redirect response, copy cookies from `supabaseResponse` onto the redirect, otherwise the session refresh from `getClaims()` is lost and the user loops on the redirect.
+
+### Auth callback route
+- `/auth/callback/route.ts` handles both Google OAuth (PKCE) and magic-link confirmation.
+- Always validate `next` query param: must start with `/`, must not contain `//` or `:` (blocks protocol-relative and absolute URL redirects).
+- Supabase sets the `code` param for PKCE; the route calls `supabase.auth.exchangeCodeForSession(code)` using the SERVER client (from `@/lib/supabase/server.ts`), not the browser client.
+
+### Login page notes
+- `useSearchParams()` in Next.js 15 requires a `Suspense` boundary. Pattern: inner `LoginForm` component uses the hook; outer `LoginPage` export wraps it in `<Suspense>`.
+- Magic-link works with zero Supabase Studio config (email provider enabled by default).
+- Google OAuth requires Supabase Studio → Authentication → Providers → Google (Client ID + Secret). ⚠️ Still pending keyboard task for Jony.
+
+### Migration: 36 fetch sites → apiFetch
+- Used Python regex `re.sub(r'(?<!api)fetch\(', 'apiFetch(', content)` for safe replacement (avoids double-replacing `apiFetch(`).
+- macOS BSD `sed` does not support `\b` word boundaries — always use Python for cross-platform regex replacements.
