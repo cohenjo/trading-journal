@@ -315,8 +315,6 @@ async def test_missing_authorization_header_raises_401(
     settings: SupabaseAuthSettings,
 ) -> None:
     """A request without an Authorization header must raise HTTP 401."""
-    from unittest.mock import MagicMock
-
     from app.dependencies import get_current_user
 
     # Build a minimal Request-like object with no Authorization header
@@ -342,8 +340,6 @@ async def test_malformed_bearer_raises_401(
     settings: SupabaseAuthSettings,
 ) -> None:
     """A request with a malformed Authorization header must raise HTTP 401."""
-    from unittest.mock import MagicMock
-
     from app.dependencies import get_current_user
 
     mock_request = MagicMock()

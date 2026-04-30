@@ -3,7 +3,7 @@
 -- Purpose: Create security-definer helper functions used by all household RLS policies
 
 -- ============================================================
--- is_household_member(hid uuid) → boolean
+-- is_household_member(p_household_id uuid) → boolean
 --
 -- Returns true when the current session user is an active
 -- (left_at IS NULL) member of the given household.
@@ -13,7 +13,7 @@
 -- allowing auth.uid() to reflect the actual session identity.
 -- SET search_path prevents search-path injection attacks.
 -- ============================================================
-create or replace function public.is_household_member(hid uuid)
+create or replace function public.is_household_member(p_household_id uuid)
 returns boolean
 language sql
 stable
@@ -23,19 +23,19 @@ as $$
   select exists (
     select 1
     from   public.household_members
-    where  household_id = hid
+    where  household_id = p_household_id
       and  user_id      = auth.uid()
       and  left_at      is null
   );
 $$;
 
 -- ============================================================
--- is_household_owner(hid uuid) → boolean
+-- is_household_owner(p_household_id uuid) → boolean
 --
 -- Returns true when the current session user holds the 'owner'
 -- role in the given household and has not left it.
 -- ============================================================
-create or replace function public.is_household_owner(hid uuid)
+create or replace function public.is_household_owner(p_household_id uuid)
 returns boolean
 language sql
 stable
@@ -45,7 +45,7 @@ as $$
   select exists (
     select 1
     from   public.household_members
-    where  household_id = hid
+    where  household_id = p_household_id
       and  user_id      = auth.uid()
       and  role         = 'owner'
       and  left_at      is null

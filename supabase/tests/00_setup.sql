@@ -22,6 +22,71 @@
 -- Ensure pgTAP is available
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
+-- CI sometimes runs against a slim supabase/postgres image whose auth.users
+-- table lacks GoTrue columns that Supabase local provides. Normalize the test
+-- auth surface here; production Supabase owns this schema, migrations do not.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOLOGIN;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  CREATE SCHEMA IF NOT EXISTS auth;
+
+  IF to_regclass('auth.users') IS NULL THEN
+    EXECUTE 'CREATE TABLE auth.users (id uuid PRIMARY KEY)';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email'
+  ) THEN
+    EXECUTE 'ALTER TABLE auth.users ADD COLUMN email text';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'email_confirmed_at'
+  ) THEN
+    EXECUTE 'ALTER TABLE auth.users ADD COLUMN email_confirmed_at timestamptz';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'created_at'
+  ) THEN
+    EXECUTE 'ALTER TABLE auth.users ADD COLUMN created_at timestamptz';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'updated_at'
+  ) THEN
+    EXECUTE 'ALTER TABLE auth.users ADD COLUMN updated_at timestamptz';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'aud'
+  ) THEN
+    EXECUTE 'ALTER TABLE auth.users ADD COLUMN aud text';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'auth' AND table_name = 'users' AND column_name = 'role'
+  ) THEN
+    EXECUTE 'ALTER TABLE auth.users ADD COLUMN role text';
+  END IF;
+
+  EXECUTE 'CREATE UNIQUE INDEX IF NOT EXISTS users_email_key ON auth.users (email)';
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'Skipping auth.users normalization; current database already manages auth schema permissions';
+END $$;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Test schema
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -55,7 +120,8 @@ $$;
 -- Requires: superuser or supabase_auth_admin role (SECURITY DEFINER satisfies
 --           this when the function owner is postgres/superuser).
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION tests.create_test_user(email TEXT)
+DROP FUNCTION IF EXISTS tests.create_test_user(TEXT);
+CREATE OR REPLACE FUNCTION tests.create_test_user(p_email TEXT)
 RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -75,7 +141,7 @@ BEGIN
   )
   VALUES (
     v_id,
-    email,
+    p_email,
     now(),
     now(),
     now(),
