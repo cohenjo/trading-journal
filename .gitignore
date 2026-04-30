@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.vercel
 
 # Dependencies
 node_modules/
@@ -42,6 +43,8 @@ MANIFEST
 memory-bank/
 .roo/
 docs/
+!docs/design-hosting/
+!docs/design-hosting/**
 sample images/
 sample/
 reports/

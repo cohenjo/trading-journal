@@ -1,503 +1,3 @@
-### 2026-02-23T22:46:19Z: Squad team initialized
-**By:** Squad (Coordinator)
-**What:** Initialized the squad roster, routing, casting registry/history, and per-agent charter/history files for this repository.
-**Why:** Establish a persistent operating team for coordinated multi-agent delivery.
-
-### 2026-02-23T22:46:19Z: Casting universe selected
-**By:** Squad (Coordinator)
-**What:** Persistent cast uses The Usual Suspects naming with Scribe and Ralph exempt from casting.
-**Why:** Keep stable memorable identifiers while preserving deterministic squad identity.
-
-### 2026-02-23T23:00:00Z: Financial Precision and Type Safety (consolidated)
-**By:** Fenster, Hockney
-**Category:** Financial Accuracy, Data Integrity
-**Status:** Requires Action
-
-**What:** Critical finding across both frontend and backend: financial calculations lack proper precision handling.
-- Frontend: All 53 components use native JavaScript numbers; no Decimal or BigNumber types found
-- Backend: All 48 monetary fields in SQLModel use Python float type for prices, trades, PnL, commissions
-
-**Why:** Floating-point arithmetic causes cumulative rounding errors in portfolio calculations. For a trading application, this is mission-critical and violates financial data integrity principles. Native numbers cannot reliably represent decimal monetary values.
-
-**Recommendation:** 
-1. Add `decimal.js` or `bignumber.js` to frontend; refactor all financial operations
-2. Migrate backend monetary fields to Python `Decimal` type (requires Alembic migration and API contract updates)
-3. Add TypeScript interfaces for all API responses to improve type safety
-4. Establish quality gate: all PRs must use Decimal/BigNumber for monetary calculations (no float arithmetic)
-
-**Impact:** Breaking change for backend API; additive for frontend. Estimated 1-2 weeks implementation.
-
-### 2026-02-23T23:00:00Z: Security Hardening (consolidated)
-**By:** Keaton, Hockney, Rabin
-**Category:** Security, Authentication, Production Readiness
-**Status:** CRITICAL - Blocks Production Deployment
-
-**Critical Issues Identified:**
-1. **Credentials Exposed** - .env file contains plaintext IB credentials and DB passwords in version control (complete account compromise risk)
-2. **No Authentication** - All 17 API endpoints lack authentication; anyone with network access can view/modify/delete financial data
-3. **Unrestricted CORS** - allow_origins=["*"] enables CSRF attacks and data exfiltration
-4. **Missing Security Headers** - No CSP, X-Frame-Options, X-Content-Type-Options, HSTS
-5. **Insecure Data Storage** - Financial settings in browser localStorage without encryption
-
-**Immediate Actions (Week 1):**
-- Rotate all exposed credentials immediately
-- Remove .env from git history using git filter-repo or BFG Repo-Cleaner
-- Implement JWT-based authentication with bcrypt password hashing
-- Restrict CORS to specific origins only (localhost:3000 for dev, production domain)
-- Add security headers middleware
-- Remove database credentials from code (fail fast if not configured)
-
-**Follow-up Actions (Week 2-3):**
-- Implement rate limiting on API endpoints
-- Add comprehensive input validation for financial endpoints
-- Audit SQL construction for injection risks
-- Encrypt or move sensitive settings from localStorage to backend
-- Implement audit logging for financial operations
-- Validate file upload endpoints (type, size, malware scanning)
-
-**Risk Assessment:** Application should NOT be deployed to production in current state. Estimated 2-3 weeks to production-ready with dedicated effort.
-
-### 2026-02-23T23:00:00Z: Testing and Quality Assurance (consolidated)
-**By:** Fenster, Hockney, Keaton
-**Category:** Quality, Testing, CI/CD
-**Status:** Requires Action
-
-**Issues:**
-- Frontend: Zero test files found (no .test.ts/.test.tsx/.spec.ts/.spec.tsx)
-- Backend: Only 10 test files; no visible tests for core financial calculations (trade PnL, daily summaries)
-- No CI/CD pipeline: only Squad workflows present, no automated lint/test/build on PR
-
-**What:** Establish testing infrastructure and automated quality gates.
-
-**Recommendations:**
-1. Set up React Testing Library for frontend with vitest or Jest
-2. Create comprehensive pytest suite for backend financial calculations
-3. Add GitHub Actions workflows for lint/test/build on every PR
-4. Establish quality gates: all PRs must pass tests, maintain >85% coverage on financial logic
-5. Test data import validation, error handling, edge cases
-
-**Timeline:** 1-2 weeks for initial setup; ongoing as part of development workflow.
-
-### 2026-02-23T23:00:00Z: API Documentation and DevOps (consolidated)
-**By:** Keaton
-**Category:** Documentation, Developer Experience, DevOps
-**Status:** Requires Action
-
-**Issues:**
-- FastAPI application lacks OpenAPI documentation generation
-- No documented authentication strategy or rate limiting approach
-- Missing CI/CD pipeline and automated deployment workflow
-
-**What:** Enable API documentation and establish production deployment practices.
-
-**Recommendations:**
-1. Enable FastAPI's built-in OpenAPI docs endpoint in main.py
-2. Create security.md documenting current authentication strategy and implementation roadmap
-3. Add GitHub Actions workflows for CI/CD (lint, test, build, deploy)
-4. Document CORS configuration and environment-specific secrets management
-5. Create deployment runbook for production hardening checklist
-
-**Priority:** High - Required before production deployment.
-# Architecture Decision: Company Analysis Page ("Split-Brain" View)
-
-**Author:** Keaton (Lead)
-**Date:** 2025-07-18
-**Status:** Proposed
-**Requested by:** Jony Vesterman Cohen
-
----
-
-## 1. Route Path
-
-**Route:** `/analyze`
-**App Router path:** `apps/frontend/src/app/analyze/page.tsx`
-
-**Rationale:** `/analyze` is short, action-oriented, and avoids collision with existing routes (`/trading/*`, `/options`, `/backtest`). It sits at the top level like other trading tools (`/options`, `/ladder`, `/holdings`) rather than nested under `/trading/` — consistent with how the app routes standalone tool pages. The page is about *analyzing a company*, not managing trades, so it deserves its own namespace.
-
-**Alternative considered:** `/trading/analyze` — rejected because existing TRADING-section pages like `/options`, `/ladder`, `/holdings` already use top-level paths.
-
----
-
-## 2. Page Component Structure
-
-```
-apps/frontend/src/components/Analyze/
-├── AnalyzePage.tsx              # Page shell: ticker search bar + Split-Brain toggle
-├── SplitBrainToggle.tsx         # Toggle between "Long-Term" and "Short-Term" views
-├── TickerSearch.tsx              # Autocomplete ticker input (debounced API call)
-│
-├── longterm/
-│   ├── LongTermView.tsx         # Container for all Long-Term panes
-│   ├── PriceChartWithFairValue.tsx  # 1Y/5Y line chart + DCF fair-value overlay
-│   ├── AISynthesis.tsx          # "Growth Engine" + "Bear Case" bulleted lists
-│   ├── FinancialScorecard.tsx   # ROIC vs WACC, Revenue/FCF CAGR, Net Debt/EBITDA
-│   ├── ValuationBenchmarks.tsx  # Forward P/E, PEG, EV/FCF display cards
-│   └── DCFCalculator.tsx        # Interactive sliders → recalculates fair value live
-│
-├── shortterm/
-│   ├── ShortTermView.tsx        # Container for all Short-Term panes
-│   ├── CandlestickChart.tsx     # 1M candlestick + EMA 50/200 + Bollinger + volume
-│   ├── MomentumPanel.tsx        # RSI + MACD indicators
-│   ├── AIPriceAction.tsx        # "Current Support", "Setup Quality" summary
-│   ├── OptionChainSnapshot.tsx  # IV Percentile, IV Rank table
-│   └── BreakevenVisualizer.tsx  # Price vs Strike vs Breakeven visual
-│
-└── hooks/
-    ├── useCompanyFundamentals.ts  # Fetch + cache fundamentals data
-    ├── usePriceHistory.ts         # Fetch OHLCV data for charts
-    ├── useOptionChain.ts          # Fetch options chain data
-    └── useDCFCalculator.ts        # Client-side DCF recalculation on slider change
-```
-
-**Key design decisions:**
-- `SplitBrainToggle` uses React state (not URL params) — both views share the same ticker context, switching is instant
-- Chart components follow the `OptionsChart.tsx` pattern: `useRef` + `useEffect` with `createChart` from lightweight-charts
-- DCF Calculator does client-side recalculation via `useDCFCalculator` hook — sliders call a pure function, no API round-trip needed
-- Each view is lazy-loaded with `React.lazy()` to avoid loading Short-Term chart code when in Long-Term mode
-
----
-
-## 3. API Contracts
-
-All endpoints under prefix `/api/analyze`. New router file: `apps/backend/app/api/analyze.py`.
-
-### 3.1 Company Fundamentals
-
-```
-GET /api/analyze/fundamentals/{ticker}
-```
-
-**Response:**
-```json
-{
-  "ticker": "AAPL",
-  "name": "Apple Inc.",
-  "sector": "Technology",
-  "market_cap": 3200000000000,
-  "currency": "USD",
-  "financials": {
-    "roic": 0.562,
-    "wacc": 0.098,
-    "revenue_cagr_5y": 0.082,
-    "fcf_cagr_5y": 0.115,
-    "net_debt_ebitda": 0.42,
-    "forward_pe": 28.5,
-    "peg_ratio": 2.1,
-    "ev_fcf": 25.3,
-    "trailing_eps": 6.42,
-    "forward_eps": 7.10,
-    "dividend_yield": 0.0055
-  },
-  "dcf_inputs": {
-    "current_fcf": 110000000000,
-    "shares_outstanding": 15400000000,
-    "growth_rate_default": 0.08,
-    "discount_rate_default": 0.10,
-    "terminal_growth": 0.025,
-    "projection_years": 10
-  }
-}
-```
-
-**Source:** yfinance `ticker.info`, `ticker.financials`, `ticker.cashflow`, `ticker.balance_sheet`
-
-### 3.2 Price History
-
-```
-GET /api/analyze/price-history/{ticker}?period={1y|5y|1mo}&interval={1d|1wk}
-```
-
-**Response:**
-```json
-{
-  "ticker": "AAPL",
-  "period": "1y",
-  "interval": "1d",
-  "data": [
-    {
-      "time": "2024-07-18",
-      "open": 178.50,
-      "high": 182.30,
-      "low": 177.80,
-      "close": 181.20,
-      "volume": 52340000
-    }
-  ]
-}
-```
-
-**Source:** yfinance `ticker.history(period, interval)`
-
-### 3.3 Technical Indicators
-
-```
-GET /api/analyze/technicals/{ticker}
-```
-
-**Response:**
-```json
-{
-  "ticker": "AAPL",
-  "as_of": "2025-07-18",
-  "indicators": {
-    "ema_50": 179.30,
-    "ema_200": 172.15,
-    "rsi_14": 62.5,
-    "macd": {
-      "macd_line": 2.45,
-      "signal_line": 1.80,
-      "histogram": 0.65
-    },
-    "bollinger": {
-      "upper": 188.50,
-      "middle": 181.20,
-      "lower": 173.90,
-      "bandwidth": 0.081
-    }
-  },
-  "support_resistance": {
-    "support_1": 175.00,
-    "resistance_1": 190.00,
-    "trend": "bullish"
-  }
-}
-```
-
-**Source:** Calculated server-side from yfinance OHLCV using standard TA formulas (EMA, RSI, MACD, Bollinger Bands)
-
-### 3.4 Option Chain
-
-```
-GET /api/analyze/options/{ticker}?expiry={YYYY-MM-DD}
-```
-
-**Response:**
-```json
-{
-  "ticker": "AAPL",
-  "current_price": 181.20,
-  "expirations": ["2025-07-25", "2025-08-01", "2025-08-15"],
-  "selected_expiry": "2025-07-25",
-  "iv_percentile": 32.5,
-  "iv_rank": 28.1,
-  "calls": [
-    {
-      "strike": 180.0,
-      "bid": 3.20,
-      "ask": 3.40,
-      "iv": 0.245,
-      "delta": 0.52,
-      "gamma": 0.035,
-      "theta": -0.12,
-      "volume": 1520,
-      "open_interest": 8400
-    }
-  ],
-  "puts": [
-    {
-      "strike": 180.0,
-      "bid": 2.80,
-      "ask": 3.00,
-      "iv": 0.252,
-      "delta": -0.48,
-      "gamma": 0.034,
-      "theta": -0.11,
-      "volume": 980,
-      "open_interest": 6200
-    }
-  ]
-}
-```
-
-**Source:** yfinance `ticker.options` for expirations, `ticker.option_chain(expiry)` for chain data
-
-### 3.5 AI Synthesis (Future — Stub First)
-
-```
-GET /api/analyze/synthesis/{ticker}
-```
-
-**Response:**
-```json
-{
-  "ticker": "AAPL",
-  "generated_at": "2025-07-18T14:00:00Z",
-  "growth_engine": [
-    "Services revenue growing 15% YoY, now 25% of total revenue",
-    "Vision Pro ecosystem expanding developer adoption",
-    "India manufacturing diversification reducing supply chain risk"
-  ],
-  "bear_case": [
-    "iPhone unit sales declining 3% in key China market",
-    "Regulatory pressure on App Store fees in EU",
-    "Premium valuation leaves little margin of safety at 28x forward P/E"
-  ],
-  "price_action_summary": {
-    "current_support": "$175 (200-day EMA + high volume node)",
-    "setup_quality": "Moderate — consolidating above support, awaiting catalyst"
-  }
-}
-```
-
-**Phase 1:** Return hardcoded/templated synthesis derived from fundamentals data (no LLM).
-**Phase 2:** Integrate Copilot SDK or OpenAI for genuine AI synthesis from financial data + news.
-
----
-
-## 4. Financial Model Interfaces
-
-### 4.1 DCF Valuation (McManus)
-
-```python
-# apps/backend/app/services/analyze_service.py
-
-def calculate_dcf(
-    current_fcf: float,        # Latest free cash flow
-    growth_rate: float,         # Annual FCF growth rate (slider: 0-30%)
-    discount_rate: float,       # WACC / required return (slider: 5-20%)
-    terminal_growth: float,     # Terminal perpetuity growth (default 2.5%)
-    projection_years: int,      # Typically 10
-    shares_outstanding: float,  # For per-share fair value
-) -> dict:
-    """Returns projected FCFs, terminal value, enterprise value, fair value per share."""
-```
-
-**Output:** `{ "projected_fcfs": [...], "terminal_value": float, "enterprise_value": float, "fair_value_per_share": float }`
-
-### 4.2 ROIC Calculation
-
-```python
-def calculate_roic(
-    nopat: float,          # Net Operating Profit After Tax
-    invested_capital: float # Total equity + net debt
-) -> float:
-```
-
-**Source fields:** From yfinance financials and balance_sheet DataFrames.
-
-### 4.3 Technical Indicators (McManus)
-
-```python
-def calculate_ema(prices: list[float], period: int) -> list[float]:
-def calculate_rsi(prices: list[float], period: int = 14) -> list[float]:
-def calculate_macd(prices: list[float]) -> dict:  # macd_line, signal, histogram
-def calculate_bollinger(prices: list[float], period: int = 20, std_dev: float = 2.0) -> dict:
-```
-
-These are pure functions operating on price arrays. No external dependencies — standard formulas.
-
-### 4.4 IV Percentile / IV Rank
-
-```python
-def calculate_iv_percentile(current_iv: float, historical_ivs: list[float]) -> float:
-    """% of days in past year where IV was below current IV."""
-
-def calculate_iv_rank(current_iv: float, high_iv_52w: float, low_iv_52w: float) -> float:
-    """(Current IV - 52w Low) / (52w High - 52w Low) * 100"""
-```
-
-### 4.5 Breakeven Calculator
-
-```python
-def calculate_breakeven(
-    strike: float,
-    premium: float,
-    option_type: str,  # "call" | "put"
-    current_price: float,
-) -> dict:
-    """Returns breakeven price and distance from current price."""
-```
-
----
-
-## 5. Data Sources
-
-| Data Need | Source | Notes |
-|-----------|--------|-------|
-| Company info, financials | `yfinance` ticker.info, .financials, .cashflow, .balance_sheet | Already in dependencies |
-| Price history (OHLCV) | `yfinance` ticker.history() | Supports 1d, 1wk, 1mo intervals |
-| Option chains + Greeks | `yfinance` ticker.option_chain() | Greeks included in chain data |
-| Technical indicators | **Calculated server-side** | Pure math from OHLCV — no extra deps |
-| IV historical data | `yfinance` options chain over time | May need caching strategy for 52-week lookback |
-| AI Synthesis | **Phase 1: Template-based** from fundamentals | Phase 2: Copilot SDK / OpenAI integration |
-| Social sentiment | **Out of scope for v1** | Future: Reddit/Twitter APIs or third-party sentiment feeds |
-
-**Caching strategy:** yfinance calls are slow (1-3s per ticker). Add a simple in-memory TTL cache (5-minute expiry for prices, 1-hour for fundamentals) using `cachetools` or a dict-based approach in the service layer.
-
----
-
-## 6. Nav Integration
-
-**File:** `apps/frontend/src/components/Layout/MainLayout.tsx`
-**Location:** After the "Backtest" link (line 156), before the Settings divider (line 158).
-
-Insert:
-```tsx
-<Link
-    href="/analyze"
-    className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-    onClick={() => setMenuOpen(false)}
->
-    Company Analysis
-</Link>
-```
-
-This places it as the last item in the TRADING section — logically it's a research/analysis tool that complements the existing trading execution pages above it.
-
----
-
-## 7. Work Decomposition
-
-### Phase 1: Foundation (No dependencies between tasks)
-
-| # | Task | Agent | Depends On | Description |
-|---|------|-------|------------|-------------|
-| 1 | Backend router + fundamentals endpoint | **Hockney** | — | Create `app/api/analyze.py`, register in `main.py`, implement `GET /api/analyze/fundamentals/{ticker}` using yfinance |
-| 2 | Backend price history endpoint | **Hockney** | — | Implement `GET /api/analyze/price-history/{ticker}` with period/interval params |
-| 3 | Financial calculation service | **McManus** | — | Implement `app/services/analyze_service.py` with DCF, ROIC, EMA, RSI, MACD, Bollinger pure functions |
-| 4 | Frontend page shell + nav link | **Fenster** | — | Create `app/analyze/page.tsx`, `AnalyzePage.tsx`, `SplitBrainToggle.tsx`, `TickerSearch.tsx`, add nav link in MainLayout |
-
-### Phase 2: Long-Term View (Depends on Phase 1)
-
-| # | Task | Agent | Depends On | Description |
-|---|------|-------|------------|-------------|
-| 5 | Price chart with fair value overlay | **Fenster** | 2, 3 | `PriceChartWithFairValue.tsx` — line chart using lightweight-charts, DCF overlay line |
-| 6 | Financial Scorecard component | **Fenster** | 1 | `FinancialScorecard.tsx` — display ROIC/WACC, CAGR, Debt/EBITDA from fundamentals endpoint |
-| 7 | Valuation Benchmarks + DCF Calculator | **Fenster** | 1, 3 | `ValuationBenchmarks.tsx` + `DCFCalculator.tsx` with interactive sliders |
-| 8 | AI Synthesis stub | **Hockney** | 1 | `GET /api/analyze/synthesis/{ticker}` — template-based summary from fundamentals data |
-| 9 | AI Synthesis component | **Fenster** | 8 | `AISynthesis.tsx` — render growth engine + bear case lists |
-
-### Phase 3: Short-Term View (Depends on Phase 1)
-
-| # | Task | Agent | Depends On | Description |
-|---|------|-------|------------|-------------|
-| 10 | Technicals endpoint | **Hockney** | 2, 3 | `GET /api/analyze/technicals/{ticker}` — calls McManus calculation functions |
-| 11 | Option chain endpoint | **Hockney** | 3 | `GET /api/analyze/options/{ticker}` — wraps yfinance option_chain + IV calculations |
-| 12 | Candlestick chart + indicators | **Fenster** | 2, 10 | `CandlestickChart.tsx` + `MomentumPanel.tsx` — candlestick series with overlays |
-| 13 | Option chain + breakeven UI | **Fenster** | 11 | `OptionChainSnapshot.tsx` + `BreakevenVisualizer.tsx` |
-| 14 | AI Price Action component | **Fenster** | 8, 10 | `AIPriceAction.tsx` — support/resistance + setup quality display |
-
-### Phase 4: Polish
-
-| # | Task | Agent | Depends On | Description |
-|---|------|-------|------------|-------------|
-| 15 | Caching layer for yfinance | **Hockney** | 1, 2, 10, 11 | Add TTL-based in-memory cache to avoid repeated yfinance calls |
-| 16 | Loading states + error handling | **Fenster** | 5-14 | Skeleton loaders, error boundaries, empty states for all components |
-| 17 | Integration review | **Keaton** | All | End-to-end review, verify data flow, chart performance, mobile responsiveness |
-
----
-
-## Design Principles Applied
-
-1. **Separation:** Backend does all financial math — frontend is a render layer with one exception (DCF slider recalculation for instant feedback)
-2. **yfinance first:** No new dependencies for data. yfinance covers fundamentals, prices, and options chains
-3. **Incremental delivery:** Each phase delivers a working slice. Phase 1 + 2 alone gives a useful Long-Term analysis tool
-4. **AI as enhancement, not dependency:** Synthesis is template-based in v1. The page works without AI — it adds color but isn't load-bearing
-5. **Chart consistency:** All charts follow the `OptionsChart.tsx` pattern (dark theme, slate grid, lightweight-charts API)
-
----
-
-## Open Questions
 
 1. **Ticker universe:** Should we restrict to US equities, or support international tickers (TASE, LSE)? yfinance supports both but data coverage varies.
 2. **Persistence:** Should analysis results be saved to DB, or is this always live/ephemeral? Recommend ephemeral for v1.
@@ -942,3 +442,546 @@ This separation allows backend teams to reorganize financial categories without 
 - Other single-page translations should follow this same pattern
 
 **Impact:** Additive. Zero changes to existing pages. Bilingual support ready for expansion.
+
+---
+
+## 2026-04-30: Hosting & Sharing Design v1 (consolidated)
+
+**By:** Keaton (Architect, Lead), Fenster (Frontend), Rabin (Auth), Hockney (Backend), Mcmanus (Data), Kujan (Deploy)  
+**Status:** APPROVED (pending implementation)  
+**Impact:** Full-stack architecture, hosting strategy, auth model, data governance, deployment plan
+
+### Architecture Overview
+
+**Recommendation:** Adopt **Hybrid hosting model**:
+- **Frontend:** Vercel + Next.js 15 App Router (auto-deploy from GitHub)
+- **Auth:** Supabase Auth + Google OAuth (SSR via @supabase/ssr)
+- **Database:** Supabase Postgres with Row Level Security (RLS)
+- **API/CRUD:** Next.js Server Actions (replacing FastAPI for UI operations)
+- **Heavy compute:** Local Docker workers (backtests, broker sync, imports) writing to Supabase
+- **CI/CD:** GitHub Actions (PR validation, deploy, nightly jobs)
+
+**Cost:** $0–15/month MVP; ~$70–150/month for 50+ users.
+
+### Rationale
+
+1. **Minimizes cost** — Vercel free tier + Supabase free tier covers solo and couple sharing ($0–3/mo).
+2. **Preserves Python investment** — FastAPI stays as local compute worker for heavy jobs.
+3. **Security at database layer** — RLS policies enforce household authorization even if frontend routes are misconfigured.
+4. **Household sharing first-class** — Supabase Auth + `households`/`household_members` tables provide real multi-user authorization semantics (not just frontend UI preferences).
+5. **Phased migration** — 4–6 weeks independent phases (database → frontend → backend → heavy compute) with rollback at each step.
+
+### Key Decisions by Domain
+
+#### 1. Hosting Topology (Kujan)
+- **Primary:** Vercel + Supabase + (optional) Fly.io
+- **Fallback:** Vercel + Supabase + local Docker (better for MVP couples sharing)
+- **Phases:** Phase 0 (validation) → Phase 1 (database) → Phase 2 (frontend) → Phase 3 (backend, optional) → Phase 4 (heavy compute, when scaling)
+- **CI/CD Workflows:**
+  - `squad-ci.yml` — PR validation (lint, type-check, test, Playwright E2E)
+  - `squad-deploy.yml` — Main branch auto-deploy (Vercel + Alembic migrations)
+  - `squad-nightly.yml` — Scheduled jobs (DB maintenance, backtest exports)
+- **Secrets:** GitHub Actions for backend/deploy secrets; Vercel env for frontend public keys
+
+#### 2. Authentication & Sharing (Rabin)
+- **Provider:** Supabase Auth + Google OAuth
+- **Household model:** `households` + `household_members(user_id, role)` with roles `owner`, `member`, `viewer`
+- **Sharing:** Invite links (single-use, time-bound, email-bound, token-hashed)
+- **Frontend session:** `@supabase/ssr` with secure HttpOnly cookies; no localStorage tokens
+- **Backend JWT:** FastAPI verifies Supabase JWTs via JWKS; service-role key reserved for admin jobs only
+- **RLS:** Enforce household authorization at database layer with `is_household_member()` helper
+
+#### 3. Frontend Strategy (Fenster)
+- **Deployment:** Native Vercel + Next.js 15 App Router (no custom adapter)
+- **Auth boundary:** Supabase SSR middleware refresh + server helpers for Server Components/Actions
+- **CRUD:** Server Actions with RLS (no separate API layer for normal operations)
+- **OAuth redirect:** Use stable per-PR proxy or allowlist for preview deploys (not wildcard `*.vercel.app`)
+- **UX:** Invite flow `/signin → Google → /auth/callback → /dashboard`; household switcher; role-based UI
+
+#### 4. Backend Strategy (Hockney)
+- **Hybrid model:**
+  - Server Actions handle CRUD (direct Supabase via RLS)
+  - FastAPI remains for heavy compute only (backtests, PDF imports, broker sync, options analytics, growth analysis)
+- **Data flow:** `raw_*` (broker facts) → `compute_*` (local job runs) → `cooked_*` (RLS-protected, UI reads)
+- **Compute jobs:** Start local Docker; escalate to GitHub Actions cron or hosted runners only when reliability justifies cost
+- **Endpoint migration:** Plan first 3 Server Action migrations; defer remaining FastAPI endpoints
+
+#### 5. Data Architecture (Mcmanus)
+- **Tenancy:** `households` as boundary; family financial data scoped by `household_id`; personal research by `owner_user_id`
+- **Layering:** 
+  - `raw_*` — Immutable broker/import/market facts
+  - `compute_*` — Local Docker job outputs and intermediate results
+  - `cooked_*` — RLS-protected dashboard tables for UI
+- **Schema migration:** Backfill existing single-user data into personal households; add `household_id` FK to major tables
+- **RLS helpers:** `is_household_member(hid uuid)` standard policy predicate
+- **Enum standardization:** Use `household_role` (not `household_member_role`)
+
+### Reconciliation Notes
+
+- **Keaton's Option A vs Option B:** Hockney's Hybrid (Option C) resolves the split — use Vercel/Supabase for UI, local Docker for compute.
+- **Rabin RLS helpers:** Stricter `left_at`/`deleted_at` checks supersede McManus's simpler versions.
+- **Kujan escalation path:** Fly.io/Render moved from primary to "future escalation" if local Docker becomes unreliable.
+- **Enum naming:** Standardized to `household_role` (Rabin) across all schemas.
+- **Default invite role:** `viewer` (least privilege).
+- **Service-role secrets:** GitHub Actions only; strict CI guardrails prevent frontend leakage.
+
+### Affected Team Members & Follow-ups
+
+- **Mcmanus:** Align enum names and `household_members` schema with Rabin's version; backfill single-user households
+- **Kujan:** Remove `CLERK_SECRET_KEY`; add `SUPABASE_DB_DIRECT_URL` / `SUPABASE_DB_POOL_URL` split; prepare Phase 0 checklist
+- **Rabin:** Verify `@supabase/ssr` HttpOnly behavior; test preview-deploy OAuth flow; implement MFA/free-tier strategy
+- **Hockney:** Validate PgBouncer + SQLModel prepared statement settings; define `compute_runs` schema; prioritize first 3 Server Action endpoints
+- **Fenster:** Implement auth middleware; build household UX; test invite flow on preview deploys
+
+### Success Criteria
+
+- [x] All six researcher sections completed
+- [x] Architecture consensus reached (Keaton + Rabin + Kujan + Redfoot approved)
+- [x] Cost model validated ($0–3/mo MVP, $70–150/mo at scale)
+- [x] Security checklist completed (secrets, RLS, auth flow)
+- [ ] Phase 0 local validation completed
+- [ ] Phase 1 database cutover executed
+- [ ] Phase 2 frontend deployed to Vercel
+- [ ] Phase 3 backend (optional) deployed
+- [ ] Phase 4 heavy compute (when scaling) deployed
+
+### Reference
+
+- **Full design:** `docs/design-hosting/design.md`
+- **Sections:** `docs/design-hosting/sections/` (6 files)
+- **Diagrams:** `docs/design-hosting/diagrams/` (6 Excalidraw files)
+- **Reviews:** `docs/design-hosting/reviews/` (5 review files)
+- **Related:** `.squad/agents/*/history.md` for researcher learnings
+
+---
+
+### 2026-05-01: Supabase Setup Runbook & Local Development Workflow
+**By:** Kujan (DevOps/Platform), requested by Jony Vesterman Cohen
+**Category:** Infrastructure, Documentation
+**Status:** Implemented
+
+**What:** Split the original combined hosting runbook into focused agent deliverables. Kujan owns Supabase setup and operations; Hockney will handle Vercel deployment separately. The trading journal application uses Supabase for Postgres + Auth with household-based sharing model and RLS enforcement.
+
+**Key Decisions:**
+
+1. **Local Development via Supabase CLI:** Use `supabase start` for local Docker-based development stack instead of standalone Postgres container.
+   - Single command boots Postgres, GoTrue (auth), PostgREST, Storage, Studio, and Inbucket
+   - Automatic migrations replay on `supabase db reset`
+   - Consistent local/remote schema via `supabase link` + `supabase db push`
+   - Studio web UI at `http://127.0.0.1:54323` for schema inspection
+
+2. **Connection String Strategy:** Use **direct connection** (port 54322 local, 5432 remote) for migrations and long-running jobs. Use **transaction pooler** (port 6543) for production web traffic with `?statement_cache_size=0`.
+   - Alembic/SQLAlchemy migrations fail through PgBouncer transaction pooler
+   - Direct connections support session-level features and long transactions
+   - Transaction pooler optimizes short-lived serverless/web requests
+
+3. **Migration Workflow:** SQL-first migrations via `supabase migration new` with manual review. Avoid Studio UI diff tool for financial schema.
+   - Financial applications require explicit control over constraints, indexes, and RLS policies
+   - SQL migrations are reviewable, testable, and version-controlled
+   - Studio diff tool can miss security-critical policies or generate verbose/redundant DDL
+
+4. **Three-Environment Strategy:** Provision three Supabase projects: `trading-journal-dev`, `trading-journal-preview`, `trading-journal-prod`.
+   - **Dev:** Integration testing, schema experimentation, safe to break
+   - **Preview:** PR validation, stakeholder review, matches production config
+   - **Prod:** Live user data, strict change control
+
+5. **Region Selection:** Recommend `eu-central-1` (Frankfurt) for Israel-based primary developer.
+   - Frankfurt offers ~80-120 ms latency to Israel (verified via cloudping.info)
+   - **Cannot change region post-creation** — must choose correctly upfront
+
+6. **Free-Tier Monitoring:** Defer PDF file uploads until paid tier. Monitor database size before Phase 1 schema deployment.
+   - 500 MB database storage, 1 GB file storage, 5 GB monthly egress bandwidth
+   - Upgrade trigger: DB > 400 MB OR egress > 80% of quota
+
+7. **OAuth Configuration Pattern:** Configure Google OAuth for both local (`http://127.0.0.1:54321/auth/v1/callback`) and remote (`https://<project-ref>.supabase.co/auth/v1/callback`).
+   - Google Console: Add both callback URIs to Authorized redirect URIs
+   - Supabase: Configure in Dashboard → Authentication → Providers → Google
+   - Preview deploy OAuth requires explicit Vercel preview URLs in Google Console OR Supabase wildcard support (must verify)
+
+8. **RLS Helper Function Pattern:** Use `is_household_member(hid uuid)` security definer function + policies on every user-data table.
+   - Centralized authorization logic (DRY)
+   - `security definer` grants function access to `household_members` table
+   - Simplifies per-table policies to single `using (public.is_household_member(household_id))` clause
+
+**Verification Checklist (⚠️ items):**
+- Region selection (`eu-central-1` latency acceptable)
+- Management API field names (verify `region` vs. `region_id`)
+- Free-tier quotas (50k MAU / 500 MB DB / 5 GB egress)
+- Backup retention (7-day free tier)
+- Project pause policy (~7 days inactivity)
+- OAuth preview URL behavior (wildcard support)
+- Local DB size check before TJ-005 schema deploy
+- PgBouncer parameter (`statement_cache_size=0`) in production pooler URL
+
+**Outcomes:**
+- Runbook Delivered: `docs/design-hosting/setup-supabase.md` (498 lines, 11 sections)
+- Cross-References: Links to Hockney's Vercel runbook, design docs, and GitHub issues TJ-001/004/005/007
+- Verification Items: 8 ⚠️-flagged items requiring user confirmation before Phase 1
+- CLI Commands: Quick reference appendix with 15+ common operations
+- Troubleshooting: 7 common issues + solutions
+
+---
+
+### 2026-04-30: Supabase 2-Project Topology (Free Tier)
+**By:** Keaton (Lead), requested by Jony Vesterman Cohen
+**Category:** Architecture, Infrastructure
+**Status:** Approved — reflects Kujan's verified finding against live Supabase docs
+
+**Context:** The approved hosting design (`docs/design-hosting/design.md`) assumed three Supabase environments mapped to three remote projects. Kujan's remote runbook (`docs/design-hosting/runbooks/supabase-02-remote.md`) verified against live Supabase pricing that the **free tier allows a maximum of 2 active projects per organisation**. A 3-project topology therefore requires a paid plan from day one.
+
+**Decision:** Adopt a **2-project topology** that stays within the free tier:
+
+| Slot | Supabase project | Serves |
+|---|---|---|
+| 1 | **Production** | Vercel production deployments only |
+| 2 | **Dev/Preview** | Local development + all Vercel preview deployments (shared state) |
+| — | **Local Docker** (`supabase start`) | Fully offline iteration; no remote project slot consumed |
+
+**Rationale:**
+- Free tier = 2 projects max. Using 3 costs $25/mo on Pro immediately.
+- Dev and preview share enough characteristics (non-production data, seed-able, ephemeral) that sharing a single remote project is acceptable for a small team.
+- Local Docker (`supabase start`) gives any developer a fully isolated environment without touching the remote project count.
+
+**Trade-offs:**
+
+**Risk:** Preview branches share Dev/Preview state. Two PRs that mutate the same database row (e.g., both seeding the same household fixture) can collide or produce confusing test results.
+
+**Mitigations (in priority order):**
+1. **Opt-in per-PR seed reset** — a CI step that truncates and re-seeds the Dev/Preview project when a PR opts in via a label or workflow flag. Cheap and sufficient for a solo/duo team.
+2. **Upgrade to Supabase Pro ($25/mo)** — adds a third project slot, allowing true per-environment isolation. Appropriate when team size reaches 3+ active contributors or when preview-state collisions become frequent.
+
+**Affected Artefacts:**
+- `docs/design-hosting/design.md` — Phase 1 topology, Acceptance Criteria §15 item 3, Edge Case §13 "Preview deploys hitting prod data", top-of-doc changelog note.
+- `docs/design-hosting/runbooks/supabase-02-remote.md` — already correct per Kujan's runbook; no changes needed.
+
+---
+
+### 2026-04-30: Issue Decomposition: Hosting Migration
+**By:** Keaton (Lead), requested by Jony Vesterman Cohen
+**Category:** Planning, Architecture
+**Status:** Ready for review
+
+**What:** Decomposed the approved hosting design (design.md v2) into 31 GitHub issues across 6 phases (Prep → Foundation → Data → Frontend → Sharing → Cutover).
+
+**Key metrics:**
+- **Total issues:** 31
+- **Total phases:** 6
+- **Critical path depth:** 9 (TJ-000 → TJ-004 → TJ-005 → TJ-007 → TJ-018 → TJ-025 → TJ-026 → TJ-029 → TJ-030)
+- **Most work:** Kujan (10 issues — heavy infra/DevOps load), Fenster (7 issues — frontend + sharing UX)
+- **@copilot-suitable:** 9 issues (TJ-002, TJ-009, TJ-014, TJ-015, TJ-017, TJ-019, TJ-024, TJ-027, TJ-028)
+
+**Design.md insufficiencies flagged:**
+1. **Table classification not fully specified:** design.md §6 surveys tables but doesn't produce a definitive classification table. TJ-003 creates this as a prerequisite for TJ-005.
+2. **Email delivery for invites unspecified:** design.md §5 mentions email but doesn't specify provider. TJ-021 defers to logging invite URLs with email integration as follow-up.
+3. **Custom domain decision still pending:** design.md §17 lists this as a Jony decision. TJ-026 (prod deploy) notes the dependency.
+4. **Preview OAuth strategy needs spike:** design.md §4.1 describes three options but doesn't pick one. TJ-025 validates whichever approach is chosen.
+5. **Audit log schema not detailed:** design.md §5 describes audit requirements but doesn't provide DDL. TJ-024 creates this.
+
+**Artifacts:**
+- `docs/design-hosting/issue-manifest.json`
+- `docs/design-hosting/issue-manifest.md`
+# Decision: Analyze Page — Shared Components & Error Resilience
+
+**Author:** Fenster (Frontend)
+**Date:** 2025-07-24
+**Issue:** #6 — Company Analysis polish for v0.0.1
+
+## Context
+
+The Analyze page had duplicated skeleton/error UI across ShortTermView and LongTermView, no per-section error isolation, no retry support in shortterm hooks, and rigid grid layouts on mobile.
+
+## Decisions
+
+1. **Extracted `shared/` component library** — SkeletonCard, ErrorBanner (with optional `onRetry`), SectionErrorBoundary (React class error boundary), and EmptyState live under `Analyze/shared/` with a barrel export. Both views now import from this single source.
+
+2. **Per-section error boundaries** — Every data-driven section in both views is wrapped in `<SectionErrorBoundary>`. A crash in one section (e.g. chart rendering) no longer takes down the entire page.
+
+3. **Retry on all hooks** — All 4 shortterm hooks (`useTechnicals`, `usePriceHistory`, `useSynthesis`, `useOptionChain`) now expose `refetch` via `useCallback`. Longterm hooks already had this. Each section's ErrorBanner wires to the relevant hook's `refetch`.
+
+4. **Mobile-responsive grids** — FinancialScorecard changed from `grid-cols-2` to `grid-cols-1 sm:grid-cols-2`. ShortTermView grids changed from `md:grid-cols-2` to `sm:grid-cols-2` for earlier breakpoint.
+
+5. **Improved empty & error states** — No-ticker-selected now shows an EmptyState with suggestions. Invalid-ticker errors show a descriptive message with icon and retry button.
+
+## Trade-offs
+
+- SectionErrorBoundary is a class component (React requirement for error boundaries). This is the only class component in the codebase.
+- The `shared/` folder is scoped to Analyze. If other pages need these components later, they can be promoted to a top-level `shared/` or `ui/` directory.
+### 2026-07-23: Insurance Page API Contract & After I Leave Integration
+**By:** Fenster
+**Category:** Frontend Architecture, API Contract
+**Status:** Implemented (pending backend)
+
+**What:** Created frontend for insurance policies with API contract:
+- `GET /api/insurance` → `{ status: "success", data: InsurancePolicy[] }`
+- `POST /api/insurance` → body: `InsurancePolicy` → `{ status: "success", data: InsurancePolicy }`
+- `PUT /api/insurance/{id}` → body: partial `InsurancePolicy` → `{ status: "success", data: InsurancePolicy }`
+- `DELETE /api/insurance/{id}` → `{ status: "success" }`
+
+**InsurancePolicy shape:**
+```typescript
+{
+  id?: string;
+  type: 'Life' | 'Mortgage' | 'Health' | 'Disability' | 'Other';
+  provider: string;
+  policy_number?: string;
+  sum_insured?: string;  // flexible text, not numeric
+  monthly_premium?: number | null;
+  beneficiaries?: string;
+  expiry_date?: string;  // ISO date
+  website?: string;
+  notes?: string;
+  owner: string;  // 'You' or 'Partner'
+}
+```
+
+**Why:** `sum_insured` is text (not number) because insurance can be "₪2,000,000" or "Covers remaining mortgage" — flexible format for different policy types. `monthly_premium` is numeric for future aggregation.
+
+**After I Leave integration:** Life and Mortgage sections replace demo data with real policies when `/api/insurance` returns matching type. SummaryTable also swaps demo insurance rows for real data.
+
+**Impact:** Hockney needs to implement the backend matching this contract. Frontend gracefully handles API unavailability (empty state).
+# Decision: Pension Historical Report Browser
+
+**Author:** Fenster (Frontend Dev)
+**Date:** 2025-07-22
+**Issue:** #13
+
+## Context
+
+The pension page only showed the latest uploaded report. Users need to browse historical reports to track retirement progress over time and compare changes between periods.
+
+## Decision
+
+### Backend
+- Added `GET /api/pension/reports` endpoint that returns:
+  - List of uploaded PDF files with metadata (filename, owner, upload timestamp, size)
+  - Per-snapshot pension totals derived from `FinanceSnapshot` records, including per-account breakdowns
+
+### Frontend
+- **ReportHistory** component: timeline sidebar showing all pension snapshots with total values, delta badges comparing to previous snapshot, expandable per-account details, and a collapsible uploaded files list
+- **SnapshotDetail** component: full-width detail view when a snapshot is clicked, showing per-account table with value, deposits, earnings, fees, and delta vs previous period
+- Layout changed from 2-col to 3-col grid (lg breakpoint) to accommodate history panel alongside upload + results
+
+### Architecture Notes
+- No new DB models — reports endpoint reads existing `FinanceSnapshot` records and scans the `reports/` directory for file metadata
+- No i18n added (pension page doesn't use i18n patterns)
+- Currency formatting follows existing `he-IL` / `ILS` convention
+- All new components are `'use client'` to match existing pension page pattern
+
+## Alternatives Considered
+
+1. **Store reports in DB**: Adds model complexity; filesystem scan is sufficient for MVP since files are already saved on upload
+2. **Separate page for history**: Rejected — inline panel provides faster context switching without losing dashboard view
+# Decision: Insurance Policies API Design
+
+**Date:** 2025-07-22
+**Author:** Hockney (Backend Dev)
+**Issue:** #18
+
+## Context
+
+Insurance policies page needs a backend API. This is a new standalone entity, not embedded in the finance snapshots system like pensions.
+
+## Decisions
+
+1. **Standalone table, not snapshot-embedded**: Insurance policies are CRUD entities stored in their own `insurance_policies` table with UUID PKs. Unlike pensions (which live inside `FinanceSnapshot.data` as JSON items), insurance policies don't need time-series tracking or net-worth calculations. They're reference data.
+
+2. **sum_insured as string**: Kept as free-text (`str`) instead of `float` because coverage descriptions vary — some are monetary ("₪2,000,000"), some are descriptive ("Covers remaining mortgage balance"). Frontend can display as-is.
+
+3. **Owner values: "You" / "Partner"**: Matches the existing pension pattern for household-level ownership.
+
+4. **Type enum validated server-side**: Accepted values are `life`, `mortgage`, `health`, `disability`, `other`. Validated in the API layer, not at the DB level, so the enum can be extended without migrations.
+
+## Impact
+
+- Frontend team: API is at `/api/insurance` with standard CRUD + `?owner=` filter
+- No impact on existing finance/pension systems
+- Migration `acadd4bc6806` needs to run on deploy
+# Decision: Add OpenAPI metadata and route docstrings
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2025-07-22
+**Issue:** #12
+
+## Context
+
+FastAPI auto-generates `/docs` (Swagger UI) and `/redoc` endpoints, but the generated spec lacked proper API metadata and many route handlers had no docstrings — resulting in a bare, undocumented schema.
+
+## Decision
+
+1. Added OpenAPI metadata to the `FastAPI()` constructor: title, description, version, and explicit `docs_url`/`redoc_url`.
+2. Added concise docstrings to all route handler functions across 17 router files that were missing them.
+3. No `response_model` additions were needed — all typed routes already had them; untyped routes return dynamic dicts where adding a model would change behavior.
+4. No business logic was changed.
+
+## Rationale
+
+- Docstrings automatically populate the OpenAPI operation summaries, making `/docs` and `/redoc` immediately useful for frontend devs and future API consumers.
+- Keeping docstrings to 1–2 lines avoids clutter while giving each endpoint a clear purpose statement.
+- Explicit `docs_url`/`redoc_url` makes the configuration self-documenting even though they match FastAPI defaults.
+
+## Impact
+
+- `/docs` and `/redoc` now show a titled, described API with per-endpoint summaries.
+- No runtime behavior change. All 238 passing tests remain green (2 pre-existing failures require PostgreSQL).
+# Decision: Add Security Headers Middleware
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2025-07-18
+**Status:** Accepted
+**Issue:** #10
+
+## Context
+
+The trading journal backend had no security headers on HTTP responses. This leaves the application vulnerable to clickjacking, MIME-type sniffing, and other client-side attacks.
+
+## Decision
+
+Added a Starlette `BaseHTTPMiddleware` that injects six security headers on **every** response:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| X-Frame-Options | DENY | Prevent clickjacking |
+| X-Content-Type-Options | nosniff | Stop MIME-type sniffing |
+| Strict-Transport-Security | max-age=31536000; includeSubDomains | Enforce HTTPS |
+| Referrer-Policy | strict-origin-when-cross-origin | Limit referrer leakage |
+| Content-Security-Policy | default-src 'self' | Restrict resource origins |
+| Permissions-Policy | camera=(), microphone=(), geolocation=() | Disable sensitive browser APIs |
+
+Headers are defined as a constant dict in `security_headers.py` so tests and future middleware can reference the single source of truth.
+
+## Consequences
+
+- All responses (including errors) now carry these headers.
+- The CSP `default-src 'self'` is intentionally strict; if the frontend needs to load external resources it should be relaxed per-directive rather than weakening the default.
+- HSTS assumes HTTPS in production; harmless over plain HTTP in dev.
+# Decision: Migrate monetary float fields to Decimal
+
+**Author:** McManus (Data/Finance)  
+**Date:** 2025-07-25  
+**Status:** Accepted  
+**Issue:** #9
+
+## Context
+
+All monetary fields across the trading-journal backend were stored as Python `float`
+(IEEE 754 double-precision). This introduces rounding errors in financial calculations
+(e.g., `0.1 + 0.2 != 0.3`), which is unacceptable for a trading journal tracking
+real P&L, commissions, and portfolio values.
+
+## Decision
+
+Migrate every monetary `float` field to `decimal.Decimal` in Python and
+`Numeric(18, 6)` in PostgreSQL. This covers ~80+ fields across 9 schema files.
+
+### Key design choices
+
+| Choice | Rationale |
+|--------|-----------|
+| `Numeric(18,6)` precision | 18 digits total, 6 fractional — sufficient for equity/options prices and large portfolio values |
+| `sa_column=Column(Numeric(18,6))` for table fields | SQLModel requires explicit SQLAlchemy column for Numeric mapping |
+| Plain `Decimal` for Pydantic-only models | No database column needed; Pydantic validates the type |
+| `ENCODERS_BY_TYPE[Decimal] = float` in FastAPI | Ensures JSON responses emit numbers, not strings — backward compatible with frontend |
+| `DecimalSafeJSONResponse` as default | Belt-and-suspenders for any Decimal that bypasses `jsonable_encoder` |
+| Manual Alembic migration | Autogenerate requires live DB; hand-written migration is safer and reviewable |
+
+## Scope
+
+- **Migrated:** All SQLModel table fields, Pydantic API models, and dataclass models
+  with monetary semantics across models.py, trading_models.py, finance_models.py,
+  dividend_models.py, plan_models.py, insurance_models.py, options_models.py,
+  backtest_models.py, ladder_models.py
+- **Not migrated:** `plan_service.py` and `plan_components.py` simulation engine
+  (uses dict-based float arithmetic — separate refactor)
+- **Intentionally kept as float:** `Ndx1mChartData.time` (Unix timestamp)
+
+## Consequences
+
+- Financial calculations gain exact decimal precision
+- Frontend receives numbers (not strings) — no breaking change
+- Alembic migration safely casts existing float data via `::numeric(18,6)`
+- Test assertions updated to use `float()` wrapper for `pytest.approx` compatibility
+# Decision: JWT Authentication for API Endpoints
+
+**Author:** Rabin (Security Specialist)  
+**Date:** 2025-07-26  
+**Status:** Implemented  
+**Issue:** #1 — Add authentication to API endpoints
+
+## Context
+
+All 18+ API endpoints lacked authentication. Anyone with network access could view, modify, or delete financial data. This was the #1 blocker for non-localhost deployment.
+
+## Decision
+
+Implement JWT-based authentication using `python-jose` + `passlib[bcrypt]`.
+
+### Key choices:
+
+| Decision | Rationale |
+|----------|-----------|
+| JWT Bearer tokens | Stateless, no server-side session storage needed |
+| bcrypt password hashing | Industry standard, resistant to brute-force |
+| Router-level `dependencies=` | Clean separation — auth applied per router include in main.py |
+| Public paths: `/`, `/api/auth/register`, `/api/auth/login` | Minimum surface area for unauthenticated access |
+| No roles/permissions | Single-user personal app — authenticated = authorized |
+| `JWT_SECRET_KEY` env var with dev default | Safe for local dev, forces explicit config for production |
+| 60-minute token expiry | Balance between convenience and security |
+| bcrypt < 4.1 pinned | passlib incompatible with bcrypt 5.x |
+
+## Files Changed
+
+- `app/schema/user_models.py` — User model + Pydantic schemas
+- `app/auth/security.py` — JWT + bcrypt helpers
+- `app/auth/dependencies.py` — `get_current_user` FastAPI dependency
+- `app/api/auth.py` — Register, login, me endpoints
+- `main.py` — Auth router + `dependencies=auth_dep` on all data routers
+- `alembic/versions/acfa0cdeaae7_add_users_table.py` — Migration
+- `tests/conftest.py` — Auth-aware test fixtures
+- `tests/test_auth.py` — 13 auth-specific tests
+
+## Risks
+
+- `passlib` is unmaintained; may need replacement if Python 3.13+ drops `crypt` module
+- Dev default secret key must never reach production — document in deployment guide
+# Decision: Backend Financial Test Coverage (Issue #5)
+
+**Author:** Redfoot (Tester)  
+**Date:** 2025-07-25  
+**Status:** Proposed
+
+## Context
+
+The backend had ~136 passing tests but major gaps in financial calculation coverage. Core money-handling logic — daily PnL summaries, dividend/options projections, XLSX data import, and Decimal precision in options analytics — had zero tests.
+
+## Decision
+
+Added 94 focused pytest tests across 6 new test files:
+
+| Test File | Tests | What It Covers |
+|-----------|-------|----------------|
+| `test_daily_summary.py` | 16 | PnL aggregation, win rate, avg win/loss, edge cases |
+| `test_dividend_projection.py` | 14 | Reinvest/withdrawal phases, compounding, phase transitions |
+| `test_options_projection.py` | 10 | Growth/flat phases, base averaging, cutoff transitions |
+| `test_options_analytics_edge_cases.py` | 24 | IV percentile/rank boundaries, CSP Decimal precision, Greeks formatting |
+| `test_xlsx_data_loaders.py` | 13 | Bonds/dividends/options XLSX load/save, invalid data handling |
+| `test_dividend_service_enrich.py` | 17 | CAGR edge cases, position enrichment, portfolio yield, DGR averaging |
+
+## Key Principles
+
+1. **Self-contained**: All tests use mocks for DB and file I/O — no external dependencies
+2. **Known expected values**: Financial calculations verified with hand-computed results
+3. **Decimal verification**: CSP breakeven tests confirm Decimal rounding (ROUND_HALF_UP)
+4. **Projection logic extracted**: Dividend/options projection math replicated as pure functions for isolated testing (original logic is embedded in FastAPI endpoints)
+
+## Gaps Remaining
+
+- **API integration tests** for `POST /trades` (requires DB session, existing conftest supports it)
+- **Finance snapshot enrichment** (`GET /api/finances/latest`) — complex currency conversion flow
+- **Dividend service `resolve_dividend_data`** — only basic tests; yfinance edge cases need more coverage
+- Projection logic should ideally be extracted from endpoints into utility functions (refactor candidate)
+
+## Impact
+
+- Total test count: ~136 → ~230 (94 new)
+- All financial calculations now have baseline coverage
+- No pre-existing tests were modified or broken
