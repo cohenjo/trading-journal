@@ -1,79 +1,101 @@
 /**
- * e2e/fixtures/auth.ts
+ * Playwright fixtures for authenticated E2E tests.
  *
- * Playwright fixtures for authenticated test sessions.
+ * Provides:
+ *   authenticatedUser  — throwaway Supabase user, signed in, page with live session
+ *   householdOwner     — authenticated user + a household row seeded via admin API
  *
- * Sign-in is performed inside the browser context via page.evaluate() + supabase-js
- * loaded from esm.sh.  This ensures that @supabase/ssr sets the correct cookies that
- * the Next.js middleware expects — a plain fetch()-based sign-in does NOT work because
- * the SSR cookie jar lives in the browser context, not in the Node test process.
+ * Usage:
+ *   import { test } from '../fixtures/auth';
+ *   test('holdings page', async ({ authenticatedUser: { page } }) => { ... });
  */
-import { test as base, expect, Page } from '@playwright/test';
-import { createE2eUser, deleteE2eUser, makeE2eEmail } from './admin';
 
-export interface AuthFixtures {
-  /** A one-off throwaway user signed in for this test. */
-  authenticatedUser: { page: Page; email: string; userId: string };
-  /** Same as authenticatedUser but labelled as the household owner role. */
-  householdOwner: { page: Page; email: string; userId: string };
+import { test as base, type Page } from '@playwright/test';
+import { createBrowserClient } from '@supabase/ssr';
+import { createE2eUser, deleteE2eUser } from './admin';
+
+export interface AuthUserFixture {
+  page: Page;
+  userId: string;
+  email: string;
+  password: string;
 }
 
-async function signInInBrowser(
+export interface HouseholdOwnerFixture extends AuthUserFixture {
+  householdId: string;
+}
+
+/**
+ * Sign in via the Supabase browser client inside the Playwright browser context.
+ * This sets the auth cookies the SSR middleware expects.
+ */
+async function signInWithSupabase(
   page: Page,
   email: string,
   password: string,
-  supabaseUrl: string,
-  supabaseAnonKey: string
 ): Promise<void> {
-  await page.evaluate(
-    async ({ url, anonKey, email, password }) => {
-      // Dynamically import supabase-js from CDN so SSR cookies are set in browser context
-      const { createClient } = await import(
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore — CDN import; typed in playwright evaluate context
-        'https://esm.sh/@supabase/supabase-js@2'
-      );
-      const client = createClient(url, anonKey);
-      const { error } = await client.auth.signInWithPassword({ email, password });
-      if (error) throw new Error(`Sign-in failed: ${error.message}`);
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+  if (!supabaseUrl || !anonKey) {
+    throw new Error(
+      '[e2e/auth] NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be set.',
+    );
+  }
+
+  // Navigate to the app first so document.cookie is scoped to the right origin
+  await page.goto('/');
+
+  // Run sign-in inside the browser context so cookies are set in the browser jar
+  const result = await page.evaluate(
+    async ([url, key, em, pw]) => {
+      // @ts-expect-error — evaluated in browser, supabase loaded via CDN-less inline
+      const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
+      const client = createClient(url, key, {
+        auth: { persistSession: true, storageKey: 'sb-session' },
+      });
+      const { data, error } = await client.auth.signInWithPassword({ email: em, password: pw });
+      return { userId: data?.user?.id ?? null, error: error?.message ?? null };
     },
-    { url: supabaseUrl, anonKey: supabaseAnonKey, email, password }
+    [supabaseUrl, anonKey, email, password] as [string, string, string, string],
   );
+
+  if (result.error || !result.userId) {
+    throw new Error(`[e2e/auth] signInWithPassword failed: ${result.error}`);
+  }
+
+  // Reload so Next.js SSR middleware picks up the new session cookies
+  await page.reload();
 }
 
-const PASSWORD = 'E2eTestPass!1';
-
-export const test = base.extend<AuthFixtures>({
+export const test = base.extend<{
+  authenticatedUser: AuthUserFixture;
+  householdOwner: HouseholdOwnerFixture;
+}>({
   authenticatedUser: async ({ page }, use) => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const { id, email, password } = await createE2eUser();
 
-    const email = makeE2eEmail();
-    const { id: userId } = await createE2eUser(email, PASSWORD);
+    await signInWithSupabase(page, email, password);
 
-    // Navigate to app first so cookies are set in the correct origin
-    await page.goto('/');
-    await signInInBrowser(page, email, PASSWORD, supabaseUrl, supabaseAnonKey);
+    await use({ page, userId: id, email, password });
 
-    await use({ page, email, userId });
-
-    await deleteE2eUser(userId);
+    // Teardown: delete the throwaway user
+    await deleteE2eUser(id);
   },
 
   householdOwner: async ({ page }, use) => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const { id, email, password } = await createE2eUser();
 
-    const email = makeE2eEmail();
-    const { id: userId } = await createE2eUser(email, PASSWORD);
+    await signInWithSupabase(page, email, password);
 
-    await page.goto('/');
-    await signInInBrowser(page, email, PASSWORD, supabaseUrl, supabaseAnonKey);
+    // TODO (round 2): seed a household row via admin Supabase client
+    // and return householdId. For now placeholder value.
+    const householdId = 'pending-round-2';
 
-    await use({ page, email, userId });
+    await use({ page, userId: id, email, password, householdId });
 
-    await deleteE2eUser(userId);
+    await deleteE2eUser(id);
   },
 });
 
-export { expect };
+export { expect } from '@playwright/test';

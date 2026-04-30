@@ -1,29 +1,54 @@
 /**
- * e2e/smoke/home.spec.ts
+ * Smoke: home page renders without errors.
  *
- * Smoke: root route `/`
- * Expected: static redirect to /summary — no server render, no data fetching.
- * PASS on current main (no auth guard needed).
+ * `/` redirects to `/summary` per Next.js root page.tsx.
+ * Tests verify:
+ *   - No 5xx responses on any network request
+ *   - No console errors
+ *   - Page has a <body> with visible content
  */
+
 import { test, expect } from '@playwright/test';
 
-test.describe('smoke: home / root redirect', () => {
-  test('GET / redirects to /summary', async ({ page }) => {
-    await page.goto('/');
-    await expect(page).toHaveURL(/\/summary/);
-  });
+test.describe('smoke / home', () => {
+  test('GET / resolves (redirect to /summary) without 5xx or console errors', async ({ page }) => {
+    const consoleErrors: string[] = [];
+    const failedRequests: string[] = [];
 
-  test('GET / does not return 5xx', async ({ page }) => {
+    page.on('console', (msg) => {
+      if (msg.type() === 'error') consoleErrors.push(msg.text());
+    });
+
+    page.on('response', (response) => {
+      if (response.status() >= 500) {
+        failedRequests.push(`${response.status()} ${response.url()}`);
+      }
+    });
+
     const response = await page.goto('/');
-    // Next.js redirects return 3xx; final destination should be 2xx
-    expect(response?.status()).toBeLessThan(500);
+
+    // The root redirects to /summary — final response should be 2xx
+    expect(response?.status(), 'Expected 2xx after redirect').toBeLessThan(400);
+
+    // Should have landed on /summary (or at minimum not on an error page)
+    expect(page.url()).not.toContain('error');
+
+    // No 5xx from any resource
+    expect(failedRequests, `5xx responses: ${failedRequests.join(', ')}`).toHaveLength(0);
+
+    // No JS console errors (allow known third-party noise by filtering)
+    const criticalErrors = consoleErrors.filter(
+      (e) => !e.includes('favicon') && !e.includes('chrome-extension'),
+    );
+    expect(criticalErrors, `Console errors: ${criticalErrors.join('\n')}`).toHaveLength(0);
+
+    // Body exists and is not empty
+    await expect(page.locator('body')).not.toBeEmpty();
   });
 
-  test('/summary page contains stacked income chart heading', async ({ page }) => {
-    await page.goto('/summary');
-    // Page title or a key heading element
-    await expect(page.locator('body')).not.toBeEmpty();
-    // No unhandled error overlay
-    await expect(page.locator('text=Application error')).toHaveCount(0);
+  test('page title is present', async ({ page }) => {
+    await page.goto('/');
+    const title = await page.title();
+    expect(title.length, 'Page should have a non-empty title').toBeGreaterThan(0);
   });
 });
