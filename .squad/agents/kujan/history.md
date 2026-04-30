@@ -65,3 +65,10 @@
 - **Critical Finding:** Free-tier topology corrected to 2 projects (dev/preview shared + prod) — was 3 in original design. Verified against live Supabase pricing; switching from 3 to 2 saves $25/mo and stays within Hobby budget.
 - **Architecture Impact:** Dev and preview environments now share a single remote project. Mitigations: per-PR seed reset (cheap) or upgrade to Pro when team grows.
 - **Runbook Split:** Combined setup-supabase.md (498 lines) split into 3 deep-dives: supabase-01-local-dev (202), supabase-02-remote (315), supabase-03-auth-rls (385).
+
+📌 **CI/CD Scaffolding — TJ-008 (2026-05-01):**
+- **Toolchain Confirmed:** Frontend uses npm + Node 20 (package-lock.json); backend uses uv (uv.lock) + Python 3.11; no pnpm in use.
+- **Workflows Created:** `pr-frontend.yml` (lint/typecheck/build/vitest), `pr-backend.yml` (ruff/mypy-optional/pytest+postgres), `pr-supabase-migrations.yml` (supabase db lint + shadow DB dry-run), `branch-protection-status.yml` (rollup reference).
+- **Strategy A enforced:** Zero deploy workflows — Vercel git integration owns all deploys; GH Actions is PR-validation only.
+- **mypy skip logic:** No `[tool.mypy]` section in pyproject.toml detected; typecheck job auto-skips with notice if config absent.
+- **RLS smoke test deferred:** Documented as inline TODO in migration workflow; requires ~50 lines SQL scripting — tracked for follow-up.
