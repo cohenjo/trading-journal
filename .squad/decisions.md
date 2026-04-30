@@ -1075,3 +1075,101 @@ Phase 1 schema work (household columns, audit columns) **must** be written as Su
 - Dependency chain: TJ-003 → TJ-005 → TJ-006 → TJ-007
 
 
+
+## 2026-04-30: YOLO Round 2 — Supabase Branching vs 2-Project Model
+
+**By:** Keaton (Lead)  
+**Date:** 2026-04-30  
+**Requested by:** Jony Vesterman Cohen  
+**Status:** Recommendation — Keep 2-project model
+
+### Context
+
+We currently run two Supabase projects on the Free plan:
+- `trading-journal-prod` (`jaesiklybkbmzpgipvea`) — Vercel `production` env
+- `trading-journal-dev` (`zvbwgxdgxwgduhhzdwjj`) — Vercel `development` env
+
+Both have migrations 115000 (baseline) and 150000 (sharing RLS) applied. 8 Vercel env vars are wired correctly across both environments.
+
+The user noticed "Branch" in the Supabase dashboard and asked whether `dev` should be replaced by branches, or if `dev` *was* intended to be branches.
+
+### Key Finding
+
+**Supabase branching is a Pro-only paid feature ($0.01344/branch/hour + $25/mo Pro base).** The dashboard "Branch" button is visible on Free but requires Pro upgrade to actually enable. It is not usable at zero cost.
+
+### Trade-Off Matrix: 2-Project (current) vs 1-Project + Branches (Pro+)
+
+| Dimension | 2-Project (current) | 1-Project + Branches (Pro+) |
+|---|---|---|
+| **Cost** | ✅ $0 (Free plan) | ❌ ~$44+/month (Pro required) |
+| **Isolation** | ✅ Fully separate; dev changes never touch prod | ✅ Same — each branch is isolated |
+| **Migration testing** | ✅ Manual: apply to dev first, then prod | ✅ Better: auto-applied per PR via GitHub integration |
+| **Preview-per-PR** | ❌ Not possible; dev is shared | ✅ Ephemeral preview branches per PR |
+| **Free tier compatible** | ✅ Yes, fits within 2-project quota | ❌ **Requires Pro ($25+/month)** |
+
+### Recommendation
+
+**Keep the 2-project model (prod + dev). Do not switch to branches.**
+
+Rationale:
+1. **Branching literally doesn't work on Free.** Requires Pro upgrade ($25+/mo).
+2. **Current setup achieves same isolation.** Dev is your persistent "branch" with full schema parity and separate credentials.
+3. **Solo dev workflow needs no automation.** Main benefit of branching is automated PR → preview → migration. For solo dev, manual two-step is negligible overhead.
+4. **Rework cost is high.** Would require Pro upgrade, delete dev project, re-wire 4 Vercel env vars, GitHub integration setup, `config.toml` changes. Zero user-facing benefit in return.
+
+The `dev` project was correctly conceived as the free-tier equivalent of a persistent staging branch.
+
+### Revisit When
+
+- 🔄 **Team grows beyond solo** → PR-preview-per-branch becomes a collaboration accelerator
+- 💳 **Upgrade to Pro for other reasons** → at that point, convert dev to a persistent branch
+- 🚀 **Want automated migration enforcement in CI** → GitHub + branching integration is the clean path
+- 👥 **Household sharing goes multi-user** → more complex RLS testing scenarios make per-PR previews more valuable
+
+---
+
+## 2026-04-30: PR Board Cleanup — Dependabot + TJ-014 Draft
+
+**By:** Kujan (DevOps/Platform)  
+**Date:** 2026-04-30  
+**Status:** Executed  
+**Category:** Dependency Management, Technical Debt
+
+### Summary
+
+Triaged and resolved all 12 open PRs on the board following the Supabase+Vercel migration.
+
+### Final Action Table
+
+| PR # | Title | Action | Reason |
+|------|-------|--------|--------|
+| #84 | TJ-014 Migrate hardcoded credentials | ❌ Closed as obsolete | docker-compose POSTGRES_* vars, Alembic env config, and `app/dal/database.py` are all dead post-Supabase migration. `.env.example` already delivered by TJ-002 (PR #55). |
+| #52 | cachetools >=7.0.5→>=7.0.6 | ✅ Merged | Safe minor; cachetools actively used in `/api/analyze` caching layer. |
+| #51 | pypdf >=6.10.0→>=6.10.2 | ✅ Merged | Safe patch; pypdf in active backend use. |
+| #50 | @eslint/eslintrc 3.3.1→3.3.5 | ✅ Merged | Safe patch dev dep. |
+| #49 | @types/node 20→25 | ⏸ Deferred | 5 major versions; must match Node runtime (currently Node 20 in CI); needs `npm run build && npm test` validation. |
+| #48 | jsdom 28→29 | ⏸ Deferred | Major bump to vitest's test environment; breaking DOM behavior changes possible; needs full test suite validation. |
+| #47 | @playwright/test 1.57→1.59 | ✅ Merged | Safe minor within 1.x; no breaking changes. |
+| #46 | bcrypt <4.1→<5.1 | ✅ Merged | bcrypt IS still used via passlib/CryptContext in `app/auth/security.py` for local auth (register/login). Supabase JWT migration replaced token validation but not password hashing. |
+| #45 | upload-artifact v4→v7 | ⏸ Deferred | 3 major version jump affecting 5 workflows; v5/v6 changelogs not fully reviewed; high blast radius. |
+| #44 | setup-python v4→v6 | ✅ Merged | Only breaking change is Node 24 runtime for the action; GitHub-hosted runners meet the v2.327.1+ requirement. |
+| #28 | react-dom + @types/react-dom | ✅ Merged | Minor bump 19.1.0→19.2.5 within React 19 family already pinned. |
+| #24 | python-multipart >=0.0.22→>=0.0.27 | ✅ Merged | Safe patch; required manual conflict resolution with pyproject.toml. |
+
+### Risk Call Rationale
+
+**PR #46 — bcrypt (MERGE despite Supabase JWT migration):**  
+Supabase JWT (PR #89) replaced how we **validate tokens**, not how we **hash passwords for local accounts**. Both coexist. Expanding `<4.1` to `<5.1` is safe — bcrypt 5.x maintains the public API.
+
+**PR #44 — setup-python v4→v6 (MERGE despite major version jump):**  
+Only breaking change is Node 24 runtime for the action. GitHub-hosted runners already on v2.327.1+. Additionally, all other workflows already use `setup-python@v5`, so v6 brings full alignment.
+
+**PR #45 — upload-artifact v4→v7 (DEFER despite appearing additive):**  
+3-major-version jump with intermediate v5/v6 changelogs not fully reviewed. upload-artifact v3→v4 had real breaking changes. Given blast radius (used 5× in CI), deferring pending changelog review.
+
+### Follow-up Items
+
+1. **PR #48, #49** — Human should run `npm install jsdom@29 @types/node@25 && npm run build && npm test` in `apps/frontend` and verify before merging.
+2. **PR #45** — Review upload-artifact v5, v6 release notes; merge if no breaking changes found.
+3. **bcrypt usage** — If team decides to remove local auth endpoints in favour of Supabase Auth exclusively, `passlib[bcrypt]` and `bcrypt` can be dropped entirely.
+

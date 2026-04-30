@@ -139,3 +139,6 @@
 - upload-artifact major bumps need changelog review for each version in the jump range.
 - setup-python major bumps are usually safe if the only change is the action's own Node runtime version.
 - Dependabot PRs touching the same file (pyproject.toml, package.json) conflict cascade when merged sequentially — merge them in rapid succession or trigger `@dependabot rebase` proactively.
+
+📌 Team update (2026-04-30T20:15:15Z): PR board cleanup triaged and merged into shared decisions. 8 merged (safe versions), 3 deferred with validation steps, 1 closed as obsolete. Decision now live in `.squad/decisions.md`.
+
