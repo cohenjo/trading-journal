@@ -37,6 +37,17 @@
 
 ## Learnings
 
+📌 **Startup & Access Runbook (2026-04-30 — vercel-06-startup-and-access.md):**
+- **Critical gotcha:** `vercel pull` writes to `.vercel/.env.development.local` but `next dev` only reads from the project root. Must `cp .vercel/.env.development.local .env.development.local` before `npm run dev` or the app 500s with "Your project's URL and Key are required".
+- **`vercel dev` alternative:** Using `vercel dev` instead of `npm run dev` reads `.vercel/` directly and avoids the copy step — but loses Turbopack.
+- **Port conflict handling:** Next.js auto-selects next available port if 3000 is in use (e.g., 3002). Watch startup output for actual URL.
+- **Dev deployment URL pattern:** `https://trading-journal-<hash>-cohenjos-projects.vercel.app` — deployment-protection-gated (returns 401 to unauthenticated). Access requires Vercel org membership.
+- **`vercel ls` scope:** `--scope cohenjos-projects` required; listing without scope returns empty even if project is linked.
+- **`vercel.json` fix:** `preferredRegion` nested inside `functions` is invalid — moved to top-level `regions: ["fra1"]`.
+- **`.env` location:** Lives in main repo worktree (`trading-journal/.env`), not in coord worktree. Source path explicitly.
+- **First deployment:** No prior deployments existed in cohenjos-projects scope; first deploy completed successfully with Next.js Turbopack build.
+- **Vercel vuln scanner:** May flag current Next.js version as "vulnerable" even when it's latest — check advisories, don't block on scanner lag.
+
 📌 **Supabase Local Dev Runbook (2026-05-01 — supabase-01-local-dev.md):**
 - CLI auth key naming changed: newer versions output `Publishable`/`Secret` (`sb_publishable_...`/`sb_secret_...`) instead of `anon key`/`service_role key` — always copy from `supabase status`, never hardcode.
 - Mailpit (not Inbucket) is the mail catcher label in current `supabase start` output; both refer to port 54324.

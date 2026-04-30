@@ -3,11 +3,7 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
-  "functions": {
-    "app/**": {
-      "preferredRegion": "fra1"
-    }
-  },
+  "regions": ["fra1"],
   "headers": [
     {
       "source": "/(.*)",
