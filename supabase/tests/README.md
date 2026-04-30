@@ -2,7 +2,8 @@
 
 **Issue:** TJ-013 / GH #66  
 **Author:** Redfoot (Tester)  
-**Depends on:** PR #85 (`squad/61-ci-cd-scaffolding`) — migrations must be applied before these tests can run.
+**Depends on:** PR #85 (`squad/61-ci-cd-scaffolding`) — migrations must be applied before these tests can run.  
+**Extended by:** PR #88 (`squad/66-rls-reconciliation-tests`) — adds concrete tests for McManus's new policies (migrations 20260430130300–130500).
 
 ---
 
@@ -47,6 +48,9 @@ psql "$PGURL" -f supabase/tests/10_household_membership.sql
 psql "$PGURL" -f supabase/tests/20_household_data_isolation.sql
 psql "$PGURL" -f supabase/tests/30_owner_private_isolation.sql
 psql "$PGURL" -f supabase/tests/40_audit_columns.sql
+psql "$PGURL" -f supabase/tests/50_user_profile.sql
+psql "$PGURL" -f supabase/tests/60_hard_delete_policies.sql
+psql "$PGURL" -f supabase/tests/70_trading_account_config.sql
 ```
 
 ### Run with `pg_prove` (TAP output + exit code)
@@ -56,7 +60,10 @@ pg_prove --username postgres --port 54322 --dbname postgres \
   supabase/tests/10_household_membership.sql \
   supabase/tests/20_household_data_isolation.sql \
   supabase/tests/30_owner_private_isolation.sql \
-  supabase/tests/40_audit_columns.sql
+  supabase/tests/40_audit_columns.sql \
+  supabase/tests/50_user_profile.sql \
+  supabase/tests/60_hard_delete_policies.sql \
+  supabase/tests/70_trading_account_config.sql
 ```
 
 `pg_prove` exits non-zero if any test fails, making it suitable for CI gates.
@@ -72,8 +79,11 @@ pg_prove --username postgres --port 54322 --dbname postgres \
 | `20_household_data_isolation.sql` | Mixed | 10 | Tier A (concrete): `cooked.dashboard_summary` RLS isolation. Tier B (aspirational): `trade`, `trading_positions` — columns exist, RLS not yet enabled |
 | `30_owner_private_isolation.sql` | **ASPIRATIONAL** ⚠️ | 8 | `note`, `backtestrun` owner-private isolation; `backtesttrade` inherited visibility; policy expression contract |
 | `40_audit_columns.sql` | **CONCRETE** ✅ | 12 | `tg_update_timestamp()` trigger; `created_at`/`updated_at`/`deleted_at` on all 14 tables; schema structural checks |
+| `50_user_profile.sql` | **CONCRETE** ✅ | 10 | `user_profile` RLS (owner-only SELECT/UPDATE/DELETE); `handle_new_auth_user()` trigger fires on auth.users INSERT; idempotency via ON CONFLICT; SECURITY DEFINER + search_path annotation |
+| `60_hard_delete_policies.sql` | **CONCRETE** ✅ | 8 | `households_owner_delete` + `household_members_owner_delete` policies; owner CAN delete; member/outsider CANNOT; CASCADE on household delete removes member rows |
+| `70_trading_account_config.sql` | **CONCRETE** ✅ | 6 | `trading_account_config` household-scoped RLS (member read/update, owner delete); cross-household isolation; `trading_account_secrets` confirmed absent |
 
-**Total test assertions: ~47**
+**Total test assertions: ~71** (+28 concrete from PR #88, covering all PR #85 policy gaps)
 
 ---
 
@@ -119,17 +129,17 @@ The `household_invitations` table described in GH #58 does **not exist** in the 
 - Invited email can accept invitation
 - Non-invited cannot accept
 
-### 2. `trading_account_config` split — SKIPPED
+### 2. `trading_account_config` — ✅ COVERED by PR #88
 
-Migration `20260430130300` is a SKETCH only (awaiting user decision on Option A/B/C for secrets handling). No tests written against this table.
+~~Migration `20260430130300` is a SKETCH only~~ — Decision #3 was made: `trading_account_secrets` is dropped and `trading_account_config` is now purely household-scoped. Tests in `70_trading_account_config.sql` cover all four RLS policies and confirm `trading_account_secrets` is absent.
 
-### 3. `retire_local_user_table` — SKIPPED
+### 3. `user_profile` + auth trigger — ✅ COVERED by PR #88
 
-Migration `20260430130400` is marked DESTRUCTIVE and conditional. No tests for `public.user_legacy`.
+~~Migration `20260430130400` is marked DESTRUCTIVE and conditional~~ — Decision #4 was made: `public.user` is replaced by `public.user_profile`. Tests in `50_user_profile.sql` cover all owner-only RLS policies and the `handle_new_auth_user()` trigger.
 
-### 4. Hard-delete is BLOCKED — Rabin deviation #1
+### 4. Hard-delete policy relaxed — ✅ COVERED by PR #88
 
-All `DELETE` policies on `households` and `household_members` use `USING (false)`. This is intentional (enforces soft-delete discipline via `deleted_at` / `left_at`). Tests verify that hard-delete attempts are silently rejected (0 rows deleted, row still exists). The same pattern should be applied to all future household-scoped tables.
+~~All `DELETE` policies on `households` and `household_members` use `USING (false)`~~ — Migration `20260430130500` replaced these with owner-only `households_owner_delete` / `household_members_owner_delete`. Tests in `60_hard_delete_policies.sql` verify the new behavior. Note: `household_role` enum is `('owner','member','viewer')` — there is no `'admin'` role value; `is_household_owner()` checks `role='owner'` only.
 
 ### 5. No `created_by` / `updated_by` columns
 
