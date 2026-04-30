@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
@@ -56,7 +57,7 @@ export default function DayPage() {
 
   useEffect(() => {
     if (date) {
-      fetch(`/api/day/${date}`)
+      apiFetch(`/api/day/${date}`)
         .then((res) => res.json())
         .then((data) => {
           setDayDetails(data);

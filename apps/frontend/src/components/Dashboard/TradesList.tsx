@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from "react";
 
@@ -20,7 +21,7 @@ export default function TradesList() {
   useEffect(() => {
     // Fetch trades from the backend.
     // For now, we'll use a dummy date.
-    fetch("/api/day/2025-07-02")
+    apiFetch("/api/day/2025-07-02")
       .then((res) => res.json())
       .then((data) => setTrades(data));
   }, []);

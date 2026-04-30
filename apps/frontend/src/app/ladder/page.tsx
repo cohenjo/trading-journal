@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -28,12 +29,12 @@ function LadderPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const overviewRes = await fetch("/api/ladder/overview");
+      const overviewRes = await apiFetch("/api/ladder/overview");
       const overviewJson = await overviewRes.json();
       setRungs(overviewJson.rungs ?? []);
       setBonds(overviewJson.bonds ?? []);
 
-      const incomeRes = await fetch("/api/ladder/income");
+      const incomeRes = await apiFetch("/api/ladder/income");
       const incomeJson = await incomeRes.json();
       setIncomeSeries(incomeJson.income_series ?? []);
       setDistributions(incomeJson.distributions ?? []);
@@ -69,7 +70,7 @@ function LadderPage() {
             bonds={bonds}
             onUpdateRungTarget={async (rungId, targetAmount) => {
               try {
-                await fetch(`/api/ladder/rungs/${rungId}`, {
+                await apiFetch(`/api/ladder/rungs/${rungId}`, {
                   method: "PUT",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ target_amount: targetAmount }),
@@ -86,7 +87,7 @@ function LadderPage() {
             }}
             onAddBond={async (payload) => {
               try {
-                const res = await fetch("/api/ladder/bonds", {
+                const res = await apiFetch("/api/ladder/bonds", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
@@ -103,12 +104,12 @@ function LadderPage() {
 
                 // After adding a bond, reload ladder and income data so
                 // all views stay in sync.
-                const overviewRes = await fetch("/api/ladder/overview");
+                const overviewRes = await apiFetch("/api/ladder/overview");
                 const overviewJson = await overviewRes.json();
                 setRungs(overviewJson.rungs ?? []);
                 setBonds(overviewJson.bonds ?? []);
 
-                const incomeRes = await fetch("/api/ladder/income");
+                const incomeRes = await apiFetch("/api/ladder/income");
                 const incomeJson = await incomeRes.json();
                 setIncomeSeries(incomeJson.income_series ?? []);
                 setDistributions(incomeJson.distributions ?? []);

@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from 'react';
 import { ProgressChart } from '@/components/Progress/ProgressChart';
@@ -8,7 +9,7 @@ import { useSettings } from '../settings/SettingsContext';
 
 async function fetchHistory() {
     try {
-        const res = await fetch('/api/finances/history?limit=100');
+        const res = await apiFetch('/api/finances/history?limit=100');
         if (!res.ok) throw new Error('Failed to fetch history');
         const data = await res.json();
         // Map backend model to frontend summary
@@ -42,7 +43,7 @@ async function saveHistory(summary: ProgressSummary) {
             total_investments: summary.total_investments
         };
 
-        const res = await fetch('/api/finances/', {
+        const res = await apiFetch('/api/finances/', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -58,7 +59,7 @@ async function saveHistory(summary: ProgressSummary) {
 
 async function deleteHistory(date: string) {
     try {
-        const res = await fetch(`/api/finances/${date}`, {
+        const res = await apiFetch(`/api/finances/${date}`, {
             method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to delete history');

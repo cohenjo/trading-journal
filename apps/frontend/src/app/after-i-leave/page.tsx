@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
@@ -22,7 +23,7 @@ interface InsurancePolicy {
 
 async function fetchInsurancePolicies(): Promise<InsurancePolicy[]> {
   try {
-    const res = await fetch('/api/insurance');
+    const res = await apiFetch('/api/insurance');
     if (!res.ok) return [];
     const data = await res.json();
     return data.data || [];
@@ -33,7 +34,7 @@ async function fetchInsurancePolicies(): Promise<InsurancePolicy[]> {
 
 async function fetchFinanceData(): Promise<FinanceItem[]> {
   try {
-    const res = await fetch('/api/finances/latest');
+    const res = await apiFetch('/api/finances/latest');
     if (!res.ok) return [];
     const data = await res.json();
     return data.data?.items || [];

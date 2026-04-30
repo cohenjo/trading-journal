@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from "react";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
@@ -25,8 +26,8 @@ export default function AccountSettings({ onAccountsChange }: AccountSettingsPro
     const fetchAccounts = async () => {
         try {
             const [accRes, impRes] = await Promise.all([
-                fetch("/api/dividends/accounts"),
-                fetch("/api/dividends/accounts/importable")
+                apiFetch("/api/dividends/accounts"),
+                apiFetch("/api/dividends/accounts/importable")
             ]);
 
             if (accRes.ok) {
@@ -69,7 +70,7 @@ export default function AccountSettings({ onAccountsChange }: AccountSettingsPro
         try {
             let res;
             if (selectedImport) {
-                res = await fetch("/api/dividends/accounts/import", {
+                res = await apiFetch("/api/dividends/accounts/import", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -78,7 +79,7 @@ export default function AccountSettings({ onAccountsChange }: AccountSettingsPro
                     })
                 });
             } else {
-                res = await fetch("/api/dividends/accounts?name=" + encodeURIComponent(newAccount), {
+                res = await apiFetch("/api/dividends/accounts?name=" + encodeURIComponent(newAccount), {
                     method: "POST"
                 });
             }
@@ -108,7 +109,7 @@ export default function AccountSettings({ onAccountsChange }: AccountSettingsPro
         setIsDeleting(true);
 
         try {
-            const res = await fetch(`/api/dividends/accounts/${encodeURIComponent(deleteModal.name)}`, {
+            const res = await apiFetch(`/api/dividends/accounts/${encodeURIComponent(deleteModal.name)}`, {
                 method: "DELETE"
             });
 

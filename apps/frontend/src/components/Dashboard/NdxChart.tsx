@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useRef } from 'react';
 import { createChart, IChartApi, CandlestickData, UTCTimestamp, SeriesMarker, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
@@ -55,9 +56,9 @@ export default function NdxChart({ date, trades }: { date: string, trades: Match
       });
 
       if (date) {
-        fetch(`/api/ndx/sync/${date}`, { method: 'POST' })
+        apiFetch(`/api/ndx/sync/${date}`, { method: 'POST' })
           .then(() => {
-            fetch(`/api/ndx/${date}`)
+            apiFetch(`/api/ndx/${date}`)
               .then((res) => res.json())
               .then((data: ChartData[]) => {
                 const formattedData: CandlestickData[] = data.map(item => ({

@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -24,7 +25,7 @@ export default function CalendarView({ date, onDateChange }: CalendarViewProps) 
     const fetchSummaries = async () => {
       const year = date.getFullYear();
       const month = date.getMonth() + 1;
-      const response = await fetch(`/api/summary/${year}/${month}`);
+      const response = await apiFetch(`/api/summary/${year}/${month}`);
       const data = await response.json();
       setSummaries(data);
     };

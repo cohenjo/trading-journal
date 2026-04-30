@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState } from "react";
 import { TaxCondorRecommendation } from "./types";
@@ -17,7 +18,7 @@ export default function TaxCondorView() {
   const fetchRecommendations = async () => {
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         "/api/tax-condor/recommend",
         {
           method: "POST",

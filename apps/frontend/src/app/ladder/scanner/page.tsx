@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -49,7 +50,7 @@ const ScannerPage: React.FC = () => {
       if (minRating) params.set("min_rating", minRating);
       if (currency) params.set("currency", currency);
 
-      const res = await fetch(`/api/bonds/scanner?${params.toString()}`);
+      const res = await apiFetch(`/api/bonds/scanner?${params.toString()}`);
       if (!res.ok) {
         throw new Error(`Request failed with status ${res.status}`);
       }

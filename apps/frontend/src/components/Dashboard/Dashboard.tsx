@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from "react";
 import TradesList from "./TradesList";
@@ -18,7 +19,7 @@ export default function Dashboard() {
   useEffect(() => {
     const initializeDate = async () => {
       try {
-        const response = await fetch("/api/summary/latest-month");
+        const response = await apiFetch("/api/summary/latest-month");
         if (!response.ok) {
           return;
         }
@@ -40,7 +41,7 @@ export default function Dashboard() {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1;
       try {
-        const response = await fetch(`/api/summary/${year}/${month}`);
+        const response = await apiFetch(`/api/summary/${year}/${month}`);
         if (!response.ok) {
           throw new Error("Network response was not ok");
         }

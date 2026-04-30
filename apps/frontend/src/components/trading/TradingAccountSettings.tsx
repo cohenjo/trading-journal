@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from "react";
 
@@ -24,7 +25,7 @@ export default function TradingAccountSettings() {
 
     const fetchConfigs = async () => {
         try {
-            const res = await fetch("/api/trading/configs");
+            const res = await apiFetch("/api/trading/configs");
             if (res.ok) {
                 const data = await res.json();
                 setConfigs(data || []);
@@ -39,7 +40,7 @@ export default function TradingAccountSettings() {
 
     const fetchFinanceAccounts = async () => {
         try {
-            const res = await fetch("/api/finances/latest");
+            const res = await apiFetch("/api/finances/latest");
             if (res.ok) {
                 const data = await res.json();
                 if (data && data.data && data.data.items) {
@@ -58,7 +59,7 @@ export default function TradingAccountSettings() {
         setSaving(true);
         setMessage("");
         try {
-            const res = await fetch("/api/trading/config", {
+            const res = await apiFetch("/api/trading/config", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(editingConfig)

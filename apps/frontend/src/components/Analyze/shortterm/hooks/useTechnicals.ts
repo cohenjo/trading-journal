@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useCallback } from "react";
 
@@ -51,7 +52,7 @@ export function useTechnicals(ticker: string): UseTechnicalsResult {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/analyze/technicals/${ticker}`)
+    apiFetch(`/api/analyze/technicals/${ticker}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch technicals for ${ticker}`);
         return res.json();

@@ -1,3 +1,4 @@
+import { apiFetch } from '@/lib/api-client';
 import React from 'react';
 import { PlanItem, PlanMilestone } from './types';
 import { CurrencySelector } from '../Common/CurrencySelector';
@@ -50,7 +51,7 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
     // Helper to fetch data
     const fetchMarketData = async (symbol: string, type: 'price' | 'yield') => {
         try {
-            const res = await fetch(`/api/finances/price/${symbol}`);
+            const res = await apiFetch(`/api/finances/price/${symbol}`);
             if (!res.ok) throw new Error('Failed to fetch');
             const data = await res.json();
 

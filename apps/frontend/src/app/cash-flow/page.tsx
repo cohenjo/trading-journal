@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '../settings/SettingsContext';
 import { CashFlowSankey } from '@/components/CashFlow/CashFlowSankey';
@@ -6,13 +7,13 @@ import { PlanData } from '@/components/Plan/types';
 
 // Fetch Utilities (Duplicated from PlanPage for now)
 async function fetchLatestPlan() {
-    const res = await fetch('/api/plans/latest');
+    const res = await apiFetch('/api/plans/latest');
     if (res.ok) return res.json();
     return null;
 }
 
 async function fetchFinances() {
-    const res = await fetch('/api/finances/latest');
+    const res = await apiFetch('/api/finances/latest');
     if (res.ok) return res.json();
     return {
         net_worth: 0,
@@ -46,7 +47,7 @@ export default function CashFlowPage() {
 
         // Debounce slightly
         const timer = setTimeout(() => {
-            fetch('/api/plans/simulate', {
+            apiFetch('/api/plans/simulate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

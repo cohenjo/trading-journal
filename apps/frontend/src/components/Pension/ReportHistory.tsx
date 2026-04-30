@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from 'react';
 import type {
@@ -69,7 +70,7 @@ export default function ReportHistory({ onSelectSnapshot, selectedDate, refreshK
     let cancelled = false;
     setLoading(true);
 
-    fetch('/api/pension/reports')
+    apiFetch('/api/pension/reports')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();

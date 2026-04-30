@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useCallback, useRef, useEffect } from "react";
 
@@ -70,7 +71,7 @@ export function useGrowthStory(ticker: string): UseGrowthStoryReturn {
     }, 1000);
 
     try {
-      const res = await fetch(`${apiUrl}/api/analyze/growth-story/${ticker}`, {
+      const res = await apiFetch(`${apiUrl}/api/analyze/growth-story/${ticker}`, {
         method: "POST",
       });
       if (!res.ok) {
