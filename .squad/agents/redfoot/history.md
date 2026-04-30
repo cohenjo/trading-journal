@@ -133,3 +133,27 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 - Output saved to `docs/design-hosting/reviews/redfoot-rereview.md`.
 
 📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
+
+### 2025-07-25: Playwright E2E Framework — Smoke tier scaffolded
+
+**What was done:**
+- Designed tiered E2E architecture: `e2e/smoke/` (P0), `e2e/auth/` (P1), `e2e/flows/` (P1), `e2e/rls/` (P2).
+- Updated `apps/frontend/playwright.config.ts`: switched from `testDir: './tests'` to `testMatch` covering both `tests/**` (existing integration tests) and `e2e/**` (new tiered suite). `baseURL` now reads `BASE_URL || PLAYWRIGHT_BASE_URL || 'http://localhost:3000'`.
+- Wrote 4 smoke specs (9 tests across home/settings/holdings/healthcheck) — all enumerate cleanly with `--list` (no TS errors).
+- Created `e2e/fixtures/admin.ts`: service-role admin client with prod-guard (throws if Supabase URL ref looks like production). Exports `createE2eUser`, `deleteE2eUser`, `makeE2eEmail`.
+- Created `e2e/fixtures/auth.ts`: `authenticatedUser` and `householdOwner` Playwright fixtures. Sign-in uses `page.evaluate` to call supabase-js inside the browser context so SSR cookies are set correctly.
+- Created `e2e/scripts/cleanup-stale-users.ts`: lists all `e2e_*` Supabase users, deletes any older than 1 hour.
+- Added `tsx` to devDependencies and `test:e2e`, `test:e2e:dev`, `test:e2e:cleanup` scripts to package.json.
+- Wrote `e2e/README.md` with full cheat sheet, tier definitions, fixture docs, CI shape spec, and env setup guide.
+
+**Key patterns:**
+- Throwaway users: `e2e_<unix-ms>_<4char-rand>@example.com` — unique per run, prefix-searchable for cleanup.
+- Service-role client is singleton, lives only in `e2e/fixtures/admin.ts` — never imported by app code.
+- Prod guard: checks Supabase URL ref slug for `dev/stag/test/local/preview/sandbox` hints; bypass with `SUPABASE_E2E_ALLOW_PROD=true`.
+- Auth fixture uses `page.evaluate` + esm.sh CDN import of supabase-js to sign in inside the browser context (sets the `@supabase/ssr` cookies the middleware expects).
+- `playwright.config.ts` uses `testMatch` (not `testDir`) to cover both old `tests/` and new `e2e/` without migration.
+- `BASE_URL` env var is the canonical targeting mechanism; `PLAYWRIGHT_BASE_URL` preserved for backwards compat.
+
+**`--list` result:** 9 new smoke tests enumerated across chromium/firefox/webkit with no TypeScript errors. Existing `tests/` specs still enumerate correctly.
+
+**PR:** (pending — this round is scaffold only; running tests against dev Supabase is next round after Kujan confirms env)
