@@ -1,0 +1,41 @@
+# Branch Protection Status — Required Checks Reference
+#
+# This file documents which status checks must pass before merging to `main`.
+# It is NOT a deploy workflow — Vercel's git integration handles all deployments.
+#
+# REQUIRED checks for branch protection on `main`:
+#   ┌──────────────────────────────┬────────────────────────────────┐
+#   │ Check Name                   │ Source Workflow                │
+#   ├──────────────────────────────┼────────────────────────────────┤
+#   │ Lint (Frontend)              │ pr-frontend.yml / lint         │
+#   │ Type Check (Frontend)        │ pr-frontend.yml / typecheck    │
+#   │ Build (Frontend)             │ pr-frontend.yml / build        │
+#   │ Lint (ruff) (Backend)        │ pr-backend.yml / lint          │
+#   │ Validate Migrations          │ pr-supabase-migrations.yml     │
+#   └──────────────────────────────┴────────────────────────────────┘
+#
+# To register these as required checks via gh CLI, see .github/workflows/README.md
+
+name: Branch Protection — Status Rollup
+
+on:
+  # Runs on every PR to provide a single "all-green" status check
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  status-rollup:
+    name: All Required Checks Reference
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm CI coverage
+        run: |
+          echo "This job documents required branch protection checks."
+          echo "Actual validation is performed by:"
+          echo "  - pr-frontend.yml  (lint, typecheck, build, test)"
+          echo "  - pr-backend.yml   (lint, typecheck, test)"
+          echo "  - pr-supabase-migrations.yml (validate-migrations, dry-run-on-shadow)"
+          echo ""
+          echo "Vercel handles all deployments via git integration."
+          echo "See .github/workflows/README.md for branch protection setup commands."

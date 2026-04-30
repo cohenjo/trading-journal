@@ -1,0 +1,182 @@
+name: Nightly Database Backup
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC daily
+  workflow_dispatch:       # manual trigger
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false   # never cancel a running backup
+
+permissions:
+  contents: read
+  issues: write   # needed for failure-alert job
+
+jobs:
+  backup:
+    name: pg_dump → encrypt → upload
+    runs-on: ubuntu-22.04
+    outputs:
+      dump_size:      ${{ steps.sizes.outputs.dump_size }}
+      encrypted_size: ${{ steps.sizes.outputs.encrypted_size }}
+      sha256:         ${{ steps.sizes.outputs.sha256 }}
+      filename:       ${{ steps.meta.outputs.filename }}
+
+    steps:
+      # ── 1. Install dependencies ────────────────────────────────────────────
+      - name: Install postgresql-client-15
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client-15
+
+      - name: Install age
+        # age 1.2.0 — verify latest at https://github.com/FiloSottile/age/releases
+        run: |
+          AGE_VERSION="1.2.0"
+          curl -fsSL \
+            "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-amd64.tar.gz" \
+            -o age.tar.gz
+          tar -xzf age.tar.gz
+          sudo install -m 0755 age/age /usr/local/bin/age
+          sudo install -m 0755 age/age-keygen /usr/local/bin/age-keygen
+          age --version
+
+      # ── 2. Generate filename / metadata ───────────────────────────────────
+      - name: Set backup metadata
+        id: meta
+        run: |
+          TIMESTAMP="$(date -u +%Y%m%d-%H%M%S)"
+          echo "filename=trading-journal-backup-${TIMESTAMP}.dump.age" >> "$GITHUB_OUTPUT"
+          echo "timestamp=${TIMESTAMP}" >> "$GITHUB_OUTPUT"
+
+      # ── 3. Dump the database ───────────────────────────────────────────────
+      # IMPORTANT: use the DIRECT connection URL (port 5432), NOT the
+      # transaction-pooler URL (port 6543 / PgBouncer) — pg_dump is
+      # incompatible with PgBouncer because it requires persistent session state
+      # and uses features (SET, LOCK TABLE) that break under transaction pooling.
+      - name: Run pg_dump
+        env:
+          PGPASSWORD_IGNORE: "1"   # silence pg warning; password is in the URL
+          DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+        run: |
+          pg_dump \
+            --format=custom \
+            --compress=9 \
+            --no-password \
+            --dbname="$DB_URL" \
+            --file="backup.dump"
+
+      # ── 4. Encrypt with age ────────────────────────────────────────────────
+      # age -r accepts a Bech32 public key (age1...) from AGE_PUBLIC_KEY secret.
+      # The encrypted output is a binary .age file readable only by the holder
+      # of the corresponding private key (AGE_IDENTITY_FILE).
+      - name: Encrypt backup with age
+        env:
+          AGE_PUBLIC_KEY: ${{ secrets.AGE_PUBLIC_KEY }}
+        run: |
+          age -r "$AGE_PUBLIC_KEY" -o "${{ steps.meta.outputs.filename }}" backup.dump
+          # Remove plaintext dump immediately after encryption
+          rm -f backup.dump
+
+      # ── 5. Compute sizes and checksum ─────────────────────────────────────
+      - name: Compute sizes and SHA-256
+        id: sizes
+        run: |
+          ENC_FILE="${{ steps.meta.outputs.filename }}"
+          ENC_SIZE="$(stat -c%s "$ENC_FILE")"
+          SHA256="$(sha256sum "$ENC_FILE" | awk '{print $1}')"
+
+          echo "dump_size=N/A (dump removed after encryption)"   >> "$GITHUB_OUTPUT"
+          echo "encrypted_size=${ENC_SIZE}"                      >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}"                                 >> "$GITHUB_OUTPUT"
+
+          echo "### Backup Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Key | Value |"    >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|-------|"    >> "$GITHUB_STEP_SUMMARY"
+          echo "| File | \`${ENC_FILE}\` |"                      >> "$GITHUB_STEP_SUMMARY"
+          echo "| Encrypted size | ${ENC_SIZE} bytes |"          >> "$GITHUB_STEP_SUMMARY"
+          echo "| SHA-256 | \`${SHA256}\` |"                     >> "$GITHUB_STEP_SUMMARY"
+          echo "| Timestamp (UTC) | ${{ steps.meta.outputs.timestamp }} |" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── 6. Upload as GH Actions artifact (primary store, 90-day retention) ─
+      - name: Upload encrypted backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.filename }}
+          path: ${{ steps.meta.outputs.filename }}
+          retention-days: 90
+          if-no-files-found: error
+
+      # ── 7. Secondary store (choose ONE and uncomment) ─────────────────────
+      #
+      # ── Option A: Cloudflare R2 ──────────────────────────────────────────
+      # - name: Upload to Cloudflare R2
+      #   env:
+      #     AWS_ACCESS_KEY_ID:     ${{ secrets.CF_R2_ACCESS_KEY_ID }}
+      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.CF_R2_SECRET_ACCESS_KEY }}
+      #     CF_ACCOUNT_ID:         ${{ secrets.CF_ACCOUNT_ID }}
+      #     R2_BUCKET:             trading-journal-backups
+      #   run: |
+      #     pip install awscli --quiet
+      #     aws s3 cp "${{ steps.meta.outputs.filename }}" \
+      #       "s3://${R2_BUCKET}/${{ steps.meta.outputs.filename }}" \
+      #       --endpoint-url "https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
+      #
+      # ── Option B: AWS S3 ─────────────────────────────────────────────────
+      # - name: Upload to AWS S3
+      #   env:
+      #     AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     AWS_DEFAULT_REGION:    eu-central-1
+      #     S3_BUCKET:             trading-journal-backups
+      #   run: |
+      #     aws s3 cp "${{ steps.meta.outputs.filename }}" \
+      #       "s3://${S3_BUCKET}/backups/${{ steps.meta.outputs.filename }}"
+      #
+      # ── Option C: Backblaze B2 ───────────────────────────────────────────
+      # - name: Upload to Backblaze B2
+      #   env:
+      #     B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+      #     B2_APPLICATION_KEY:    ${{ secrets.B2_APPLICATION_KEY }}
+      #     B2_BUCKET:             trading-journal-backups
+      #   run: |
+      #     pip install b2 --quiet
+      #     b2 authorize-account "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
+      #     b2 upload-file "$B2_BUCKET" \
+      #       "${{ steps.meta.outputs.filename }}" \
+      #       "backups/${{ steps.meta.outputs.filename }}"
+
+  # ── Failure alert: open a GH issue ────────────────────────────────────────
+  alert-on-failure:
+    name: Open failure issue
+    needs: backup
+    if: failure()
+    runs-on: ubuntu-22.04
+    permissions:
+      issues: write
+    steps:
+      - name: Create critical failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: `🚨 Nightly backup FAILED — ${new Date().toISOString().split('T')[0]}`,
+              body: [
+                '## Backup failure alert',
+                '',
+                `**Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+                `**Triggered at:** ${new Date().toUTCString()}`,
+                '',
+                '### Action required',
+                '1. Review the failed workflow run linked above.',
+                '2. Verify `SUPABASE_PROD_DB_URL` and `AGE_PUBLIC_KEY` secrets are still valid.',
+                '3. Check if Supabase project has paused (free-tier inactivity pause).',
+                '4. Re-run the workflow once the issue is resolved.',
+                '',
+                '> ⚠️ The last successful backup may be more than 24 hours old. Investigate immediately.',
+              ].join('\n'),
+              labels: ['priority:critical', 'squad:kujan'],
+            });

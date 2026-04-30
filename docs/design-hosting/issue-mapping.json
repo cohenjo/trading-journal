@@ -1,0 +1,157 @@
+{
+  "TJ-000": {
+    "number": 53,
+    "url": "https://github.com/cohenjo/trading-journal/issues/53",
+    "title": "Verify Supabase + Vercel free-tier facts and document baseline DB size"
+  },
+  "TJ-001": {
+    "number": 54,
+    "url": "https://github.com/cohenjo/trading-journal/issues/54",
+    "title": "Create local Supabase dev stack and sanitized seed data runbook"
+  },
+  "TJ-002": {
+    "number": 55,
+    "url": "https://github.com/cohenjo/trading-journal/issues/55",
+    "title": "Create secrets management plan and env var inventory"
+  },
+  "TJ-003": {
+    "number": 56,
+    "url": "https://github.com/cohenjo/trading-journal/issues/56",
+    "title": "Classify table ownership: household vs owner-private vs global reference"
+  },
+  "TJ-004": {
+    "number": 57,
+    "url": "https://github.com/cohenjo/trading-journal/issues/57",
+    "title": "Provision Supabase projects for dev, preview, and production"
+  },
+  "TJ-005": {
+    "number": 58,
+    "url": "https://github.com/cohenjo/trading-journal/issues/58",
+    "title": "Add household_id, owner_user_id, and audit columns via Alembic migration"
+  },
+  "TJ-006": {
+    "number": 59,
+    "url": "https://github.com/cohenjo/trading-journal/issues/59",
+    "title": "Create raw/compute/cooked schema layering and initial tables"
+  },
+  "TJ-007": {
+    "number": 60,
+    "url": "https://github.com/cohenjo/trading-journal/issues/60",
+    "title": "Implement RLS helper functions and core policies"
+  },
+  "TJ-008": {
+    "number": 61,
+    "url": "https://github.com/cohenjo/trading-journal/issues/61",
+    "title": "Set up CI/CD scaffolding: PR validation + Vercel git integration"
+  },
+  "TJ-009": {
+    "number": 62,
+    "url": "https://github.com/cohenjo/trading-journal/issues/62",
+    "title": "Set up encrypted pg_dump backup cron and restore rehearsal"
+  },
+  "TJ-010": {
+    "number": 63,
+    "url": "https://github.com/cohenjo/trading-journal/issues/63",
+    "title": "Wire manual trade entry flows to work against Supabase schema"
+  },
+  "TJ-011": {
+    "number": 64,
+    "url": "https://github.com/cohenjo/trading-journal/issues/64",
+    "title": "Implement compute worker framework with raw \u2192 compute \u2192 cooked pipeline"
+  },
+  "TJ-012": {
+    "number": 65,
+    "url": "https://github.com/cohenjo/trading-journal/issues/65",
+    "title": "Backfill existing data from local Postgres to Supabase"
+  },
+  "TJ-013": {
+    "number": 66,
+    "url": "https://github.com/cohenjo/trading-journal/issues/66",
+    "title": "Cooked-table reconciliation tests and data integrity validation"
+  },
+  "TJ-014": {
+    "number": 67,
+    "url": "https://github.com/cohenjo/trading-journal/issues/67",
+    "title": "Migrate hardcoded env values and API URL references to env vars"
+  },
+  "TJ-015": {
+    "number": 68,
+    "url": "https://github.com/cohenjo/trading-journal/issues/68",
+    "title": "Add @supabase/ssr middleware and Supabase client helpers"
+  },
+  "TJ-016": {
+    "number": 69,
+    "url": "https://github.com/cohenjo/trading-journal/issues/69",
+    "title": "Implement Google OAuth sign-in flow with Supabase Auth"
+  },
+  "TJ-017": {
+    "number": 70,
+    "url": "https://github.com/cohenjo/trading-journal/issues/70",
+    "title": "Replace python-jose JWT validation with Supabase JWKS verification"
+  },
+  "TJ-018": {
+    "number": 71,
+    "url": "https://github.com/cohenjo/trading-journal/issues/71",
+    "title": "Migrate CRUD endpoints from FastAPI to Next.js Server Actions"
+  },
+  "TJ-019": {
+    "number": 72,
+    "url": "https://github.com/cohenjo/trading-journal/issues/72",
+    "title": "Connect GitHub repo to Vercel and configure environment variables"
+  },
+  "TJ-020": {
+    "number": 73,
+    "url": "https://github.com/cohenjo/trading-journal/issues/73",
+    "title": "Dashboard reads cooked tables with staleness indicators"
+  },
+  "TJ-021": {
+    "number": 74,
+    "url": "https://github.com/cohenjo/trading-journal/issues/74",
+    "title": "Build household invite flow: send, accept, and revoke invites"
+  },
+  "TJ-022": {
+    "number": 75,
+    "url": "https://github.com/cohenjo/trading-journal/issues/75",
+    "title": "Implement sharing-specific RLS policies and role enforcement"
+  },
+  "TJ-023": {
+    "number": 76,
+    "url": "https://github.com/cohenjo/trading-journal/issues/76",
+    "title": "Playwright E2E tests for auth, invite, and sharing flows"
+  },
+  "TJ-024": {
+    "number": 77,
+    "url": "https://github.com/cohenjo/trading-journal/issues/77",
+    "title": "Implement audit trail for household lifecycle events"
+  },
+  "TJ-025": {
+    "number": 78,
+    "url": "https://github.com/cohenjo/trading-journal/issues/78",
+    "title": "Validate preview deploys end-to-end with auth and data isolation"
+  },
+  "TJ-026": {
+    "number": 79,
+    "url": "https://github.com/cohenjo/trading-journal/issues/79",
+    "title": "Production deploy, DNS configuration, and data migration"
+  },
+  "TJ-027": {
+    "number": 80,
+    "url": "https://github.com/cohenjo/trading-journal/issues/80",
+    "title": "Configure worker Docker healthcheck, restart, and retry policies"
+  },
+  "TJ-028": {
+    "number": 81,
+    "url": "https://github.com/cohenjo/trading-journal/issues/81",
+    "title": "Disable legacy auth, freeze old FastAPI CRUD routes, and update CORS"
+  },
+  "TJ-029": {
+    "number": 82,
+    "url": "https://github.com/cohenjo/trading-journal/issues/82",
+    "title": "Post-cutover monitoring, nightly cron, and alerting setup"
+  },
+  "TJ-030": {
+    "number": 83,
+    "url": "https://github.com/cohenjo/trading-journal/issues/83",
+    "title": "Post-cutover review and decommission local stack"
+  }
+}
