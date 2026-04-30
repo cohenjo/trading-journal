@@ -10,6 +10,15 @@ const nextConfig: NextConfig = {
     // Pre-existing TS errors — type-check is run separately in CI
     ignoreBuildErrors: true,
   },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "*.supabase.co",
+        pathname: "/storage/v1/object/public/**",
+      },
+    ],
+  },
   async rewrites() {
     // Determine the backend base URL. Docker sets it to http://backend:8000
     // Aspire sets it to a dynamic localhost port.
