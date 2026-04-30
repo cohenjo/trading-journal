@@ -375,13 +375,25 @@ create table if not exists public.dividend_ticker_data (
 );
 
 -- ================================================================
+-- Enum: public.tradingaccounttype
+-- Source: 5fe76bf46802_add_schwab_support_to_trading_models.py
+-- ================================================================
+do $$ begin
+  create type public.tradingaccounttype as enum ('IBKR', 'SCHWAB');
+exception when duplicate_object then null;
+end $$;
+
+-- ================================================================
 -- Table: public.trading_account_config
 -- Source: 0bf5a6151a3f_add_tradingaccountconfig.py + aaf944172360 (last_synced)
--- NOTE: Decision #3 columns (app_key, app_secret, account_hash, tokens_path)
--- are NOT created here; they'll be dropped by 130300 anyway.
+--         + 5fe76bf46802 (name, account_type)
+-- NOTE: trading_account_secrets is a stub table dropped by migration 130300;
+--       trading_account_config columns (name, account_type, etc.) are real and persist.
 -- ================================================================
 create table if not exists public.trading_account_config (
   id serial primary key,
+  name text not null default 'My Trading Account',
+  account_type public.tradingaccounttype not null default 'IBKR',
   host text not null,
   port integer not null,
   client_id integer not null,
@@ -393,6 +405,7 @@ create table if not exists public.trading_account_config (
 -- ================================================================
 -- Table: public.trading_account_summary
 -- Source: aaf944172360_add_persistent_trading_models.py
+--         + 5fe76bf46802 (account_config_id FK)
 -- ================================================================
 create table if not exists public.trading_account_summary (
   id serial primary key,
@@ -402,9 +415,13 @@ create table if not exists public.trading_account_summary (
   timestamp timestamptz not null
 );
 
+alter table public.trading_account_summary
+  add column if not exists account_config_id integer references public.trading_account_config(id);
+
 -- ================================================================
 -- Table: public.trading_positions
 -- Source: aaf944172360_add_persistent_trading_models.py
+--         + 5fe76bf46802 (account_config_id FK)
 -- ================================================================
 create table if not exists public.trading_positions (
   id serial primary key,
@@ -415,6 +432,9 @@ create table if not exists public.trading_positions (
   con_id integer not null,
   timestamp timestamptz not null
 );
+
+alter table public.trading_positions
+  add column if not exists account_config_id integer references public.trading_account_config(id);
 
 -- ================================================================
 -- Table: public.insurance_policies
@@ -438,15 +458,15 @@ create table if not exists public.insurance_policies (
 
 -- ================================================================
 -- Stub Table: public.trading_account_secrets
--- Source: Decision #3 — this table is dropped by 130300
+-- Source: Decision #3 — dropped by migration 130300.
+-- trading_account_secrets is a stub table dropped by migration 130300;
+-- trading_account_config columns are real and persist.
 -- We create a minimal stub here so 130300 can drop it cleanly.
 -- ================================================================
 create table if not exists public.trading_account_secrets (
-  id serial primary key,
-  account_id text,
-  app_key text,
-  app_secret text
+    id serial primary key
 );
+comment on table public.trading_account_secrets is 'Stub for clean removal by migration 130300. Original table dropped per design decision (no broker secrets in YOLO scope).';
 
 -- ================================================================
 -- End of baseline legacy schema migration
