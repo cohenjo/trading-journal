@@ -60,6 +60,10 @@ trading-journal-data/
 # Copilot CLI (local MCP config)
 .copilot/
 
+# Supabase local dev runtime state — never commit
+supabase/.temp/
+supabase/.branches/
+
 # IDE
 .vscode/
 .idea/
