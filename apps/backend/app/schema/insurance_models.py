@@ -14,6 +14,7 @@ class InsurancePolicy(SQLModel, table=True):
         default_factory=lambda: str(uuid.uuid4()),
         primary_key=True,
     )
+    user_id: Optional[str] = Field(default=None, foreign_key="auth.users.id", index=True)  # FK to auth.users
     owner: str  # "You" or "Partner"
     type: str  # "life", "mortgage", "health", "disability", "other"
     provider: str

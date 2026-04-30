@@ -1,12 +1,14 @@
 import logging
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.dal.database import get_session
+from app.dependencies import get_current_user_id
 from app.schema.insurance_models import InsurancePolicy
 
 logger = logging.getLogger(__name__)
@@ -63,9 +65,10 @@ def _validate_policy_fields(data: dict) -> None:
 def list_policies(
     owner: Optional[str] = None,
     db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
-    """List all insurance policies, optionally filtered by owner."""
-    statement = select(InsurancePolicy)
+    """List all insurance policies for the authenticated user, optionally filtered by owner."""
+    statement = select(InsurancePolicy).where(InsurancePolicy.user_id == user_id)
     if owner:
         statement = statement.where(InsurancePolicy.owner == owner)
     statement = statement.order_by(InsurancePolicy.created_at.desc())
@@ -77,14 +80,17 @@ def list_policies(
 def create_policy(
     body: InsurancePolicyCreate,
     db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
-    """Create a new insurance policy."""
+    """Create a new insurance policy for the authenticated user."""
     _validate_policy_fields(body.model_dump())
-    policy = InsurancePolicy(**body.model_dump())
+    policy_data = body.model_dump()
+    policy_data["user_id"] = str(user_id)  # Set user_id from authenticated user
+    policy = InsurancePolicy(**policy_data)
     db.add(policy)
     db.commit()
     db.refresh(policy)
-    logger.info("Created insurance policy %s (%s / %s)", policy.id, policy.owner, policy.type)
+    logger.info("Created insurance policy %s for user %s (%s / %s)", policy.id, user_id, policy.owner, policy.type)
     return {"status": "success", "data": policy.model_dump()}
 
 
@@ -93,9 +99,15 @@ def update_policy(
     policy_id: str,
     body: InsurancePolicyUpdate,
     db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
-    """Update fields of an existing insurance policy."""
-    policy = db.get(InsurancePolicy, policy_id)
+    """Update fields of an existing insurance policy (user-scoped)."""
+    # Fetch policy and verify ownership
+    statement = select(InsurancePolicy).where(
+        InsurancePolicy.id == policy_id,
+        InsurancePolicy.user_id == user_id
+    )
+    policy = db.exec(statement).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
 
@@ -109,7 +121,7 @@ def update_policy(
     db.add(policy)
     db.commit()
     db.refresh(policy)
-    logger.info("Updated insurance policy %s", policy.id)
+    logger.info("Updated insurance policy %s for user %s", policy.id, user_id)
     return {"status": "success", "data": policy.model_dump()}
 
 
@@ -117,12 +129,18 @@ def update_policy(
 def delete_policy(
     policy_id: str,
     db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
 ):
-    """Delete an insurance policy by ID."""
-    policy = db.get(InsurancePolicy, policy_id)
+    """Delete an insurance policy by ID (user-scoped)."""
+    # Fetch policy and verify ownership
+    statement = select(InsurancePolicy).where(
+        InsurancePolicy.id == policy_id,
+        InsurancePolicy.user_id == user_id
+    )
+    policy = db.exec(statement).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
     db.delete(policy)
     db.commit()
-    logger.info("Deleted insurance policy %s", policy_id)
+    logger.info("Deleted insurance policy %s for user %s", policy_id, user_id)
     return {"status": "success", "data": {"id": policy_id}}

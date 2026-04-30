@@ -1,0 +1,70 @@
+[
+  {
+    "path": "/backtest",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:16.411Z",
+    "loadTimeMs": 759,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/cash-flow",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:19.559Z",
+    "loadTimeMs": 792,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/current-finances",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:22.765Z",
+    "loadTimeMs": 705,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  },
+  {
+    "path": "/day",
+    "status": "🟡 redirect",
+    "consoleErrors": [],
+    "networkErrors": [],
+    "apiEndpointsCalled": [
+      {
+        "url": "/api/metrics/page-load",
+        "method": "POST",
+        "status": 307
+      }
+    ],
+    "timestamp": "2026-04-30T23:05:26.009Z",
+    "loadTimeMs": 732,
+    "httpStatus": 200,
+    "renderError": "Next.js error overlay detected"
+  }
+]
