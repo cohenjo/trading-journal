@@ -135,3 +135,12 @@
 
 📌 Team update (2026-04-30T20:15:15Z): PR board cleanup triaged and merged into shared decisions. 8 merged (safe versions), 3 deferred with validation steps, 1 closed as obsolete. Decision now live in `.squad/decisions.md`.
 
+
+📌 **Vercel Protection Bypass + BASE_URL Harmonization (2026-04-30 — squad/vercel-bypass-and-base-url):**
+- **Bypass API:** Vercel REST API (`/v9/projects/{id}` PATCH) does NOT expose `protectionBypass` field — returns `bad_request: should NOT have additional property protectionBypass`. The feature must be enabled via the Vercel dashboard → Project Settings → Deployment Protection → Protection Bypass for Automation → Generate Token.
+- **Manual step documented:** Runbook section 7.2 in `vercel-06-startup-and-access.md` walks through the one-time dashboard setup.
+- **Secret location:** `trading-journal/.env` (gitignored), key `VERCEL_AUTOMATION_BYPASS_SECRET`. A placeholder has been pre-generated; replace with the token from the dashboard.
+- **Playwright wiring:** `extraHTTPHeaders: { 'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '' }` added to `apps/frontend/playwright.config.ts` `use:` block.
+- **Canonical env var:** `BASE_URL` (per Redfoot's decision). `PLAYWRIGHT_BASE_URL` kept as legacy alias in playwright.config.ts. The `baseURL` line updated to `process.env.BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000'`.
+- **New script:** `test:e2e:dev` added to `apps/frontend/package.json` targeting the pinned dev deployment URL.
+- **Curl bypass test:** Returned 401 — expected until token is registered in Vercel dashboard.
