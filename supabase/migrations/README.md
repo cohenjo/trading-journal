@@ -29,15 +29,28 @@ Use `--project-ref` from the Supabase dashboard → Project Settings → General
 ## Migration Order (dependency graph)
 
 ```
-20260430120000_households_and_members        ← must run FIRST; creates public.households
-20260430120100_rls_helpers                   ← depends on households table
-20260430120200_rls_policies_households       ← depends on rls_helpers
-20260430130000_add_audit_columns             ← depends on all app tables existing (Alembic baseline)
-20260430130100_add_household_id              ← depends on 120000 (households(id) FK target)
-20260430130200_add_owner_user_id             ← depends on auth.users existing (Supabase-managed)
-20260430130300_split_trading_account_config  ← ⚠️ SKETCH ONLY — awaiting user decision
-20260430130400_retire_local_user_table       ← ⚠️ DESTRUCTIVE — run only after auth migration
+20260430115000_baseline_legacy_schema         ← NEW: Creates all 21 legacy tables (from Alembic)
+20260430120000_households_and_members         ← creates public.households, household_members
+20260430120100_rls_helpers                    ← depends on households table
+20260430120200_rls_policies_households        ← depends on rls_helpers
+20260430130000_add_audit_columns              ← depends on legacy tables from 115000
+20260430130100_add_household_id               ← depends on 120000 (households(id) FK target)
+20260430130200_add_owner_user_id              ← depends on auth.users existing (Supabase-managed)
+20260430130300_drop_trading_account_secrets   ← drops secrets; adds household_id to config; RLS
+20260430130400_user_to_user_profile           ← ⚠️ DESTRUCTIVE — run only after auth migration
+20260430130500_relax_delete_policies          ← depends on rls_helpers
+20260430130600_repoint_user_fks               ← no-op; audit trail only
+20260430140000_create_schemas                 ← creates raw/compute/cooked namespaces
+20260430140100_raw_tables                     ← depends on 140000
+20260430140200_compute_tables                 ← depends on 140000
+20260430140300_cooked_tables                  ← depends on 140000, 140200
 ```
+
+## Migrations: Baseline (TJ-005 followup / 2026-04-30 — McManus)
+
+| File | Description |
+|---|---|
+| `20260430115000_baseline_legacy_schema.sql` | **NEW**: Creates all 21 legacy public schema tables consolidated from 22 Alembic migrations. Includes: execution, manualtrade, trade, matchedtrade, dailysummary, optioncontract, historicaloptionbar, backtestrun, backtesttrade, ndx1m, dailybar, finance_snapshots, plans, insurance_policies, dividend_positions, dividend_accounts, dividend_ticker_data, trading_account_config, trading_account_summary, trading_positions, note, plus stub trading_account_secrets. Uses CREATE TABLE IF NOT EXISTS for idempotency. All monetary fields use NUMERIC(18,6). Applied to both DEV and PROD. |
 
 ## Migrations in this batch (TJ-005 / 2026-04-30, batch 1 — Rabin)
 
@@ -85,10 +98,11 @@ Dependency: `20260430140000` must run before `140100`–`140300`. Batch 3 depend
 ### Updated migration order (dependency graph)
 
 ```
-20260430120000  households_and_members           ← FIRST; creates public.households
+20260430115000  baseline_legacy_schema            ← NEW: All 21 legacy tables (from Alembic)
+20260430120000  households_and_members            ← creates public.households
 20260430120100  rls_helpers                       ← depends on households
 20260430120200  rls_policies_households           ← depends on rls_helpers
-20260430130000  add_audit_columns                 ← depends on app tables
+20260430130000  add_audit_columns                 ← depends on legacy tables from 115000
 20260430130100  add_household_id                  ← depends on 120000
 20260430130200  add_owner_user_id                 ← depends on auth.users
 20260430130300  drop_trading_account_secrets      ← drops secrets; adds household_id to config; RLS

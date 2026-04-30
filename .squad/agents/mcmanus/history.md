@@ -49,3 +49,20 @@ Resolved all 4 user-pending decisions on PR #85 by rewriting Hockney's sketch mi
 **Decision #3 (secrets):** Rewrote `20260430130300` — dropped broker credential columns from `trading_account_config`, added `household_id`, enabled household-scoped RLS.
 **Decision #4 (user_profile):** Rewrote `20260430130400` — destructive DROP of `public.user` + CREATE `public.user_profile` with auth.users trigger (SECURITY DEFINER), RLS, backfill. Added `20260430130600` (FK audit no-op).
 Closed GH #56 (TJ-003). PR #85 comment posted at https://github.com/cohenjo/trading-journal/pull/85#issuecomment-4355234613.
+
+## 2026-04-30 — Baseline legacy schema migration (PR #90, TJ-005 followup)
+
+**Requested by:** Jony Vesterman Cohen  
+**Work:** Created `20260430115000_baseline_legacy_schema.sql` migration establishing all 21 legacy public schema tables for trading journal. This migration consolidates the baseline schema from 22 Alembic migrations (8250ff809a39 through 4d9a58ecd93b), creating tables in their final form after all schema evolutions.
+
+**Problem:** Supabase migrations 130000, 130100, 130200, 130300 were failing because they reference legacy tables (manualtrade, trade, execution, etc.) that don't exist on fresh Supabase instances. The Alembic migrations were designed for local development databases, not cloud deployments.
+
+**Solution:** Single idempotent baseline migration (timestamped 115000 to run before 120000 household bootstrap) that creates all 21 legacy tables using CREATE TABLE IF NOT EXISTS. Uses NUMERIC(18,6) for all monetary fields (per Decision #2). Creates stub `trading_account_secrets` table so 130300 can drop it cleanly. Does NOT add household_id, owner_user_id, audit columns, or RLS — those come from 130xxx migrations.
+
+**Tables created:** execution, manualtrade, trade, matchedtrade, dailysummary, optioncontract, historicaloptionbar, backtestrun, backtesttrade, ndx1m, dailybar, finance_snapshots, plans, insurance_policies, dividend_positions, dividend_accounts, dividend_ticker_data, trading_account_config, trading_account_summary, trading_positions, note, plus stub trading_account_secrets.
+
+**Key insight:** Migration 335418ec68e3 was incomplete — only created manualtrade, not trade. Reconstructed trade table creation + transformation from d869bcf363dc downgrade() logic. Fixed SQL keyword issue by quoting `right` column in optioncontract.
+
+**Applied:** Successfully applied to both DEV (zvbwgxdgxwgduhhzdwjj) and PROD (jaesiklybkbmzpgipvea). All 5 migrations (115000, 130000, 130100, 130200, 130300) now working. Both environments have 24 tables total (21 legacy + 3 household).
+
+PR #90 opened and ready for review.
