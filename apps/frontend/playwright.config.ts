@@ -28,8 +28,18 @@ export default defineConfig({
   ],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('')`. */
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    /* Base URL to use in actions like `await page.goto('')`.
+     * Canonical var: BASE_URL. PLAYWRIGHT_BASE_URL is preserved as a legacy alias. */
+    baseURL: process.env.BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+
+    /* Send the Vercel automation bypass header so tests can reach protection-gated
+     * dev deployments without disabling SSO protection globally. The secret lives
+     * in .env (gitignored) as VERCEL_AUTOMATION_BYPASS_SECRET and must be added to
+     * the Vercel project via the dashboard (Settings → Deployment Protection →
+     * Protection Bypass for Automation) before it takes effect. */
+    extraHTTPHeaders: {
+      'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '',
+    },
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',

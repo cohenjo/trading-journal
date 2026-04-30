@@ -372,3 +372,99 @@ available: `npm install next@latest`.
 - **PR → preview → production lifecycle:** [vercel-05-deployment-flow.md](./vercel-05-deployment-flow.md)
 - **Secrets inventory:** [operations/secrets-and-env-vars.md](../operations/secrets-and-env-vars.md)
 - **Backup & restore:** [operations/backup-and-restore.md](../operations/backup-and-restore.md)
+
+---
+
+## 7. Running E2E tests against the deployed dev URL
+
+### 7.1 Overview
+
+Vercel deployment protection (SSO protection) gates all dev deployments behind org membership.
+Playwright E2E tests run in CI (headless, no browser session) and cannot SSO-authenticate.
+The solution is Vercel's **Protection Bypass for Automation** feature, which accepts a
+pre-shared secret sent as an HTTP header to bypass protection.
+
+### 7.2 One-time setup — enable bypass in Vercel dashboard (manual step)
+
+The Vercel REST API does not expose the `protectionBypass` configuration field. This must
+be done once in the dashboard:
+
+1. Open https://vercel.com/cohenjos-projects/trading-journal/settings/deployment-protection
+2. Scroll to **Protection Bypass for Automation**.
+3. Click **Generate Token**. Copy the generated token.
+4. Update `.env` in the `trading-journal` main repo (already gitignored):
+   ```bash
+   # Replace the placeholder with the token from the dashboard
+   VERCEL_AUTOMATION_BYPASS_SECRET=<token-from-dashboard>
+   ```
+5. The token is already wired into `apps/frontend/playwright.config.ts` via `extraHTTPHeaders`:
+   ```ts
+   extraHTTPHeaders: {
+     'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET || '',
+   }
+   ```
+
+> **Note:** A placeholder secret (`052e6d04...`) is already in `.env` but will return 401
+> until the matching token is registered in the Vercel dashboard. Replace it with the one
+> generated in step 3.
+
+### 7.3 Where the secret lives
+
+| Location | Path | Notes |
+|----------|------|-------|
+| Local dev | `trading-journal/.env` | Gitignored. Key: `VERCEL_AUTOMATION_BYPASS_SECRET` |
+| CI (GitHub Actions) | GH repo secret | Add as `VERCEL_AUTOMATION_BYPASS_SECRET` in Settings → Secrets |
+| Playwright config | `apps/frontend/playwright.config.ts` | Reads the env var automatically via `extraHTTPHeaders` |
+
+### 7.4 Running tests against the dev deployment
+
+```bash
+set -a && source /Users/jocohe/projects/trading-journal/.env && set +a
+cd apps/frontend
+
+# Run full suite against dev deployment
+npm run test:e2e:dev
+
+# Equivalent manual form (pinned URL):
+BASE_URL=https://trading-journal-avqth0l0g-cohenjos-projects.vercel.app playwright test
+
+# Or with a fresh deploy URL:
+BASE_URL=$(vercel deploy --token "$VERCEL_TOKEN" --scope cohenjos-projects --yes 2>&1 | tail -1) \
+  playwright test
+```
+
+### 7.5 Env var naming — `BASE_URL` is canonical
+
+Per Redfoot's E2E architecture decision (`.squad/decisions/inbox/redfoot-e2e-architecture.md`):
+
+- **`BASE_URL`** — canonical targeting variable. Use this in all new scripts and CI configs.
+- **`PLAYWRIGHT_BASE_URL`** — legacy alias preserved in `playwright.config.ts` for backwards compat.
+- **`DEV_BASE_URL`** — can be set in `.env.local` so `test:e2e:dev` works without a URL each time.
+
+### 7.6 Rotating the bypass secret
+
+If the secret is leaked:
+
+1. Open https://vercel.com/cohenjos-projects/trading-journal/settings/deployment-protection
+2. Delete the old token and generate a new one.
+3. Update `VERCEL_AUTOMATION_BYPASS_SECRET` in:
+   - `trading-journal/.env` (local)
+   - GitHub Actions secret `VERCEL_AUTOMATION_BYPASS_SECRET`
+
+### 7.7 Disabling protection entirely (make dev URL publicly browsable)
+
+If the team decides the dev environment does not need protection:
+
+```bash
+set -a && source /Users/jocohe/projects/trading-journal/.env && set +a
+PROJECT_ID=$(jq -r .projectId apps/frontend/.vercel/project.json)
+TEAM_ID=$(jq -r .orgId apps/frontend/.vercel/project.json)
+curl -s -X PATCH "https://api.vercel.com/v9/projects/$PROJECT_ID?teamId=$TEAM_ID" \
+  -H "Authorization: Bearer $VERCEL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"ssoProtection": null}'
+```
+
+To re-enable: replace `null` with `{"deploymentType": "all_except_custom_domains"}`.
+
+Dashboard alternative: Project Settings → General → Deployment Protection → toggle off.
