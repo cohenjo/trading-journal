@@ -57,6 +57,40 @@ jobs:
         run: |
           set -euo pipefail
           export PGPASSWORD=shadow_pass
+          psql -h localhost -U shadow_user -d shadow_db -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+              CREATE ROLE anon NOLOGIN;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+              CREATE ROLE authenticated NOLOGIN;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+              CREATE ROLE service_role NOLOGIN BYPASSRLS;
+            END IF;
+          END $$;
+          CREATE SCHEMA IF NOT EXISTS auth;
+          CREATE TABLE IF NOT EXISTS auth.users (
+            id uuid PRIMARY KEY,
+            email text UNIQUE,
+            email_confirmed_at timestamptz,
+            created_at timestamptz,
+            updated_at timestamptz,
+            aud text,
+            role text
+          );
+          CREATE OR REPLACE FUNCTION auth.uid()
+          RETURNS uuid
+          LANGUAGE sql
+          STABLE
+          AS $$
+            SELECT COALESCE(
+              NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid,
+              NULLIF((NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub'), '')::uuid
+            );
+          $$;
+          SQL
           MIGRATION_DIR="supabase/migrations"
           echo "Applying migrations from $MIGRATION_DIR..."
           for f in $(ls "$MIGRATION_DIR"/*.sql | sort); do
