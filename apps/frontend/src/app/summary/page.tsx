@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState, useMemo } from "react";
 import { useSettings } from "../settings/SettingsContext";
@@ -37,12 +38,12 @@ export default function SummaryPage() {
     const fetchData = async () => {
       try {
         // 1. Fetch Ladder Income
-        const ladderRes = await fetch("/api/ladder/income");
+        const ladderRes = await apiFetch("/api/ladder/income");
         const ladderJson = await ladderRes.json();
         const ladderSeries = ladderJson.income_series || [];
 
         // 2. Fetch Dividend Projection
-        const divRes = await fetch("/api/dividends/projection", {
+        const divRes = await apiFetch("/api/dividends/projection", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(divParams),
@@ -51,7 +52,7 @@ export default function SummaryPage() {
         const divData = divJson.data || [];
 
         // 3. Fetch Options Projection
-        const optRes = await fetch("/api/options/projection", {
+        const optRes = await apiFetch("/api/options/projection", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(optParams),

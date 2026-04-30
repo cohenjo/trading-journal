@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useMemo, useState } from "react";
 import OptionsChart, { OptionsChartPoint } from "../../components/Options/OptionsChart";
@@ -30,7 +31,7 @@ export default function OptionsPage() {
   };
 
   useEffect(() => {
-    fetch("/api/options")
+    apiFetch("/api/options")
       .then((res) => res.json())
       .then((data) => {
         setHistoricalData(data);
@@ -41,7 +42,7 @@ export default function OptionsPage() {
   useEffect(() => {
     if (historicalData.length === 0) return;
 
-    fetch("/api/options/projection", {
+    apiFetch("/api/options/projection", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
@@ -72,7 +73,7 @@ export default function OptionsPage() {
 
   const handleSaveHistory = async (newData: OptionsRecord[]) => {
     try {
-      const res = await fetch("/api/options", {
+      const res = await apiFetch("/api/options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newData),

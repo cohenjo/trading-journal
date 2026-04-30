@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useEffect, useState } from "react";
 
@@ -26,7 +27,7 @@ export default function HoldingsPage() {
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch("/api/holdings");
+        const res = await apiFetch("/api/holdings");
         if (!res.ok) {
           throw new Error(`Failed to load holdings: ${res.status}`);
         }
@@ -54,7 +55,7 @@ export default function HoldingsPage() {
 
     try {
       setSavingId(id);
-      const res = await fetch(`/api/holdings/${id}`, {
+      const res = await apiFetch(`/api/holdings/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ face_value: holding.face_value }),
@@ -77,7 +78,7 @@ export default function HoldingsPage() {
   const handleRemoveHolding = async (id: string) => {
     try {
       setSavingId(id);
-      const res = await fetch(`/api/holdings/${id}`, {
+      const res = await apiFetch(`/api/holdings/${id}`, {
         method: "DELETE",
       });
       if (!res.ok) {
@@ -274,7 +275,7 @@ export default function HoldingsPage() {
                       }
                       try {
                         setSavingId("__new__");
-                        const res = await fetch(
+                        const res = await apiFetch(
                           "/api/ladder/bonds",
                           {
                             method: "POST",

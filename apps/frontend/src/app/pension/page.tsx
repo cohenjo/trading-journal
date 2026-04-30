@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PensionChart from '@/components/Pension/PensionChart';
@@ -30,7 +31,7 @@ export default function PensionPage() {
 
     const fetchDashboard = async () => {
         try {
-            const res = await fetch('/api/pension/dashboard');
+            const res = await apiFetch('/api/pension/dashboard');
             if (res.ok) {
                 const data = await res.json();
                 if (data.status === 'success') {
@@ -58,7 +59,7 @@ export default function PensionPage() {
 
     // Keep allSnapshots in sync by fetching from reports endpoint
     useEffect(() => {
-        fetch('/api/pension/reports')
+        apiFetch('/api/pension/reports')
             .then((res) => res.ok ? res.json() : null)
             .then((json) => {
                 if (json?.snapshots) {
@@ -103,7 +104,7 @@ export default function PensionPage() {
 
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-            const response = await fetch(`${apiUrl}/api/pension/upload`, {
+            const response = await apiFetch(`${apiUrl}/api/pension/upload`, {
                 method: 'POST',
                 body: formData,
             });
@@ -138,7 +139,7 @@ export default function PensionPage() {
 
         try {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-            const res = await fetch(`${apiUrl}/api/pension/${id}`, {
+            const res = await apiFetch(`${apiUrl}/api/pension/${id}`, {
                 method: 'DELETE',
             });
             if (res.ok) {

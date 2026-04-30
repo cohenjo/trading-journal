@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { PlanChart } from '@/components/Plan/PlanChart';
 import { PlanEditor } from '@/components/Plan/PlanEditor';
@@ -7,13 +8,13 @@ import { Plan, PlanData } from '@/components/Plan/types';
 import { useSettings } from '../settings/SettingsContext';
 
 async function fetchLatestPlan() {
-    const res = await fetch('/api/plans/latest');
+    const res = await apiFetch('/api/plans/latest');
     if (res.ok) return res.json();
     return null;
 }
 
 async function createPlan(data: PlanData) {
-    const res = await fetch('/api/plans/', {
+    const res = await apiFetch('/api/plans/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data), // PlanData maps to plan_in
@@ -22,7 +23,7 @@ async function createPlan(data: PlanData) {
 }
 
 async function updatePlan(id: number, data: PlanData) {
-    const res = await fetch(`/api/plans/${id}`, {
+    const res = await apiFetch(`/api/plans/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -31,7 +32,7 @@ async function updatePlan(id: number, data: PlanData) {
 }
 
 async function fetchFinances() {
-    const res = await fetch('/api/finances/latest');
+    const res = await apiFetch('/api/finances/latest');
     if (res.ok) {
         return res.json();
     }
@@ -91,7 +92,7 @@ export default function PlanPage() {
         if (!plan || !plan.data) return;
 
         const timer = setTimeout(() => {
-            fetch('/api/plans/simulate', {
+            apiFetch('/api/plans/simulate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

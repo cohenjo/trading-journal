@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from "react";
 import { BacktestChart } from "@/components/Backtest/BacktestChart";
@@ -47,7 +48,7 @@ export default function BacktestPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/backtest/years")
+    apiFetch("/api/backtest/years")
       .then((res) => res.json())
       .then((data) => {
         setYears(data);
@@ -63,7 +64,7 @@ export default function BacktestPage() {
     setError(null);
     setResults(null);
     try {
-      const res = await fetch("/api/backtest/run", {
+      const res = await apiFetch("/api/backtest/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 

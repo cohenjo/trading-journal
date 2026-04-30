@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect, useCallback } from 'react';
 
@@ -152,7 +153,7 @@ export default function InsurancePage() {
 
   const fetchPolicies = useCallback(async () => {
     try {
-      const res = await fetch('/api/insurance');
+      const res = await apiFetch('/api/insurance');
       if (res.ok) {
         const data = await res.json();
         if (data.status === 'success') {
@@ -201,7 +202,7 @@ export default function InsurancePage() {
     try {
       const url = editingId ? `/api/insurance/${editingId}` : '/api/insurance';
       const method = editingId ? 'PUT' : 'POST';
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -222,7 +223,7 @@ export default function InsurancePage() {
   const handleDelete = async (id: string) => {
     if (!window.confirm(labels.confirmDelete)) return;
     try {
-      await fetch(`/api/insurance/${id}`, { method: 'DELETE' });
+      await apiFetch(`/api/insurance/${id}`, { method: 'DELETE' });
       await fetchPolicies();
     } catch {
       // silent

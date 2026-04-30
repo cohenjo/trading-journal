@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useMemo } from "react";
 import DividendChart, { DividendChartPoint } from "../../../components/Dividends/DividendChart";
@@ -37,7 +38,7 @@ export default function DividendEstimationsPage() {
 
     // Fetch historical data on mount
     useEffect(() => {
-        fetch("/api/dividends")
+        apiFetch("/api/dividends")
             .then((res) => res.json())
             .then((data) => {
                 setHistoricalData(data);
@@ -49,7 +50,7 @@ export default function DividendEstimationsPage() {
     useEffect(() => {
         if (historicalData.length === 0) return;
 
-        fetch("/api/dividends/projection", {
+        apiFetch("/api/dividends/projection", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(params),
@@ -68,7 +69,7 @@ export default function DividendEstimationsPage() {
 
     const handleSaveHistory = async (newData: DividendRecord[]) => {
         try {
-            const res = await fetch("/api/dividends", {
+            const res = await apiFetch("/api/dividends", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(newData),

@@ -2,13 +2,33 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 /**
+ * Routes that do NOT require authentication.
+ * Add paths here that should be accessible without a login.
+ */
+const PUBLIC_ROUTES: readonly string[] = [
+  '/login',
+  '/favicon.ico',
+];
+
+/** Prefixes whose entire subtree is public (no auth required). */
+const PUBLIC_PREFIXES: readonly string[] = [
+  '/auth/',     // auth callback, OAuth redirects
+  '/_next/',    // Next.js internals
+  '/api/auth/', // next-auth / Supabase auth API routes
+];
+
+function isPublicRoute(pathname: string): boolean {
+  if (PUBLIC_ROUTES.includes(pathname)) return true;
+  return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+/**
  * Refreshes the Supabase auth session on every request and propagates the
  * updated tokens to both the request (for Server Components) and the response
  * (for the browser).
  *
- * This is the "proxy / middleware" pattern from @supabase/ssr — it must run
- * before any Server Component that calls `supabase.auth.getUser()` or
- * `supabase.auth.getClaims()` so that sessions do not expire mid-navigation.
+ * Also enforces authentication: if the user is not signed in and is requesting
+ * a protected route, they are redirected to /login?next=<original-path>.
  */
 async function updateSession(request: NextRequest): Promise<NextResponse> {
   let supabaseResponse = NextResponse.next({ request });
@@ -40,7 +60,23 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
   );
 
   // Refresh the session; result is written back via setAll above.
-  await supabase.auth.getClaims();
+  const { data } = await supabase.auth.getClaims();
+
+  const { pathname } = request.nextUrl;
+
+  // Auth guard: redirect unauthenticated users to /login
+  if (!data?.claims && !isPublicRoute(pathname)) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = '/login';
+    loginUrl.searchParams.set('next', pathname);
+    // IMPORTANT: copy updated cookies onto the redirect so the session
+    // refresh from getClaims() isn't lost.
+    const redirectResponse = NextResponse.redirect(loginUrl);
+    supabaseResponse.cookies.getAll().forEach(({ name, value, ...opts }) => {
+      redirectResponse.cookies.set(name, value, opts);
+    });
+    return redirectResponse;
+  }
 
   // IMPORTANT: return supabaseResponse as-is so the updated cookies reach
   // the browser. If you must return a different response, copy the cookies:

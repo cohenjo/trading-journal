@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useCallback } from "react";
 
@@ -34,7 +35,7 @@ export function usePriceHistory(
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `${apiUrl}/api/analyze/price-history/${ticker}?period=${period}&interval=${interval}`
       );
       if (!res.ok) {

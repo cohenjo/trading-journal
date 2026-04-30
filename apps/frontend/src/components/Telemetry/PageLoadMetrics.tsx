@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useEffect } from "react";
 
@@ -20,7 +21,7 @@ function postMetrics(payload: PageLoadMetricsPayload) {
     return;
   }
 
-  void fetch("/api/metrics/page-load", {
+  void apiFetch("/api/metrics/page-load", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body,

@@ -1,4 +1,5 @@
 'use client';
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from 'react';
 import { DonutChart } from '@/components/CurrentFinances/DonutChart';
@@ -9,7 +10,7 @@ import { convertCurrency } from '@/lib/currency';
 // --- API Helper ---
 async function fetchLatestSnapshot() {
   try {
-    const res = await fetch('/api/finances/latest');
+    const res = await apiFetch('/api/finances/latest');
     if (!res.ok) {
       if (res.status === 404) return null; // No snapshot yet
       const errorText = await res.text();
@@ -34,7 +35,7 @@ async function saveSnapshot(items: FinanceItem[], metrics: { net_worth: number, 
       ...metrics
     };
 
-    const res = await fetch('/api/finances/', {
+    const res = await apiFetch('/api/finances/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

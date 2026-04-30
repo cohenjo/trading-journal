@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState } from "react";
 
@@ -24,7 +25,7 @@ export default function AddTradeForm() {
       pnl,
     };
 
-    await fetch("/api/trades", {
+    await apiFetch("/api/trades", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(trade),

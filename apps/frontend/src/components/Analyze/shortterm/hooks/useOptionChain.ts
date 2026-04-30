@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useCallback } from "react";
 
@@ -47,7 +48,7 @@ export function useOptionChain(ticker: string): UseOptionChainResult {
       ? `/api/analyze/options/${ticker}?expiry=${expiry}`
       : `/api/analyze/options/${ticker}`;
 
-    fetch(url)
+    apiFetch(url)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch options for ${ticker}`);
         return res.json();

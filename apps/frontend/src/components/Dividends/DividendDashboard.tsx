@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect, useMemo } from "react";
 import StatsRow from "./StatsRow";
@@ -33,7 +34,7 @@ export default function DividendDashboard() {
     // Initial Fetch
     const fetchAccounts = async () => {
         try {
-            const res = await fetch("/api/dividends/accounts");
+            const res = await apiFetch("/api/dividends/accounts");
             if (res.ok) {
                 const data = await res.json();
                 setAccounts(data);
@@ -46,7 +47,7 @@ export default function DividendDashboard() {
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`/api/dividends/dashboard?currency=${settings.mainCurrency}`);
+            const res = await apiFetch(`/api/dividends/dashboard?currency=${settings.mainCurrency}`);
             if (res.ok) {
                 const data = await res.json();
                 setStats(data.stats);
@@ -121,7 +122,7 @@ export default function DividendDashboard() {
             const method = posData.id ? "PUT" : "POST";
             const url = posData.id ? `/api/dividends/position/${posData.id}` : "/api/dividends/position";
 
-            const res = await fetch(url, {
+            const res = await apiFetch(url, {
                 method,
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -151,7 +152,7 @@ export default function DividendDashboard() {
         if (!deleteModal.id) return;
         setIsDeleting(true);
         try {
-            const res = await fetch(`/api/dividends/position/${deleteModal.id}`, { method: "DELETE" });
+            const res = await apiFetch(`/api/dividends/position/${deleteModal.id}`, { method: "DELETE" });
             if (res.ok) {
                 setPositions(prev => prev.filter(p => p.id !== deleteModal.id));
                 setDeleteModal({ isOpen: false, id: null });

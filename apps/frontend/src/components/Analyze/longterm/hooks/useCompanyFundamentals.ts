@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useCallback } from "react";
 
@@ -52,7 +53,7 @@ export function useCompanyFundamentals(ticker: string): UseFundamentalsReturn {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${apiUrl}/api/analyze/fundamentals/${ticker}`);
+      const res = await apiFetch(`${apiUrl}/api/analyze/fundamentals/${ticker}`);
       if (!res.ok) {
         throw new Error(res.status === 404 ? `Ticker "${ticker}" not found` : `API error (${res.status})`);
       }

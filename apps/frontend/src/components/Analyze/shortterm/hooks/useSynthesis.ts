@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useCallback } from "react";
 
@@ -29,7 +30,7 @@ export function useSynthesis(ticker: string): UseSynthesisResult {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/analyze/synthesis/${ticker}`)
+    apiFetch(`/api/analyze/synthesis/${ticker}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Failed to fetch synthesis for ${ticker}`);
         return res.json();
