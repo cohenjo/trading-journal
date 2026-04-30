@@ -24,7 +24,7 @@
     "next": "15.3.4",
     "react": "^19.0.0",
     "react-calendar": "^6.0.1",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
