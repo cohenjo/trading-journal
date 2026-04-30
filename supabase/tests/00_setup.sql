@@ -120,7 +120,8 @@ $$;
 -- Requires: superuser or supabase_auth_admin role (SECURITY DEFINER satisfies
 --           this when the function owner is postgres/superuser).
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION tests.create_test_user(email TEXT)
+DROP FUNCTION IF EXISTS tests.create_test_user(TEXT);
+CREATE OR REPLACE FUNCTION tests.create_test_user(p_email TEXT)
 RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -140,7 +141,7 @@ BEGIN
   )
   VALUES (
     v_id,
-    email,
+    p_email,
     now(),
     now(),
     now(),
