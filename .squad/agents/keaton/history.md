@@ -50,3 +50,8 @@
 - Vercel: 3-part deep-dives (project setup, deploys+DNS, policy+CI)
 - Coordination output: 1 runbooks index, 8 ⚠️-flagged verification items, orchestration logs
 - Role: Issue decomposition (critical path analysis), topology fix, vercel-03 runbook authorship, consolidation
+
+📌 **TJ-005 Triage — Migration Strategy Verdict (2026-05-01):**
+- Ruled out Alembic for Phase 1 household-column work; Supabase migrations (`supabase/migrations/`) are the source of truth per design §4.3
+- Updated issue #58 title, posted blocking verdict, documented TJ-003→TJ-005→TJ-006→TJ-007 dependency chain
+- Hockney stays assigned; must pair with McManus post TJ-003; decision filed to inbox
