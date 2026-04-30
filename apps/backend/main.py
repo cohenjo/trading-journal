@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.dal.database import create_db_and_tables
 from app.utils.decimal_encoder import decimal_default
-from app.auth.dependencies import get_current_user
+from app.dependencies import get_current_user
 from app.api import (
     auth as auth_router_module,
     trades,
