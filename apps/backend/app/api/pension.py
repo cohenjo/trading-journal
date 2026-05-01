@@ -16,6 +16,7 @@ from app.dal.database import get_session
 from app.dependencies import get_current_user_id
 from app.schema.finance_models import FinanceSnapshot
 from app.schema.plan_models import Plan
+from app.services.household_service import get_user_household_id
 from app.utils.copilot_analyzer import analyze_report
 
 logger = logging.getLogger(__name__)
@@ -577,7 +578,11 @@ async def upload_pension_report(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Upload and analyze a pension report PDF, updating snapshots and plans (user-scoped)."""
+    """Upload and analyze a pension report PDF, updating snapshots and plans (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     try:
         root_dir = Path(__file__).parent.parent.parent.parent.parent
         reports_dir = root_dir / "reports" / owner
@@ -593,10 +598,10 @@ async def upload_pension_report(
 
         upload_warnings = _validate_pension_payload(payload)
 
-        # Query user-scoped snapshot
+        # Query household-scoped snapshot
         snapshot = db.exec(
             select(FinanceSnapshot).where(
-                FinanceSnapshot.user_id == user_id,
+                FinanceSnapshot.household_id == household_id,
                 FinanceSnapshot.date == target_date
             )
         ).first()
@@ -606,7 +611,7 @@ async def upload_pension_report(
             closest_past = db.exec(
                 select(FinanceSnapshot)
                 .where(
-                    FinanceSnapshot.user_id == user_id,
+                    FinanceSnapshot.household_id == household_id,
                     FinanceSnapshot.date < target_date
                 )
                 .order_by(FinanceSnapshot.date.desc())
@@ -616,7 +621,7 @@ async def upload_pension_report(
             if closest_past:
                 new_data = copy.deepcopy(closest_past.data) if closest_past.data else copy.deepcopy(EMPTY_SNAPSHOT_DATA)
                 snapshot = FinanceSnapshot(
-                    user_id=str(user_id),
+                    household_id=household_id,
                     date=target_date,
                     data=new_data,
                     net_worth=closest_past.net_worth,
@@ -625,7 +630,7 @@ async def upload_pension_report(
                 )
             else:
                 snapshot = FinanceSnapshot(
-                    user_id=str(user_id),
+                    household_id=household_id,
                     date=target_date,
                     data=copy.deepcopy(EMPTY_SNAPSHOT_DATA),
                     net_worth=0.0,
@@ -643,7 +648,7 @@ async def upload_pension_report(
         # appears on the dashboard immediately, even when later snapshots exist.
         latest_snapshot = db.exec(
             select(FinanceSnapshot)
-            .where(FinanceSnapshot.user_id == user_id)
+            .where(FinanceSnapshot.household_id == household_id)
             .order_by(FinanceSnapshot.date.desc())
             .limit(1)
         ).first()
@@ -698,7 +703,11 @@ def list_pension_reports(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Return a list of uploaded pension report files with metadata and snapshot totals (user-scoped)."""
+    """Return a list of uploaded pension report files with metadata and snapshot totals (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     try:
         root_dir = Path(__file__).parent.parent.parent.parent.parent
         reports_root = root_dir / "reports"
@@ -717,10 +726,10 @@ def list_pension_reports(
                     "size_bytes": stat.st_size,
                 })
 
-        # Compute per-snapshot pension totals for delta comparison (user-scoped)
+        # Compute per-snapshot pension totals for delta comparison (household-scoped)
         snapshots = db.exec(
             select(FinanceSnapshot)
-            .where(FinanceSnapshot.user_id == user_id)
+            .where(FinanceSnapshot.household_id == household_id)
             .order_by(FinanceSnapshot.date.asc())
         ).all()
 
@@ -772,11 +781,15 @@ def get_pension_dashboard(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Return aggregated pension dashboard with history and plan data (user-scoped)."""
+    """Return aggregated pension dashboard with history and plan data (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     try:
         snapshots = db.exec(
             select(FinanceSnapshot)
-            .where(FinanceSnapshot.user_id == user_id)
+            .where(FinanceSnapshot.household_id == household_id)
             .order_by(FinanceSnapshot.date.asc())
         ).all()
         plan = db.exec(select(Plan).order_by(Plan.updated_at.desc()).limit(1)).first()
@@ -794,11 +807,15 @@ def delete_pension(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Remove a pension from all snapshots and the active plan (user-scoped)."""
+    """Remove a pension from all snapshots and the active plan (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     try:
         snapshots = db.exec(
             select(FinanceSnapshot)
-            .where(FinanceSnapshot.user_id == user_id)
+            .where(FinanceSnapshot.household_id == household_id)
             .order_by(FinanceSnapshot.date.asc())
         ).all()
         for snapshot in snapshots:

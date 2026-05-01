@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 from app.dal.database import get_session
 from app.dependencies import get_current_user_id
 from app.schema.insurance_models import InsurancePolicy
+from app.services.household_service import get_user_household_id
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +68,12 @@ def list_policies(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """List all insurance policies for the authenticated user, optionally filtered by owner."""
-    statement = select(InsurancePolicy).where(InsurancePolicy.user_id == user_id)
+    """List all insurance policies for the authenticated user's household, optionally filtered by owner."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    statement = select(InsurancePolicy).where(InsurancePolicy.household_id == household_id)
     if owner:
         statement = statement.where(InsurancePolicy.owner == owner)
     statement = statement.order_by(InsurancePolicy.created_at.desc())
@@ -82,15 +87,19 @@ def create_policy(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Create a new insurance policy for the authenticated user."""
+    """Create a new insurance policy for the authenticated user's household."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     _validate_policy_fields(body.model_dump())
     policy_data = body.model_dump()
-    policy_data["user_id"] = str(user_id)  # Set user_id from authenticated user
+    policy_data["household_id"] = household_id
     policy = InsurancePolicy(**policy_data)
     db.add(policy)
     db.commit()
     db.refresh(policy)
-    logger.info("Created insurance policy %s for user %s (%s / %s)", policy.id, user_id, policy.owner, policy.type)
+    logger.info("Created insurance policy %s for household %s (%s / %s)", policy.id, household_id, policy.owner, policy.type)
     return {"status": "success", "data": policy.model_dump()}
 
 
@@ -101,11 +110,15 @@ def update_policy(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Update fields of an existing insurance policy (user-scoped)."""
-    # Fetch policy and verify ownership
+    """Update fields of an existing insurance policy (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    # Fetch policy and verify household ownership
     statement = select(InsurancePolicy).where(
         InsurancePolicy.id == policy_id,
-        InsurancePolicy.user_id == user_id
+        InsurancePolicy.household_id == household_id
     )
     policy = db.exec(statement).first()
     if not policy:
@@ -121,7 +134,7 @@ def update_policy(
     db.add(policy)
     db.commit()
     db.refresh(policy)
-    logger.info("Updated insurance policy %s for user %s", policy.id, user_id)
+    logger.info("Updated insurance policy %s for household %s", policy.id, household_id)
     return {"status": "success", "data": policy.model_dump()}
 
 
@@ -131,16 +144,20 @@ def delete_policy(
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Delete an insurance policy by ID (user-scoped)."""
-    # Fetch policy and verify ownership
+    """Delete an insurance policy by ID (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    # Fetch policy and verify household ownership
     statement = select(InsurancePolicy).where(
         InsurancePolicy.id == policy_id,
-        InsurancePolicy.user_id == user_id
+        InsurancePolicy.household_id == household_id
     )
     policy = db.exec(statement).first()
     if not policy:
         raise HTTPException(status_code=404, detail="Policy not found")
     db.delete(policy)
     db.commit()
-    logger.info("Deleted insurance policy %s for user %s", policy_id, user_id)
+    logger.info("Deleted insurance policy %s for household %s", policy_id, household_id)
     return {"status": "success", "data": {"id": policy_id}}
