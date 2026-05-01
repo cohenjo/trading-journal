@@ -1,11 +1,14 @@
 from typing import List, Optional
+from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends
 from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.dal.database import get_session
+from app.dependencies import get_current_user_id
 from app.schema.dividend_models import DividendAccount, DividendPosition
 from app.schema.finance_models import FinanceSnapshot
+from app.services.household_service import get_user_household_id
 
 router = APIRouter(prefix="/api/dividends/accounts", tags=["Dividend Accounts"])
 
@@ -20,21 +23,44 @@ class ImportRequest(BaseModel):
     name: str
 
 @router.get("", response_model=List[str])
-def get_accounts(session: Session = Depends(get_session)):
-    """List all dividend account names."""
-    accounts = session.exec(select(DividendAccount)).all()
+def get_accounts(
+    user_id: UUID = Depends(get_current_user_id),
+    session: Session = Depends(get_session)
+):
+    """List all dividend account names for the authenticated user's household."""
+    household_id = get_user_household_id(session, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    accounts = session.exec(
+        select(DividendAccount).where(DividendAccount.household_id == household_id)
+    ).all()
     # Return list of names
     return [a.name for a in accounts]
 
 @router.get("/importable", response_model=List[ImportableAccount])
-def get_importable_accounts(session: Session = Depends(get_session)):
+def get_importable_accounts(
+    user_id: UUID = Depends(get_current_user_id),
+    session: Session = Depends(get_session)
+):
     """List investment accounts available for import from finance snapshots."""
-    # 1. Get existing linked IDs
-    existing_accounts = session.exec(select(DividendAccount)).all()
+    household_id = get_user_household_id(session, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    # 1. Get existing linked IDs for this household
+    existing_accounts = session.exec(
+        select(DividendAccount).where(DividendAccount.household_id == household_id)
+    ).all()
     linked_ids = {a.linked_id for a in existing_accounts if a.linked_id}
 
-    # 2. Get latest snapshot
-    statement = select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc()).limit(1)
+    # 2. Get latest snapshot for this household
+    statement = (
+        select(FinanceSnapshot)
+        .where(FinanceSnapshot.household_id == household_id)
+        .order_by(FinanceSnapshot.date.desc())
+        .limit(1)
+    )
     snapshot = session.exec(statement).first()
     
     if not snapshot or not snapshot.data or 'items' not in snapshot.data:
@@ -54,24 +80,50 @@ def get_importable_accounts(session: Session = Depends(get_session)):
     return importable
 
 @router.post("/import", response_model=str)
-def import_account(req: ImportRequest, session: Session = Depends(get_session)):
+def import_account(
+    req: ImportRequest,
+    user_id: UUID = Depends(get_current_user_id),
+    session: Session = Depends(get_session)
+):
     """Import a finance snapshot investment as a dividend account."""
-    # Check if name exists
-    if session.get(DividendAccount, req.name):
+    household_id = get_user_household_id(session, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    # Check if name exists for this household
+    existing = session.exec(
+        select(DividendAccount)
+        .where(DividendAccount.name == req.name)
+        .where(DividendAccount.household_id == household_id)
+    ).first()
+    if existing:
         raise HTTPException(status_code=400, detail="Account name already exists")
     
-    # Check if linked_id already used (optional, but good practice)
-    existing_linked = session.exec(select(DividendAccount).where(DividendAccount.linked_id == req.linked_id)).first()
+    # Check if linked_id already used in this household
+    existing_linked = session.exec(
+        select(DividendAccount)
+        .where(DividendAccount.linked_id == req.linked_id)
+        .where(DividendAccount.household_id == household_id)
+    ).first()
     if existing_linked:
          raise HTTPException(status_code=400, detail="This investment account is already linked")
 
     # Create Account
-    new_account = DividendAccount(name=req.name, linked_id=req.linked_id)
+    new_account = DividendAccount(
+        name=req.name,
+        linked_id=req.linked_id,
+        household_id=household_id
+    )
     session.add(new_account)
     
     # Auto-populate RSU positions
     # Need to fetch the item details from snapshot
-    statement = select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc()).limit(1)
+    statement = (
+        select(FinanceSnapshot)
+        .where(FinanceSnapshot.household_id == household_id)
+        .order_by(FinanceSnapshot.date.desc())
+        .limit(1)
+    )
     snapshot = session.exec(statement).first()
     
     if snapshot and snapshot.data and 'items' in snapshot.data:
@@ -102,22 +154,46 @@ def import_account(req: ImportRequest, session: Session = Depends(get_session)):
     return new_account.name
 
 @router.post("", response_model=str)
-def create_account(name: str, session: Session = Depends(get_session)):
+def create_account(
+    name: str,
+    user_id: UUID = Depends(get_current_user_id),
+    session: Session = Depends(get_session)
+):
     """Create a new empty dividend account."""
-    # Check if exists
-    existing = session.get(DividendAccount, name)
+    household_id = get_user_household_id(session, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    # Check if exists for this household
+    existing = session.exec(
+        select(DividendAccount)
+        .where(DividendAccount.name == name)
+        .where(DividendAccount.household_id == household_id)
+    ).first()
     if existing:
         raise HTTPException(status_code=400, detail="Account already exists")
     
-    account = DividendAccount(name=name)
+    account = DividendAccount(name=name, household_id=household_id)
     session.add(account)
     session.commit()
     return account.name
 
 @router.delete("/{name}")
-def delete_account(name: str, session: Session = Depends(get_session)):
-    """Delete a dividend account and its positions."""
-    account = session.get(DividendAccount, name)
+def delete_account(
+    name: str,
+    user_id: UUID = Depends(get_current_user_id),
+    session: Session = Depends(get_session)
+):
+    """Delete a dividend account and its positions from the authenticated user's household."""
+    household_id = get_user_household_id(session, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    account = session.exec(
+        select(DividendAccount)
+        .where(DividendAccount.name == name)
+        .where(DividendAccount.household_id == household_id)
+    ).first()
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
@@ -132,7 +208,12 @@ def delete_account(name: str, session: Session = Depends(get_session)):
     
     # If linked, update the latest snapshot to set dividend_yield to 0
     if linked_id:
-        statement = select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc()).limit(1)
+        statement = (
+            select(FinanceSnapshot)
+            .where(FinanceSnapshot.household_id == household_id)
+            .order_by(FinanceSnapshot.date.desc())
+            .limit(1)
+        )
         snapshot = session.exec(statement).first()
         if snapshot and snapshot.data and 'items' in snapshot.data:
             # We need to clone the data to trigger update detection if using SQLAlchemy JSON mutation tracking, 

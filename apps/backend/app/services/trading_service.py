@@ -1,4 +1,5 @@
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 from datetime import datetime
 from ib_async import IB
 from app.schema.trading_models import TradingAccountConfig, TradingAccountSummary, TradingPosition
@@ -35,7 +36,7 @@ class TradingService:
         if self.ib.isConnected():
             self.ib.disconnect()
 
-    async def sync_account(self, db: Session, config_id: Optional[int] = None) -> Dict[str, Any]:
+    async def sync_account(self, db: Session, household_id: UUID, config_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Triggers sync for a specific account or the first one found.
         """
@@ -44,13 +45,13 @@ class TradingService:
             raise Exception("No trading account configured")
 
         if config.account_type == "IBKR":
-            return await self.sync_ibkr(db, config)
+            return await self.sync_ibkr(db, config, household_id)
         elif config.account_type == "SCHWAB":
-            return await self.sync_schwab(db, config)
+            return await self.sync_schwab(db, config, household_id)
         else:
             raise Exception(f"Unsupported account type: {config.account_type}")
 
-    async def sync_ibkr(self, db: Session, config: TradingAccountConfig) -> Dict[str, Any]:
+    async def sync_ibkr(self, db: Session, config: TradingAccountConfig, household_id: UUID) -> Dict[str, Any]:
         try:
             await self.connect_ibkr(config)
             
@@ -71,13 +72,18 @@ class TradingService:
                 net_liquidation=net_liq,
                 total_cash=total_cash,
                 currency=currency,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
+                household_id=household_id
             )
             db.add(new_summary)
 
             positions_data = self.ib.positions()
-            # Clear old positions for THIS account
-            db.exec(delete(TradingPosition).where(TradingPosition.account_config_id == config.id))
+            # Clear old positions for THIS account and household
+            db.exec(
+                delete(TradingPosition)
+                .where(TradingPosition.account_config_id == config.id)
+                .where(TradingPosition.household_id == household_id)
+            )
             
             for p in positions_data:
                 contract = p.contract
@@ -88,7 +94,8 @@ class TradingService:
                     sec_type=contract.secType,
                     avg_cost=p.avgCost,
                     con_id=contract.conId,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.utcnow(),
+                    household_id=household_id
                 )
                 db.add(new_pos)
             
@@ -109,8 +116,12 @@ class TradingService:
                 
                 # B. Sync to Dividend Positions table if linked
                 if config.linked_account_id:
-                    # Find dividend account(s) linked to the same FinanceItem
-                    stmt = select(DividendAccount).where(DividendAccount.linked_id == config.linked_account_id)
+                    # Find dividend account(s) linked to the same FinanceItem in this household
+                    stmt = (
+                        select(DividendAccount)
+                        .where(DividendAccount.linked_id == config.linked_account_id)
+                        .where(DividendAccount.household_id == household_id)
+                    )
                     div_accounts = db.exec(stmt).all()
                     
                     for da in div_accounts:
@@ -152,7 +163,7 @@ class TradingService:
                         "dividend_fixed_amount": annual_dividend_income,
                         "dividend_mode": "Fixed"
                     }
-                    await self._update_finance_snapshot(db, config.linked_account_id, net_liq, extra_updates)
+                    await self._update_finance_snapshot(db, config.linked_account_id, household_id, net_liq, extra_updates)
                 except Exception as e:
                     logger.error(f"Failed to update finance snapshot for IBKR sync: {e}")
 
@@ -167,13 +178,18 @@ class TradingService:
         finally:
             await self.disconnect_ibkr()
 
-    async def _update_finance_snapshot(self, db: Session, linked_id: str, new_value: float, extra_updates: Optional[Dict] = None):
+    async def _update_finance_snapshot(self, db: Session, linked_id: str, household_id: UUID, new_value: float, extra_updates: Optional[Dict] = None):
         """
         Updates a specific item in the latest finance snapshot and recalculates totals.
         """
         from app.schema.finance_models import FinanceSnapshot
         
-        statement = select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc()).limit(1)
+        statement = (
+            select(FinanceSnapshot)
+            .where(FinanceSnapshot.household_id == household_id)
+            .order_by(FinanceSnapshot.date.desc())
+            .limit(1)
+        )
         snapshot = db.exec(statement).first()
         
         if not snapshot or not snapshot.data or 'items' not in snapshot.data:
@@ -242,7 +258,7 @@ class TradingService:
             db.commit()
             logger.info(f"Updated finance snapshot item {linked_id} to {new_value} {item_curr}. Totals updated in {base_curr}.")
 
-    async def sync_schwab(self, db: Session, config: TradingAccountConfig) -> Dict[str, Any]:
+    async def sync_schwab(self, db: Session, config: TradingAccountConfig, household_id: UUID) -> Dict[str, Any]:
         """
         Implements Schwab sync using schwab-py.
         """
@@ -272,13 +288,18 @@ class TradingService:
                 net_liquidation=net_liq,
                 total_cash=total_cash,
                 currency=currency,
-                timestamp=datetime.utcnow()
+                timestamp=datetime.utcnow(),
+                household_id=household_id
             )
             db.add(new_summary)
             
             # 2. Positions
             schwab_positions = securities_account.get('positions', [])
-            db.exec(delete(TradingPosition).where(TradingPosition.account_config_id == config.id))
+            db.exec(
+                delete(TradingPosition)
+                .where(TradingPosition.account_config_id == config.id)
+                .where(TradingPosition.household_id == household_id)
+            )
             
             count = 0
             for p in schwab_positions:
@@ -295,7 +316,8 @@ class TradingService:
                     amount=float(p.get('longQuantity', 0.0)) or float(p.get('shortQuantity', 0.0)),
                     sec_type=sec_type,
                     avg_cost=float(p.get('averagePrice', 0.0)),
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.utcnow(),
+                    household_id=household_id
                 )
                 db.add(new_pos)
                 count += 1
@@ -315,7 +337,7 @@ class TradingService:
             logger.error(f"Schwab sync failed: {str(e)}")
             raise e
 
-    async def sync_to_dividends(self, db: Session) -> Dict[str, Any]:
+    async def sync_to_dividends(self, db: Session, household_id: UUID) -> Dict[str, Any]:
         """
         Propagates STK positions from ALL trading accounts to their linked DividendAccounts.
         """
@@ -329,14 +351,19 @@ class TradingService:
             if not config.linked_account_id:
                 continue
                 
-            # Find DividendAccount
-            statement = select(DividendAccount).where(DividendAccount.linked_id == config.linked_account_id)
+            # Find DividendAccount for this household
+            statement = (
+                select(DividendAccount)
+                .where(DividendAccount.linked_id == config.linked_account_id)
+                .where(DividendAccount.household_id == household_id)
+            )
             div_account = db.exec(statement).first()
             if not div_account: continue
             
-            # Get positions for THIS account
+            # Get positions for THIS account and household
             statement = select(TradingPosition).where(
                 TradingPosition.account_config_id == config.id,
+                TradingPosition.household_id == household_id,
                 TradingPosition.sec_type == "STK"
             )
             trading_positions = db.exec(statement).all()

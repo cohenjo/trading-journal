@@ -2,6 +2,7 @@ from enum import Enum
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from uuid import UUID
 from sqlalchemy import Column, Numeric
 from sqlmodel import SQLModel, Field
 
@@ -43,6 +44,7 @@ class TradingAccountSummary(SQLModel, table=True):
     total_cash: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     currency: str = Field(default="USD")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
 
 class TradingPosition(SQLModel, table=True):
     __tablename__ = "trading_positions"
@@ -55,3 +57,4 @@ class TradingPosition(SQLModel, table=True):
     avg_cost: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     con_id: Optional[int] = Field(default=None) # Optional for non-IBKR
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+    household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
