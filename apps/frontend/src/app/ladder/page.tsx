@@ -22,6 +22,8 @@ function LadderPage() {
   const [bonds, setBonds] = useState<Bond[]>([]);
   const [selectedRungId, setSelectedRungId] = useState<string | null>(null);
   const [hoveredRungId, setHoveredRungId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
 
   const candidateId = searchParams.get("candidateId");
@@ -29,20 +31,27 @@ function LadderPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const overviewRes = await apiFetch("/api/ladder/overview");
-      const overviewJson = await overviewRes.json();
-      setRungs(overviewJson.rungs ?? []);
-      setBonds(overviewJson.bonds ?? []);
+      setLoading(true);
+      setError(null);
+      try {
+        const overviewRes = await apiFetch("/api/ladder/overview");
+        const overviewJson = await overviewRes.json();
+        setRungs(overviewJson.rungs ?? []);
+        setBonds(overviewJson.bonds ?? []);
 
-      const incomeRes = await apiFetch("/api/ladder/income");
-      const incomeJson = await incomeRes.json();
-      setIncomeSeries(incomeJson.income_series ?? []);
-      setDistributions(incomeJson.distributions ?? []);
+        const incomeRes = await apiFetch("/api/ladder/income");
+        const incomeJson = await incomeRes.json();
+        setIncomeSeries(incomeJson.income_series ?? []);
+        setDistributions(incomeJson.distributions ?? []);
+      } catch (err) {
+        console.error("Failed to load ladder data", err);
+        setError("Failed to load ladder data. Please try again.");
+      } finally {
+        setLoading(false);
+      }
     };
 
-    fetchData().catch((err) => {
-      console.error("Failed to load ladder data", err);
-    });
+    fetchData();
   }, []);
 
   // When coming back from the scanner with a candidateYear, auto-open that rung.
@@ -59,7 +68,21 @@ function LadderPage() {
   return (
     <main className="h-[90vh] flex flex-col py-4 px-6 overflow-hidden">
       <h1 className="text-3xl font-bold text-center mb-4">Bond Ladder</h1>
-      <div className="flex-1 flex gap-4 w-full max-w-[1800px] mx-auto min-h-0 px-2">
+      
+      {error && (
+        <div className="bg-red-900/50 border border-red-800 text-red-200 p-4 rounded mb-4 max-w-4xl mx-auto">
+          {error}
+        </div>
+      )}
+      
+      {loading && (
+        <div className="flex items-center justify-center flex-1">
+          <div className="text-slate-400 animate-pulse">Loading ladder data...</div>
+        </div>
+      )}
+      
+      {!loading && (
+        <div className="flex-1 flex gap-4 w-full max-w-[1800px] mx-auto min-h-0 px-2">
         {/* Left: Ladder */}
         <div className="basis-[15%] h-full flex flex-col items-start justify-start pr-2">
           <Ladder
@@ -182,6 +205,7 @@ function LadderPage() {
           </section>
         </div>
       </div>
+      )}
     </main>
   );
 }
