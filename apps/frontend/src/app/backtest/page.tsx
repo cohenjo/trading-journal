@@ -56,7 +56,11 @@ export default function BacktestPage() {
           setSelectedYear(data[data.length - 1]);
         }
       })
-      .catch((err) => console.error("Failed to fetch years", err));
+      .catch((err) => {
+        console.error("Failed to fetch years", err);
+        // Fallback to default year if API fails
+        setYears([selectedYear]);
+      });
   }, []);
 
   const runBacktest = async () => {
@@ -139,7 +143,11 @@ export default function BacktestPage() {
             value={selectedYear}
             onChange={(e) => setSelectedYear(Number(e.target.value))}
             className="bg-slate-800 border border-slate-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={years.length === 0}
           >
+            {years.length === 0 && (
+              <option value={selectedYear}>Loading years...</option>
+            )}
             {years.map((y) => (
               <option key={y} value={y}>
                 {y}
