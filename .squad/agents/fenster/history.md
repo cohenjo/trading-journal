@@ -205,3 +205,42 @@ SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co
 **Output artifact:** `docs/design-hosting/frontend-api-callsites.md` — 89 call sites inventoried, detailed migration plan for `POST /api/finances`, decision criteria for Server Action vs direct client.
 
 **Branch:** Not yet created — this is planning/audit work only. Implementation PR will follow after team review.
+
+## finances Server Action — Stop-the-Bleed Fix (2026-07-31)
+
+**Branch:** squad/finances-server-action → PR opened  
+**Context:** POST `/api/finances` → 404 on Vercel (rewrites to undeployed FastAPI)
+
+### What was done
+
+1. Created `apps/frontend/src/app/current-finances/actions.ts`
+   - `saveFinanceSnapshot(items, metrics)` — upserts to `finance_snapshots` via SSR Supabase
+   - `getLatestFinanceSnapshot()` — reads latest snapshot via SSR Supabase
+   - `resolveHouseholdId(userId)` — looks up `household_members` from session, **never from caller**
+
+2. Updated `apps/frontend/src/app/current-finances/page.tsx`
+   - Replaced both `apiFetch('/api/finances/*')` calls with Server Actions
+   - Replaced `alert('Failed to save...')` with dismissable inline error banner (role="alert")
+   - Removed dead variable computations (`netWorth`, `totalAssets`, `totalLiabilities`) that caused lint errors
+
+3. Created `apps/frontend/src/app/current-finances/actions.test.ts`
+   - 8 vitest unit tests: unauth path, no-household path, household_id from session (not caller), DB failure, input validation, read happy/error paths
+   - Follows the mock pattern from `src/lib/__tests__/api-client.test.ts`
+
+### Key decisions
+
+- `household_id` ALWAYS comes from `household_members` table via `supabase.auth.getUser()`.  Never accepted from form input or function parameters.
+- Supabase RLS (`is_household_writer`) enforces write isolation at DB layer — confirmed GREEN by Rabin's audit.
+- next.config.ts rewrite guard left untouched (commit 89dff6e).
+- Upsert uses `onConflict: 'date'` (PK). RLS blocks cross-household updates at DB level.
+
+### Pattern established
+
+This is the **template for all 32 MOVE endpoints**. See decision note at:
+`.squad/decisions/inbox/fenster-finances-server-action.md`
+
+### Build/test results
+
+- `npm run test`: 8/8 new tests pass. 3 pre-existing Pension test failures (unrelated).
+- `npm run lint`: 0 errors in changed files. All other lint errors are pre-existing.
+- `npm run build`: ✅ succeeds with env vars set.
