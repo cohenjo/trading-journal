@@ -236,3 +236,117 @@ SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co
 **Impact**: Unblocks Wave 1, 2, and most of Wave 3 — this was THE single highest-leverage fix per issue #121.
 
 **Branch**: `squad/fix-jwt-forwarding-#121-clean` → PR #122 (ready for review)
+## Wave 4 Pages — Planning & Projection (2026-05-01)
+
+### Summary
+Completed E2E test coverage for four planning/projection pages (#114-#117) that were already functionally complete. All pages handle empty states gracefully and have working CRUD flows.
+
+**PR:** #130 — `feat(frontend): wave 4 — after-i-leave, analyze, plan, progress pages functional`
+
+### Findings by Page
+
+**After I Leave (#114)** — Family financial guide with i18n
+- PDF generation via html2pdf.js with light-mode CSS overrides
+- Hebrew/English toggle with proper RTL layout switching
+- Fetches from `/api/insurance` and `/api/finances/latest`
+- Empty state: returns `[]` from fetch helpers, no errors
+
+**Analyze (#115)** — Company analysis with split-brain view
+- Split-brain toggle between Long-Term (fundamentals) and Short-Term (technicals)
+- Ticker search drives both views
+- Empty state: shows placeholder prompt when no ticker selected
+- Already has 11 E2E tests in `e2e/flows/analyze/`
+
+**Financial Plan (#116)** — Retirement projection with CRUD
+- Full CRUD on `/api/plans/` (create/update)
+- Server-side simulation via `/api/plans/simulate` (POST with plan + finances + settings)
+- Empty plan: defaults to `{ name: 'My Plan', data: { items: [], milestones: [], settings: {} } }`
+- 404 on `/api/plans/latest` is EXPECTED for fresh users (not a bug)
+- Projection chart uses `PlanChart` component with markers for milestones/pensions
+- Plan editor (`PlanEditor`) provides input UI for income/expenses/milestones
+
+**Progress (#117)** — Net worth history tracking
+- CRUD on `/api/finances/` for historic snapshots
+- Chart displays net worth over time (empty state: "No data to display")
+- Modal for adding/editing historic records
+- Empty state: shows 0 values, empty chart, empty table
+
+### Key Patterns
+
+1. **Empty State Handling:** All pages use try/catch in fetch helpers, returning `[]` or default objects on failure. No crashes on 404 or 500.
+
+2. **Auth-Cookie Fixture:** All tests use `auth-cookie.ts` (PR #124) for authenticated sessions. NO console errors related to auth.
+
+3. **Test Structure:**
+   - Page load check (main heading)
+   - Key element presence (buttons, inputs, charts)
+   - Empty state validation
+   - Console error monitoring (filter out resource load failures)
+
+4. **Plan Simulation Flow:**
+   - Frontend debounces 500ms after plan changes
+   - POSTs to `/api/plans/simulate` with `{ plan, finances, settings }`
+   - Backend returns projection array: `[{ year, net_worth, liquid_net_worth, milestones_hit, ... }]`
+   - Frontend maps to chart data format: `{ time: '2024-01-01', value: net_worth }`
+
+5. **404 on /api/plans/latest is EXPECTED:** Fresh users have no plan yet. Frontend handles this by initializing a default empty plan.
+
+### Reusable Patterns
+
+- **E2E Test Location:** `apps/frontend/e2e/pages/{page}.spec.ts` (NEW directory created)
+- **Test Fixture:** `import { test, expect } from '../fixtures/auth-cookie'`
+- **Console Error Filter:** Ignore `'Failed to load resource'` (common for missing static assets)
+- **Empty State Assertions:** Check for fallback text like "No data to display" or default values like `$0`
+
+### No Code Changes Required
+All four pages were already functional. Only tests were added. Pages already:
+- Handle empty states gracefully
+- Display loading states during fetch
+- Show error messages on API failures
+- Have proper TypeScript typing
+- Follow existing component patterns
+
+
+## Learnings — Wave 3 Chart Pages (2026-05-01)
+
+**Issue context:** #110 (backtest), #111 (ladder), #112 (options), #113 (tax-condor) — PR #131
+
+**Chart integration patterns with lightweight-charts:**
+1. All 4 pages use `lightweight-charts` for visualization — `BacktestChart`, `ExpectedIncomeChart`, `OptionsChart` all follow the same pattern:
+   - `useRef` for container DOM element
+   - `useRef` for chart API instance
+   - `useRef` for series instances
+   - `useEffect` with cleanup on unmount
+   - Resize listener on window
+2. Chart data format: `{ time: string (YYYY-MM-DD), value: number }`
+3. Series types differ by use case: `AreaSeries` (backtest, ladder, options projected), `HistogramSeries` (options historical), `LineSeries` (target lines)
+
+**Empty state handling patterns:**
+- Backtest: Empty years array shows "Loading years..." option in disabled dropdown + fallback to default year on API error
+- Ladder: Loading state with animate-pulse + error banner + empty array fallbacks with `??` operator
+- Options: Loading state prevents rendering until data fetched + error banner
+- Tax-condor: Shows "No recommendations found" message when recommendations array is empty
+
+**Data flow gotchas:**
+- Options page: projection API requires `historicalData.length > 0` check before calling — doesn't fetch projections if no historical data exists
+- Ladder page: two separate API calls (`/overview`, `/income`) must both succeed to render properly
+- Backtest: year dropdown can be empty on first render if API is slow — fixed with loading indicator and disabled state
+
+**Error handling improvements made:**
+- Added proper try-catch with `finally` blocks for loading state cleanup
+- Replaced `console.error` silent failures with visible error banners
+- Type-safe error handling: `err instanceof Error ? err.message : 'fallback'` instead of `any`
+- Response status checks: `if (!res.ok) throw new Error(...)` before `.json()`
+
+**E2E test patterns with auth-cookie fixture:**
+- Console error filtering: ignore telemetry `/metrics/page-load` 401s but catch other errors
+- Loading indicator checks: `await expect(loading).toBeVisible()` with proper timeout
+- Empty state validation: confirm page structure exists even with no data
+- User interaction tests: input fills, checkbox toggles, button clicks
+- URL param tests: ladder page supports `?candidateYear=N` for scanner integration
+
+**Team integration notes:**
+- No backend changes needed — all fixes were frontend-only
+- All pages already had `apiFetch` with proper auth header forwarding
+- Chart components were already built — just needed proper loading/error wrappers
+- Auth-cookie fixture (PR #124) worked flawlessly for all tests
