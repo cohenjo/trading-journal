@@ -39,7 +39,7 @@ class SnapshotData(BaseModel):
 class FinanceSnapshot(SQLModel, table=True):
     __tablename__ = "finance_snapshots"
 
-    user_id: Optional[str] = Field(default=None, foreign_key="auth.users.id", index=True, primary_key=True)  # FK to auth.users, part of composite PK
+    household_id: str = Field(foreign_key="households.id", primary_key=True)
     date: date_type = Field(primary_key=True)
     
     # Store the entire snapshot as a JSON document
