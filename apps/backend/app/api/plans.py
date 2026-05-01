@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Union, Dict, Any
+from uuid import UUID
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,8 +8,10 @@ from sqlmodel import Session, select
 from opentelemetry import metrics
 
 from app.dal.database import get_session
+from app.dependencies import get_current_user_id
 from app.schema.plan_models import Plan, PlanData
 from app.schema.finance_models import FinanceSnapshot
+from app.services.household_service import get_user_household_id
 from app.services.plan_service import PlanService
 from pydantic import BaseModel
 
@@ -51,14 +54,27 @@ class ProjectionPoint(BaseModel):
     liquid_net_worth: Optional[float] = 0.0
     total_dividend_income: Optional[float] = 0.0
 @router.post("/simulate", response_model=List[ProjectionPoint])
-def simulate_plan(request: SimulationRequest, db: Session = Depends(get_session)):
+def simulate_plan(
+    request: SimulationRequest, 
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id)
+):
     """
     Run a projection simulation based on the plan, optional finance snapshot, and user settings.
     """
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     finances = request.finances
-    # If finances not provided in request (None), fetch latest from DB
+    # If finances not provided in request (None), fetch latest from DB for this household
     if not finances:
-        statement = select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc()).limit(1)
+        statement = (
+            select(FinanceSnapshot)
+            .where(FinanceSnapshot.household_id == household_id)
+            .order_by(FinanceSnapshot.date.desc())
+            .limit(1)
+        )
         finances = db.exec(statement).first()
     
     # If finances WAS provided but might be a Dict (from JSON payload) that didn't match strict model,
@@ -83,38 +99,84 @@ def simulate_plan(request: SimulationRequest, db: Session = Depends(get_session)
         simulation_duration_histogram.record((time.perf_counter() - start_time) * 1000)
 
 @router.get("/", response_model=List[Plan])
-def get_plans(db: Session = Depends(get_session)):
-    """List all financial plans ordered by last update."""
-    statement = select(Plan).order_by(Plan.updated_at.desc())
+def get_plans(
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id)
+):
+    """List all financial plans for the authenticated user's household ordered by last update."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    statement = (
+        select(Plan)
+        .where(Plan.household_id == household_id)
+        .order_by(Plan.updated_at.desc())
+    )
     plans = db.exec(statement).all()
     return plans
 
 @router.get("/latest", response_model=Plan)
-def get_latest_plan(db: Session = Depends(get_session)):
+def get_latest_plan(
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id)
+):
     """
-    Get the most recently updated plan. 
+    Get the most recently updated plan for the authenticated user's household.
     """
-    statement = select(Plan).order_by(Plan.updated_at.desc()).limit(1)
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    statement = (
+        select(Plan)
+        .where(Plan.household_id == household_id)
+        .order_by(Plan.updated_at.desc())
+        .limit(1)
+    )
     plan = db.exec(statement).first()
     if not plan:
         raise HTTPException(status_code=404, detail="No plans found")
     return plan
 
 @router.get("/{plan_id}", response_model=Plan)
-def get_plan(plan_id: int, db: Session = Depends(get_session)):
-    """Get a specific financial plan by ID."""
+def get_plan(
+    plan_id: int, 
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id)
+):
+    """Get a specific financial plan by ID (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     plan = db.get(Plan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+    
+    if plan.household_id != household_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this plan")
+    
     return plan
 
 @router.post("/", response_model=Plan)
-def create_plan(plan_in: PlanData, name: str = "My Plan", description: Optional[str] = None, db: Session = Depends(get_session)):
+def create_plan(
+    plan_in: PlanData, 
+    name: str = "My Plan", 
+    description: Optional[str] = None, 
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id)
+):
     """
-    Create a new plan.
+    Create a new plan for the authenticated user's household.
     """
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     plan_data_dict = plan_in.model_dump(mode='json')
     new_plan = Plan(
+        household_id=household_id,
         name=name,
         description=description,
         data=plan_data_dict
@@ -125,13 +187,25 @@ def create_plan(plan_in: PlanData, name: str = "My Plan", description: Optional[
     return new_plan
 
 @router.put("/{plan_id}", response_model=Plan)
-def update_plan(plan_id: int, plan_in: PlanData, db: Session = Depends(get_session)):
+def update_plan(
+    plan_id: int, 
+    plan_in: PlanData, 
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id)
+):
     """
-    Update an existing plan's data. 
+    Update an existing plan's data (household-scoped).
     """
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     plan = db.get(Plan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+    
+    if plan.household_id != household_id:
+        raise HTTPException(status_code=403, detail="Not authorized to update this plan")
         
     plan.data = plan_in.model_dump(mode='json')
     plan.updated_at = datetime.utcnow()
@@ -141,11 +215,22 @@ def update_plan(plan_id: int, plan_in: PlanData, db: Session = Depends(get_sessi
     return plan
 
 @router.delete("/{plan_id}", response_model=bool)
-def delete_plan(plan_id: int, db: Session = Depends(get_session)):
-    """Delete a financial plan by ID."""
+def delete_plan(
+    plan_id: int, 
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id)
+):
+    """Delete a financial plan by ID (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     plan = db.get(Plan, plan_id)
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
+    
+    if plan.household_id != household_id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this plan")
         
     db.delete(plan)
     db.commit()

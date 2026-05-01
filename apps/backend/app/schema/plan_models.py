@@ -67,6 +67,7 @@ class Plan(SQLModel, table=True):
     __tablename__ = "plans"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    household_id: Optional[str] = Field(default=None, foreign_key="households.id", index=True)
     name: str
     description: Optional[str] = None
     
