@@ -1,11 +1,14 @@
 from datetime import date
 from typing import List
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.dal.database import get_session
+from app.dependencies import get_current_user_id
 from app.schema.finance_models import FinanceSnapshot, SnapshotData
+from app.services.household_service import get_user_household_id
 
 router = APIRouter(prefix="/api/finances", tags=["finances"])
 
@@ -51,11 +54,24 @@ def get_stock_price(symbol: str):
 
 
 @router.get("/latest", response_model=FinanceSnapshot)
-def get_latest_snapshot(db: Session = Depends(get_session)):
+def get_latest_snapshot(
+    user_id: UUID = Depends(get_current_user_id),
+    db: Session = Depends(get_session)
+):
     """
-    Get the most recent finance snapshot, enriched with latest dashboard dividend data.
+    Get the most recent finance snapshot for the authenticated user's household,
+    enriched with latest dashboard dividend data.
     """
-    statement = select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc()).limit(1)
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    statement = (
+        select(FinanceSnapshot)
+        .where(FinanceSnapshot.household_id == household_id)
+        .order_by(FinanceSnapshot.date.desc())
+        .limit(1)
+    )
     snapshot = db.exec(statement).first()
     if not snapshot:
         raise HTTPException(status_code=404, detail="No finance snapshots found")
@@ -110,15 +126,27 @@ def get_latest_snapshot(db: Session = Depends(get_session)):
 
 
 @router.post("/", response_model=FinanceSnapshot)
-def create_snapshot(data: SnapshotData, db: Session = Depends(get_session)):
+def create_snapshot(
+    data: SnapshotData, 
+    user_id: UUID = Depends(get_current_user_id),
+    db: Session = Depends(get_session)
+):
     """
-    Create or update a finance snapshot.
-    Upserts based on date (PK). Defaults to today if date not provided.
+    Create or update a finance snapshot for the authenticated user's household.
+    Upserts based on (household_id, date). Defaults to today if date not provided.
     """
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
     snapshot_date = data.date if data.date else date.today()
     
-    # Check if a snapshot already exists for the date
-    statement = select(FinanceSnapshot).where(FinanceSnapshot.date == snapshot_date)
+    # Check if a snapshot already exists for this household and date
+    statement = (
+        select(FinanceSnapshot)
+        .where(FinanceSnapshot.household_id == household_id)
+        .where(FinanceSnapshot.date == snapshot_date)
+    )
     existing_snapshot = db.exec(statement).first()
     
     # Prepare the snapshot data dictionary
@@ -137,6 +165,7 @@ def create_snapshot(data: SnapshotData, db: Session = Depends(get_session)):
     else:
         # Create new
         new_snapshot = FinanceSnapshot(
+            household_id=household_id,
             date=snapshot_date,
             data=snapshot_data_dict,
             net_worth=data.net_worth,
@@ -150,24 +179,47 @@ def create_snapshot(data: SnapshotData, db: Session = Depends(get_session)):
 
 
 @router.get("/history", response_model=List[FinanceSnapshot])
-def get_snapshot_history(limit: int = 30, db: Session = Depends(get_session)):
+def get_snapshot_history(
+    limit: int = 30,
+    user_id: UUID = Depends(get_current_user_id),
+    db: Session = Depends(get_session)
+):
     """
-    Get historical snapshots, useful for graphing.
+    Get historical snapshots for the authenticated user's household, useful for graphing.
     Returns list sorted by date descending.
     """
-    # We might want to return a lighter model here if the JSON data is huge,
-    # but for now returning the full object is fine.
-    statement = select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc()).limit(limit)
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    statement = (
+        select(FinanceSnapshot)
+        .where(FinanceSnapshot.household_id == household_id)
+        .order_by(FinanceSnapshot.date.desc())
+        .limit(limit)
+    )
     history = db.exec(statement).all()
     return history
 
 
 @router.delete("/{date_str}", response_model=bool)
-def delete_snapshot(date_str: date, db: Session = Depends(get_session)):
+def delete_snapshot(
+    date_str: date,
+    user_id: UUID = Depends(get_current_user_id),
+    db: Session = Depends(get_session)
+):
     """
-    Delete a finance snapshot by date.
+    Delete a finance snapshot by date for the authenticated user's household.
     """
-    statement = select(FinanceSnapshot).where(FinanceSnapshot.date == date_str)
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+    
+    statement = (
+        select(FinanceSnapshot)
+        .where(FinanceSnapshot.household_id == household_id)
+        .where(FinanceSnapshot.date == date_str)
+    )
     snapshot = db.exec(statement).first()
     
     if not snapshot:
