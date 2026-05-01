@@ -87,8 +87,8 @@ export default function BacktestPage() {
       
       const data = await res.json();
       setResults(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
