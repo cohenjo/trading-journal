@@ -21,14 +21,25 @@ DROP POLICY IF EXISTS finance_snapshots_delete_own ON public.finance_snapshots;
 -- Step 2: Drop the partial unique index from wave2 (user_id, date)
 DROP INDEX IF EXISTS public.finance_snapshots_user_date_key;
 
--- Step 3: Backfill household_id from user_id where possible
+-- Step 3: Backfill household_id from user_id where possible (if user_id column exists)
 -- If row has user_id but not household_id, look up user's default_household_id
-UPDATE public.finance_snapshots fs
-SET household_id = up.default_household_id
-FROM public.user_profile up
-WHERE fs.user_id = up.user_id
-  AND fs.household_id IS NULL
-  AND up.default_household_id IS NOT NULL;
+-- Note: user_profile.id is the auth user ID, not user_id
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'finance_snapshots' 
+    AND column_name = 'user_id'
+  ) THEN
+    UPDATE public.finance_snapshots fs
+    SET household_id = up.default_household_id
+    FROM public.user_profile up
+    WHERE fs.user_id = up.id
+      AND fs.household_id IS NULL
+      AND up.default_household_id IS NOT NULL;
+  END IF;
+END $$;
 
 -- Step 4: Delete orphaned rows (no household_id and cannot be backfilled)
 DELETE FROM public.finance_snapshots WHERE household_id IS NULL;
