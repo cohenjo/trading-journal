@@ -4,12 +4,17 @@ This module provides reusable fixtures for database sessions, FastAPI client,
 and common test data factories.
 """
 
+import sys
+import pathlib
 from typing import Generator
 import pytest
 from sqlmodel import SQLModel, Session, create_engine
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
+
+# Add parent directory to Python path so 'main' module is importable
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from app.dal.database import get_session
 from app.auth.dependencies import get_current_user

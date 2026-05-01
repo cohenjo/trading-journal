@@ -1,6 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from opentelemetry import metrics
+
+from app.dependencies import get_current_user_optional
+from app.supabase_auth import SupabaseClaims
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
 meter = metrics.get_meter(__name__)
@@ -43,9 +46,20 @@ class PageLoadMetrics(BaseModel):
 
 
 @router.post("/page-load")
-def capture_page_load_metrics(payload: PageLoadMetrics):
-    """Ingest frontend page-load performance metrics into OpenTelemetry."""
+def capture_page_load_metrics(
+    payload: PageLoadMetrics,
+    claims: SupabaseClaims | None = Depends(get_current_user_optional),
+):
+    """Ingest frontend page-load performance metrics into OpenTelemetry.
+    
+    Accepts both authenticated and anonymous requests. When authenticated,
+    captures user_id in attributes. Designed to work with navigator.sendBeacon()
+    which cannot attach custom headers.
+    """
     attributes = {"path": payload.path}
+    if claims is not None:
+        attributes["user_id"] = str(claims.sub)
+    
     page_load_count.add(1, attributes)
 
     if payload.ttfb_ms is not None:
