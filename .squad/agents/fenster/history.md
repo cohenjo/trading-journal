@@ -168,3 +168,71 @@ Completed all P0 tasks for Week 1 of the testing plan. Added comprehensive test 
 ### Migration: 36 fetch sites → apiFetch
 - Used Python regex `re.sub(r'(?<!api)fetch\(', 'apiFetch(', content)` for safe replacement (avoids double-replacing `apiFetch(`).
 - macOS BSD `sed` does not support `\b` word boundaries — always use Python for cross-platform regex replacements.
+
+## Wave 1 Pages — Auth Blocker (2026-04-30)
+
+**Task**: Test and fix 5 Wave 1 frontend pages (#101-#105: current-finances, summary, cash-flow, root, settings)
+
+**Status**: **BLOCKED** by Supabase authentication issues
+
+**What I did**:
+1. Created working branch `squad/wave1-all-pages` from latest main
+2. Enhanced login page with password auth (previously only OAuth + magic link)
+3. Verified `apiFetch` exists on main (PR #96 merged — JWT forwarding pattern)
+4. Started both servers (frontend :3000, backend :8000)
+5. Attempted login with test user `redfoot-test@example.com`
+
+**Blocker**: Supabase dev project `zvbwgxdgxwgduhhzdwjj` returns `Invalid API key` for anon key. Cannot authenticate test user. All page API calls return 403 Forbidden. Cannot proceed with page testing without working auth.
+
+**Handoff**: Coordinator/Jony needs to:
+- Verify Supabase dev project health + anon key validity
+- Confirm test user exists (USER_ID `093d1078-7826-4b8f-b825-2ebb80bbf889`)
+- OR provide auth bypass for Wave 1 testing
+
+**Technical notes**:
+- Login page changes ready on branch (password field + toggle)
+- All 5 target pages identified and structurally sound
+- Backend RLS correctly blocking unauth requests (as designed)
+
+See: `.squad/log/2026-04-30T*-fenster-wave1-blocked.md`
+
+## TJ-121 — JWT Forwarding Fix (2026-05-01)
+
+**Problem**: All frontend `/api/*` calls to FastAPI returned 403 `{"detail":"Not authenticated"}` after Supabase signin.
+
+**Root cause**: 
+- Frontend's `apiFetch` (from PR #96) correctly forwards Supabase JWTs via `Authorization: Bearer` header
+- Backend's `main.py` imported the WRONG `get_current_user` dependency:
+  - Used: `app.auth.dependencies.get_current_user` (local JWT system, expects HS256 tokens signed with backend's `JWT_SECRET_KEY`)
+  - Should use: `app.dependencies.get_current_user` (Supabase JWT validator, verifies RS256 tokens via JWKS)
+
+**Solution**: One-line import change in `apps/backend/main.py`:
+```python
+-from app.auth.dependencies import get_current_user
++from app.dependencies import get_current_user
+```
+
+**The Supabase JWT validator** (`app.dependencies.get_current_user`):
+- Validates tokens via `app.supabase_auth.verify_supabase_jwt`
+- Fetches public keys from Supabase JWKS endpoint (RS256/ES256)
+- Falls back to `SUPABASE_JWT_SECRET` for local HS256 dev tokens
+- Returns `SupabaseClaims` with authenticated user UUID (`claims.sub`)
+- Backend already initialized JWKS cache in lifespan handler
+
+**Configuration**: Backend `.env` must include:
+```bash
+SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co
+# Optional: SUPABASE_JWT_SECRET for HS256 fallback
+```
+
+**Testing**: 
+- **Before**: All protected endpoints returned 403
+- **After**: 53/60 smoke tests passed (7 webkit failures due to Supabase rate limiting, NOT auth errors)
+- Manual curl tests confirm proper validation:
+  - No token → 401 "Authorization header missing"
+  - Invalid token → 401 "Malformed token"
+  - Valid Supabase token → 200
+
+**Impact**: Unblocks Wave 1, 2, and most of Wave 3 — this was THE single highest-leverage fix per issue #121.
+
+**Branch**: `squad/fix-jwt-forwarding-#121-clean` → PR #122 (ready for review)
