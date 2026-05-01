@@ -1,7 +1,6 @@
 import os
 import time
 
-import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
