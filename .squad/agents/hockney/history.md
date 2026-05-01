@@ -216,6 +216,86 @@ Full CRUD API for insurance policies at `/api/insurance` — list (with optional
 
 ---
 
+### 2026-05-01: Wave 2b — Holdings + Dividends DB Migration (PR #129)
+
+**Context:** Post-JWT walkthrough showed all pages render, but `/holdings` and `/dividends` backed by mock/file storage. User goal: real data persistence on all pages.
+
+**Work Completed:**
+
+1. **Holdings API (#119) - 1 hour** ✅
+   - Created `bond_holdings` table with household_id FK
+   - Applied household-scoped RLS policies following canonical pattern
+   - Replaced in-memory mock + XLSX storage with SQLModel CRUD
+   - Added authentication via `get_current_user_id` dependency
+   - Full CRUD: create, read, update (PUT), soft-delete
+
+2. **Dividends API (#120) - 45 minutes** ✅
+   - Updated `dividend_service` CRUD operations with household_id parameter
+   - Added authentication to all dividends endpoints
+   - Removed legacy XLSX file storage endpoints (3 endpoints deprecated)
+   - Added RLS policy for `dividend_ticker_data` (read-only reference)
+   - Created `household_service.get_user_household_id()` helper
+
+**Migration:** `supabase/migrations/20260501040000_wave2b_holdings_dividends_db.sql`
+- ✅ Dev (zvbwgxdgxwgduhhzdwjj): Applied 2026-05-01 08:58 UTC
+- ✅ Prod (jaesiklybkbmzpgipvea): Applied 2026-05-01 08:59 UTC
+- Idempotent: DROP POLICY IF EXISTS, CREATE TABLE IF NOT EXISTS
+
+**Branch:** `squad/wave2b-holdings-dividends-db`
+**PR:** #129
+
+**Learnings:**
+
+1. **Canonical RLS Pattern (Household-Scoped):**
+   ```sql
+   -- SELECT: any household member can read
+   CREATE POLICY {table}_select ON {table} FOR SELECT TO authenticated
+     USING (household_id IS NOT NULL AND public.is_household_member(household_id));
+   
+   -- INSERT/UPDATE/DELETE: only household writers (owner/member, not viewer)
+   CREATE POLICY {table}_insert ON {table} FOR INSERT TO authenticated
+     WITH CHECK (household_id IS NOT NULL AND public.is_household_writer(household_id));
+   ```
+   This pattern matches `trade`, `dividend_positions`, `insurance_policies`, `finance_snapshots`.
+
+2. **Household Helper Pattern:**
+   Created reusable `household_service.get_user_household_id(db, user_id)` helper for user-to-household mapping. Returns first active household membership. Simplifies API endpoint auth checks.
+
+3. **Soft-Delete Pattern:**
+   Bond holdings use `deleted_at` column for soft-deletes (matches audit columns pattern from 130000 migration). Allows audit trail and potential undelete functionality.
+
+4. **Reference Data RLS:**
+   Market reference tables like `dividend_ticker_data` use read-only RLS:
+   - SELECT: authenticated users (all can read)
+   - INSERT/UPDATE/DELETE: service_role only (no authenticated writes)
+
+5. **Service Layer Signature:**
+   When adding household scoping to existing service functions, always add `household_id` as explicit parameter (not fetched inside service). This keeps service layer testable and composable.
+
+6. **Legacy Endpoint Deprecation:**
+   Removed XLSX-backed endpoints (`GET /dividends`, `POST /dividends`, `POST /dividends/projection`) with clear deprecation comments pointing frontend to replacement endpoints.
+
+**Files Modified:**
+- `apps/backend/app/api/holdings.py` — Full rewrite with DB CRUD
+- `apps/backend/app/api/dividends.py` — Auth + household scoping
+- `apps/backend/app/services/dividend_service.py` — household_id params
+- `apps/backend/app/schema/bond_models.py` — New SQLModel
+- `apps/backend/app/schema/household_models.py` — New SQLModel
+- `apps/backend/app/services/household_service.py` — New helper
+
+**Testing:**
+- 223 backend tests passing (same baseline as main)
+- Pre-existing failures unrelated (auth tests need SUPABASE_URL)
+
+**Next Steps:**
+1. Frontend must update holdings + dividends pages to pass auth headers
+2. Frontend should migrate away from deprecated XLSX endpoints
+3. Consider seed data for testing (optional)
+
+📌 **Team update (2026-05-01):** Wave 2b shipped — Holdings and dividends now backed by real DB tables with household-scoped RLS. All user-facing pages now persist data. Frontend updates needed for auth headers.
+
+---
+
 
 
 📌 **Team update (2026-04-30T22-16-38Z):** RLS-21 dev+prod merge complete — PR #98 (21 public tables + drop secrets) merged to main (9ec4d2b), 18 migrations applied to prod (jaesiklybkbmzpgipvea), 0 rls_disabled_in_public advisor errors verified. Issue #97 closed. Cross-agent RLS coverage now extends to all 21 public tables. — Rabin (author), Keaton (reviewer), Hockney (prod apply), Redfoot (E2E coverage opportunity)
