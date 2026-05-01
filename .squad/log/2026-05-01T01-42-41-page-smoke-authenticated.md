@@ -2,7 +2,7 @@
 **Date**: 2026-04-30 23:48 UTC  
 **Executor**: Redfoot  
 **Target**: http://localhost:3000 (dev server with Supabase dev project)  
-**Auth**: Email/password (redfoot-test@example.com)
+**Auth**: Email/password
 
 ## Status: 🔴 BLOCKED
 
