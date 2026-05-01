@@ -1,14 +1,14 @@
 "use client";
 import { apiFetch } from '@/lib/api-client';
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import StatsRow from "./StatsRow";
 import PositionsTable, { Position } from "./PositionsTable";
 import AddPositionModal from "./AddPositionModal";
 import AccountSettings from "./AccountSettings";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
 import { useSettings } from "../../app/settings/SettingsContext";
-import { convertCurrency, formatCurrency } from "@/lib/currency";
+import { convertCurrency } from "@/lib/currency";
 
 export default function DividendDashboard() {
     const { settings } = useSettings();
@@ -31,20 +31,8 @@ export default function DividendDashboard() {
     });
     const [isDeleting, setIsDeleting] = useState(false);
 
-    // Initial Fetch
-    const fetchAccounts = async () => {
-        try {
-            const res = await apiFetch("/api/dividends/accounts");
-            if (res.ok) {
-                const data = await res.json();
-                setAccounts(data);
-            }
-        } catch (err) {
-            console.error("Error fetching accounts:", err);
-        }
-    };
-
-    const fetchData = async () => {
+    // Fetch data from dashboard endpoint (returns stats + positions)
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
             const res = await apiFetch(`/api/dividends/dashboard?currency=${settings.mainCurrency}`);
@@ -52,22 +40,24 @@ export default function DividendDashboard() {
                 const data = await res.json();
                 setStats(data.stats);
                 setPositions(data.positions);
+                
+                // Extract unique accounts from positions
+                const uniqueAccounts = Array.from(
+                    new Set(data.positions.map((p: Position) => p.account))
+                ).sort();
+                setAccounts(uniqueAccounts);
             }
         } catch (err) {
             console.error("Error fetching dividend dashboard:", err);
         } finally {
             setLoading(false);
         }
-    };
+    }, [settings.mainCurrency]);
 
-    useEffect(() => {
-        fetchAccounts();
-    }, []);
-
-    // Fetch data when settings (mainCurrency) or accounts change
+    // Fetch data when settings (mainCurrency) changes
     useEffect(() => {
         fetchData();
-    }, [settings.mainCurrency]);
+    }, [fetchData]);
 
     // Derived state for current tab
     const filteredPositions = useMemo(() => {
