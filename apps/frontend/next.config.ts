@@ -37,30 +37,6 @@ function isPrivateBackendHost(hostname: string): boolean {
   );
 }
 
-function assertProductionBackendUrl(envUrl: string): void {
-  let backendUrl: URL;
-
-  try {
-    backendUrl = new URL(envUrl);
-  } catch {
-    throw new Error(
-      `NEXT_PUBLIC_API_URL must be a valid absolute URL in production (got ${envUrl}).`,
-    );
-  }
-
-  if (!/^https?:$/.test(backendUrl.protocol)) {
-    throw new Error(
-      `NEXT_PUBLIC_API_URL must use http or https in production (got ${envUrl}).`,
-    );
-  }
-
-  if (isPrivateBackendHost(backendUrl.hostname)) {
-    throw new Error(
-      `NEXT_PUBLIC_API_URL must not point at localhost or a private address in production (got ${envUrl}). Vercel cannot reach private addresses.`,
-    );
-  }
-}
-
 const nextConfig: NextConfig = {
   /* config options here */
   eslint: {
@@ -81,20 +57,50 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
-    // Determine the backend base URL. Docker sets it to http://backend:8000
-    // Aspire sets it to a dynamic localhost port.
-    // If not set, fallback to http://127.0.0.1:8000 (suitable for local dev without compose/aspire).
+    // Rewrite /api/* to a backend — this is an opt-in escape hatch for self-hosted backends.
+    // Per architecture directive, the default is for the frontend to talk to Supabase directly
+    // via Server Actions; any `/api/*` call sites that aren't migrated will get a 404 at
+    // runtime (fail-fast behavior, which is desirable).
+    //
+    // Dev environment: falls back to http://127.0.0.1:8000 (Docker Compose or Aspire).
+    // Production/Preview on Vercel: only registers rewrites if NEXT_PUBLIC_API_URL is set
+    // to a valid public URL. If missing/private/localhost, logs a warning and returns empty
+    // rewrites (so /api/* calls will 404 rather than silently failing to reach an invalid URL).
     const isProduction = process.env.NODE_ENV === "production";
     const envUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
 
     if (isProduction) {
       if (!envUrl) {
-        throw new Error(
-          "NEXT_PUBLIC_API_URL is required in production. Set it in Vercel env vars to the public backend URL (e.g. https://api.example.com).",
+        console.warn(
+          "[next.config] NEXT_PUBLIC_API_URL is not set in production. /api/* rewrites are disabled. " +
+          "This is expected: the frontend talks to Supabase directly via Server Actions. " +
+          "If you have unmigrated /api/* call sites, they will return 404 at runtime.",
         );
+        return [];
       }
 
-      assertProductionBackendUrl(envUrl);
+      // Validate that the URL is public before registering rewrites
+      try {
+        const backendUrl = new URL(envUrl);
+        if (isPrivateBackendHost(backendUrl.hostname)) {
+          console.warn(
+            `[next.config] NEXT_PUBLIC_API_URL points to a private address (${envUrl}) in production. ` +
+            "/api/* rewrites are disabled. Vercel cannot reach private addresses. " +
+            "If you need an /api/* proxy, set NEXT_PUBLIC_API_URL to a public URL.",
+          );
+          return [];
+        }
+
+        if (!/^https?:$/.test(backendUrl.protocol)) {
+          throw new Error(
+            `NEXT_PUBLIC_API_URL must use http or https in production (got ${envUrl}).`,
+          );
+        }
+      } catch (err) {
+        throw new Error(
+          `NEXT_PUBLIC_API_URL must be a valid absolute URL in production (got ${envUrl}).`,
+        );
+      }
     }
 
     const backendUrl = envUrl || "http://127.0.0.1:8000";
