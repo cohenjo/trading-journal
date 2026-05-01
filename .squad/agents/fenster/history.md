@@ -350,3 +350,33 @@ All four pages were already functional. Only tests were added. Pages already:
 - All pages already had `apiFetch` with proper auth header forwarding
 - Chart components were already built — just needed proper loading/error wrappers
 - Auth-cookie fixture (PR #124) worked flawlessly for all tests
+## Wave 1 Pages — May 1, 2026
+
+**Context:** First batch of 5 Wave 1 pages (#101-105) brought to functional state with E2E tests.
+
+**Pages Fixed:**
+1. **current-finances** (#101) — Removed unused `netWorth` var. Added E2E test for charts + add-asset CRUD.
+2. **summary** (#102) — Replaced `any` types with `Record<string, unknown>`. Read-only dashboard, just validates rendering.
+3. **cash-flow** (#103) — Removed unused `PlanData` import, added `ProjectionPoint` interface, fixed all `any` types. Tests slider interaction.
+4. **root** (#104) — Already functional, just added E2E test for redirect to /summary.
+5. **settings** (#105) — Fixed `mainCurrency` cast from `as any` to explicit union type. Tests toggle + input CRUD.
+
+**Auth-Cookie Test Pattern:**
+- Import: `import { test, expect } from '../fixtures/auth-cookie'`
+- Fixture usage: `test('...', async ({ authenticatedUser }) => { const { page } = authenticatedUser; ... })`
+- Console error tracking: Filter out `/api/metrics/page-load` 401 (telemetry, tracked in #125)
+- Assertions: page title, h1 text, key UI elements visible, no real console errors
+- CRUD smoke: Test one primary interaction per page (add item, toggle setting, adjust slider)
+
+**Linting Fixes:**
+- Removed unused imports (`PlanData`, `netWorth`)
+- Replaced `any` types with proper interfaces or `Record<string, unknown>`
+- Explicit type casts where needed (`as 'ILS' | 'USD' | 'EUR'` instead of `as any`)
+
+**PR #128:** All 5 pages functional, tests passing, linting clean. Ready for review.
+
+**Reusable Patterns:**
+- Single-commit-per-issue workflow for traceability
+- E2E test files under `apps/frontend/e2e/pages/{page-name}.spec.ts`
+- Filter telemetry 401s in all tests (known non-blocking issue)
+- Keep test logic simple: render → no errors → primary CRUD
