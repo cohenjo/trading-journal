@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Union, Dict, Any
+from uuid import UUID
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -61,8 +62,6 @@ def simulate_plan(
     """
     Run a projection simulation based on the plan, optional finance snapshot, and user settings.
     """
-    from uuid import UUID
-    
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
@@ -105,8 +104,6 @@ def get_plans(
     user_id: UUID = Depends(get_current_user_id)
 ):
     """List all financial plans for the authenticated user's household ordered by last update."""
-    from uuid import UUID
-    
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
@@ -127,8 +124,6 @@ def get_latest_plan(
     """
     Get the most recently updated plan for the authenticated user's household.
     """
-    from uuid import UUID
-    
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
@@ -151,8 +146,6 @@ def get_plan(
     user_id: UUID = Depends(get_current_user_id)
 ):
     """Get a specific financial plan by ID (household-scoped)."""
-    from uuid import UUID
-    
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
@@ -177,8 +170,6 @@ def create_plan(
     """
     Create a new plan for the authenticated user's household.
     """
-    from uuid import UUID
-    
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
@@ -205,8 +196,6 @@ def update_plan(
     """
     Update an existing plan's data (household-scoped).
     """
-    from uuid import UUID
-    
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
@@ -232,8 +221,6 @@ def delete_plan(
     user_id: UUID = Depends(get_current_user_id)
 ):
     """Delete a financial plan by ID (household-scoped)."""
-    from uuid import UUID
-    
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
