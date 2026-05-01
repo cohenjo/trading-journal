@@ -35,9 +35,9 @@ export default function TaxCondorView() {
       
       const data = await res.json();
       setRecommendations(data);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to fetch recommendations", err);
-      setError(err.message || "Failed to fetch recommendations. Please try again.");
+      setError(err instanceof Error ? err.message : "Failed to fetch recommendations. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -59,10 +59,10 @@ export default function OptionsPage() {
       .then((res) => res.json())
       .then((response) => {
         if (Array.isArray(response.data) && response.data.length > 0) {
-          const hist = response.data.filter((p: any) => p.type === "historical");
+          const hist = response.data.filter((p: { type: string }) => p.type === "historical");
           if (hist.length > 0) {
             const avg =
-              hist.reduce((sum: number, p: any) => sum + p.amount, 0) / hist.length;
+              hist.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0) / hist.length;
             setAverage(avg);
           } else {
             setAverage(null);
@@ -70,7 +70,7 @@ export default function OptionsPage() {
         } else {
           setAverage(null);
         }
-        const points: OptionsChartPoint[] = response.data.map((p: any) => ({
+        const points: OptionsChartPoint[] = response.data.map((p: { year: number; amount: number; type: string }) => ({
           time: `${p.year}-01-01`,
           value: p.amount,
           type: p.type,
