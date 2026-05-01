@@ -1,56 +1,11 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { DonutChart } from '@/components/CurrentFinances/DonutChart';
 import { FinanceTabs, FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
 import { useSettings } from '../settings/SettingsContext';
 import { convertCurrency } from '@/lib/currency';
-
-// --- API Helper ---
-async function fetchLatestSnapshot() {
-  try {
-    const res = await apiFetch('/api/finances/latest');
-    if (!res.ok) {
-      if (res.status === 404) return null; // No snapshot yet
-      const errorText = await res.text();
-      throw new Error(`Failed to fetch snapshot: ${res.status} ${errorText}`);
-    }
-    const data = await res.json();
-    // Use the inner 'data' which matches our SnapshotData structure
-    // But check if it has the 'items' key.
-    // The backend stores JSON in 'data' column. 
-    // And FinanceSnapshot model has 'data' field.
-    return data.data;
-  } catch (err) {
-    console.error(err);
-    return null;
-  }
-}
-
-async function saveSnapshot(items: FinanceItem[], metrics: { net_worth: number, total_assets: number, total_liabilities: number, total_savings: number, total_investments: number }) {
-  try {
-    const payload = {
-      items,
-      ...metrics
-    };
-
-    const res = await apiFetch('/api/finances/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(`Failed to save snapshot: ${res.status} ${errorText}`);
-    }
-    return await res.json();
-  } catch (err) {
-    console.error(err);
-    alert('Failed to save changes. Check console.');
-  }
-}
+import { saveFinanceSnapshot, getLatestFinanceSnapshot } from './actions';
 
 
 export default function CurrentFinancesPage() {
@@ -58,12 +13,13 @@ export default function CurrentFinancesPage() {
   const mainCurrency = settings.mainCurrency || 'USD';
   const [items, setItems] = useState<FinanceItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // --- Initial Fetch ---
   useEffect(() => {
-    fetchLatestSnapshot().then(data => {
-      if (data && data.items) {
-        setItems(data.items);
+    getLatestFinanceSnapshot().then(result => {
+      if (result.success && result.data?.items) {
+        setItems(result.data.items);
       }
       setLoading(false);
     });
@@ -79,39 +35,18 @@ export default function CurrentFinancesPage() {
   const totalSavings = savingsItems.reduce((sum, i) => sum + convertCurrency(i.value, i.currency || 'ILS', mainCurrency), 0);
   const totalInvestments = investmentItems.reduce((sum, i) => sum + convertCurrency(i.value, i.currency || 'ILS', mainCurrency), 0);
   const totalEquity = totalSavings + totalInvestments;
-  const totalLiabilities = liabilityItems.reduce((sum, i) => sum + convertCurrency(i.value, i.currency || 'ILS', mainCurrency), 0);
-
-  const totalAssets = totalRealAssets + totalEquity;
-  const netWorth = totalAssets - totalLiabilities;
 
   // Save logic tied to items update
   // We wrap setItems to also trigger save, or use an effect. 
   // Using a handler is safer to control when save happens.
-  const handleUpdateItems = (newItems: FinanceItem[]) => {
+  const handleUpdateItems = useCallback((newItems: FinanceItem[]) => {
     setItems(newItems);
+    setSaveError(null);
 
     const tAssetsItems = newItems.filter(i => i.category === 'Assets');
     const tSavingsItems = newItems.filter(i => i.category === 'Savings');
     const tInvestItems = newItems.filter(i => i.category === 'Investments');
     const tLiabilityItems = newItems.filter(i => i.category === 'Liabilities');
-
-    // NOTE: For 'metrics' we save them in the main currency or base?
-    // Logic: The snapshot store should probably be agnostic or we store it 'as is' and convert on read.
-    // But the 'metrics' fields are summations.
-    // Let's store them as Main Currency values at the time of save, OR usage consistency.
-    // Given we use these for "Net Worth History" which might not convert retroactively if rates change,
-    // it is safer to store the SUM in the users Main Currency at that time. 
-    // OR store them in Base ILS if we want consistency. 
-    // The current flow doesn't check 'mainCurrency' for save logic (user context).
-    // Let's save the calculated totals (which are now in Main Currency).
-    // But wait: if user switches currency, history chart will jump!
-    // Ideally history is normalized to a Base currency (e.g. ILS or USD).
-    // Since backend doesn't seem to have multi-currency history support yet,
-    // let's stick to saving what the user sees (Main Currency) and assume they don't flip flop often OR backend handles it.
-    // PROPOSAL: Store metrics in base currency (ILS or USD) always?
-    // Let's assume the backend expects raw values and `PlanService` converts them.
-    // Actually `saveSnapshot` just dumps JSON.
-    // Let's simply save the converted totals so the snapshot matches the dashboard view.
 
     const tRealAssets = tAssetsItems.reduce((sum, i) => sum + convertCurrency(i.value, i.currency || 'ILS', mainCurrency), 0);
     const tSavings = tSavingsItems.reduce((sum, i) => sum + convertCurrency(i.value, i.currency || 'ILS', mainCurrency), 0);
@@ -119,14 +54,18 @@ export default function CurrentFinancesPage() {
     const tLiabilities = tLiabilityItems.reduce((sum, i) => sum + convertCurrency(i.value, i.currency || 'ILS', mainCurrency), 0);
     const tTotalAssets = tRealAssets + tSavings + tInvestments;
 
-    saveSnapshot(newItems, {
+    saveFinanceSnapshot(newItems, {
       net_worth: tTotalAssets - tLiabilities,
       total_assets: tTotalAssets,
       total_liabilities: tLiabilities,
       total_savings: tSavings,
-      total_investments: tInvestments
+      total_investments: tInvestments,
+    }).then(result => {
+      if (!result.success) {
+        setSaveError(result.error);
+      }
     });
-  };
+  }, [mainCurrency]);
 
 
   // Chart Data Preparation 
@@ -186,6 +125,23 @@ export default function CurrentFinancesPage() {
           </div>
           {/* Could add date selector here later */}
         </header>
+
+        {saveError && (
+          <div
+            role="alert"
+            className="mb-4 flex items-start gap-3 rounded-lg border border-red-500/40 bg-red-950/50 px-4 py-3 text-sm text-red-300"
+          >
+            <span className="mt-0.5 shrink-0">⚠️</span>
+            <span>{saveError}</span>
+            <button
+              onClick={() => setSaveError(null)}
+              aria-label="Dismiss error"
+              className="ml-auto shrink-0 text-red-400 hover:text-red-200"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Compact Charts Row */}
         <div className="flex flex-col md:flex-row gap-4 mb-8 justify-between items-center bg-slate-900/30 p-4 rounded-xl border border-slate-800/50 overflow-x-auto">
