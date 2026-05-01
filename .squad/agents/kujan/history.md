@@ -8,6 +8,7 @@
 
 
 ## Learnings
+- 2026-05-01T19:24:00+03:00 — When `main` is checked out in another worktree, use `git push origin HEAD:main` from the active branch to fast-forward the remote `main` without switching worktrees.
 
 📌 **Startup & Access Runbook (2026-04-30 — vercel-06-startup-and-access.md):**
 - **Critical gotcha:** `vercel pull` writes to `.vercel/.env.development.local` but `next dev` only reads from the project root. Must `cp .vercel/.env.development.local .env.development.local` before `npm run dev` or the app 500s with "Your project's URL and Key are required".

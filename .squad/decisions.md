@@ -4451,3 +4451,31 @@ supabase db push --linked  # Against dev first; verify; then prod
 - [ ] E2E test: multi-household user verifies isolation across all 8 endpoints
 
 ---
+
+# Decision: Main Sync & Workflow Cleanup (2026-05-01)
+
+**Date:** 2026-05-01T19:24:00+03:00  
+**Author:** Kujan (DevOps/Platform)  
+**Status:** Completed
+
+## Summary
+
+Completed main branch sync and CI workflow cleanup batch:
+
+1. **Removed obsolete workflows:**
+   - `copilot-setup-steps.yml` (superseded by updated team setup)
+   - `test-rls.yml` (replaced by integrated RLS tests in pr-supabase-migrations.yml)
+
+2. **Rebased `squad/scratch-main-worktree` onto `origin/main`:**
+   - Resolved one conflict in `.squad/history.md` via union merge (both team logs preserved)
+   - Worktree branch now identical to origin/main
+
+3. **Fast-forward push to origin/main:**
+   - 5 new commits merged (prior workflow audit + cleanup)
+   - No conflicts, clean linear history
+
+## Branch Status
+
+`squad/scratch-main-worktree` is now in sync with `origin/main` and can be retired once worktree checkout is no longer needed.
+
+---
