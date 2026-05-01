@@ -10,6 +10,7 @@ export default function TaxCondorView() {
   const [budget, setBudget] = useState(2000);
   const [useLiveData, setUseLiveData] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<
     TaxCondorRecommendation[]
   >([]);
@@ -17,6 +18,7 @@ export default function TaxCondorView() {
 
   const fetchRecommendations = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await apiFetch(
         "/api/tax-condor/recommend",
@@ -26,10 +28,16 @@ export default function TaxCondorView() {
           body: JSON.stringify({ symbol, budget, use_live_data: useLiveData }),
         }
       );
+      
+      if (!res.ok) {
+        throw new Error(`Failed to fetch recommendations: ${res.status}`);
+      }
+      
       const data = await res.json();
       setRecommendations(data);
-    } catch (error) {
-      console.error("Failed to fetch recommendations", error);
+    } catch (err) {
+      console.error("Failed to fetch recommendations", err);
+      setError(err instanceof Error ? err.message : "Failed to fetch recommendations. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -80,6 +88,12 @@ export default function TaxCondorView() {
           {loading ? "Analyzing..." : "Get Recommendations"}
         </button>
       </div>
+
+      {error && (
+        <div className="bg-red-900/50 border border-red-800 text-red-200 p-4 rounded mb-6">
+          {error}
+        </div>
+      )}
 
       <div className="space-y-6">
         {recommendations.map((rec, idx) => (

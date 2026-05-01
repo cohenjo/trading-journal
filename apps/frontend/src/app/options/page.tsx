@@ -12,6 +12,8 @@ export default function OptionsPage() {
   const [historicalData, setHistoricalData] = useState<OptionsRecord[]>([]);
   const [chartData, setChartData] = useState<OptionsChartPoint[]>([]);
   const [average, setAverage] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const params: OptionsProjectionParams = useMemo(
     () => ({
@@ -31,12 +33,19 @@ export default function OptionsPage() {
   };
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     apiFetch("/api/options")
       .then((res) => res.json())
       .then((data) => {
         setHistoricalData(data);
+        setLoading(false);
       })
-      .catch((err) => console.error("Failed to fetch options income:", err));
+      .catch((err) => {
+        console.error("Failed to fetch options income:", err);
+        setError("Failed to load options data. Please try again.");
+        setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -50,10 +59,10 @@ export default function OptionsPage() {
       .then((res) => res.json())
       .then((response) => {
         if (Array.isArray(response.data) && response.data.length > 0) {
-          const hist = response.data.filter((p: any) => p.type === "historical");
+          const hist = response.data.filter((p: { type: string }) => p.type === "historical");
           if (hist.length > 0) {
             const avg =
-              hist.reduce((sum: number, p: any) => sum + p.amount, 0) / hist.length;
+              hist.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0) / hist.length;
             setAverage(avg);
           } else {
             setAverage(null);
@@ -61,7 +70,7 @@ export default function OptionsPage() {
         } else {
           setAverage(null);
         }
-        const points: OptionsChartPoint[] = response.data.map((p: any) => ({
+        const points: OptionsChartPoint[] = response.data.map((p: { year: number; amount: number; type: string }) => ({
           time: `${p.year}-01-01`,
           value: p.amount,
           type: p.type,
@@ -91,7 +100,21 @@ export default function OptionsPage() {
     <div className="p-6 max-w-7xl mx-auto">
       <h1 className="text-3xl font-bold mb-6 text-slate-100">Options Income Projections</h1>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      {error && (
+        <div className="bg-red-900/50 border border-red-800 text-red-200 p-4 rounded mb-6">
+          {error}
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-slate-400 animate-pulse">Loading options data...</div>
+        </div>
+      )}
+
+      {!loading && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="lg:col-span-2">
           <div className="bg-slate-900 p-4 rounded-lg border border-slate-800 mb-6">
             <h3 className="text-lg font-semibold mb-4 text-slate-200">Projection Chart</h3>
@@ -108,6 +131,8 @@ export default function OptionsPage() {
           <OptionsHistory initialData={historicalData} onSave={handleSaveHistory} />
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
