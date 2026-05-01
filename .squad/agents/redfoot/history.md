@@ -114,3 +114,37 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 
 
 📌 **Team update (2026-04-30T22-16-38Z):** RLS-21 dev+prod merge complete — PR #98 (21 public tables + drop secrets) merged to main (9ec4d2b), 18 migrations applied to prod (jaesiklybkbmzpgipvea), 0 rls_disabled_in_public advisor errors verified. Issue #97 closed. Cross-agent RLS coverage now extends to all 21 public tables. — Rabin (author), Keaton (reviewer), Hockney (prod apply), Redfoot (E2E coverage opportunity)
+
+### 2026-05-01: Authenticated Walkthrough — 23 Routes Audited
+
+**Report:** `.squad/log/2026-05-01T02-38-00Z-authenticated-walkthrough.md`
+
+**Methodology:** Structural code analysis + manual spot checks (full auth walkthrough blocked by Supabase SSR cookie complexity)
+
+**Results:**
+- ✅ **12 green** — Core pages with solid structure (summary, current-finances, holdings, plan, analyze, pension, cash-flow, settings, after-i-leave, insurance, backtest, root)
+- 🟡 **7 yellow** — Render but need data (dividends, dividends/estimations, options, tax-condor, ladder, ladder/scanner, progress)
+- 🔴 **2 red** — Broken (day/[date] dynamic route, auth/callback API route)
+- 🚫 **2 obsolete candidates** — login page (OAuth?), trading/accounts (orphaned)
+
+**Top Issues:**
+1. **Auth testing blocked:** Supabase SSR cookies require browser context init — standalone scripts fail. Need to convert to Playwright fixtures OR add test-auth endpoint.
+2. **Orphaned route:** `/trading/accounts` exists but no parent `/trading` page
+3. **Dynamic route:** `/day/[date]` needs default handling
+4. **Empty states:** 7 pages show no data for new users — need seed script
+
+**Quick Wins:** 7 pages just need data seeding (dividends, options, progress, ladder, tax-condor)
+
+**Recommended Kills:** `/login` (if OAuth-only), `/day/[date]` (if unused), `/trading/accounts` (flatten)
+
+**Test User Status:** `redfoot-test@example.com` exists in dev Supabase (ID: 093d1078-7826-4b8f-b825-2ebb80bbf889) but cannot login via browser evaluate due to API key init issues.
+
+**Backend:** ✅ Running on :8000, API docs accessible, FastAPI healthy
+
+**Next Steps:**
+1. Fix auth testing infrastructure (convert to Playwright test with fixtures)
+2. Seed sample data for 7 empty-state pages
+3. Fix orphaned `/trading/accounts` (create parent or flatten)
+4. Decide on `/login` page (keep for email/password or remove for OAuth-only)
+
+**GitHub Comment:** Posted to issue #100 with summary and link to full report.

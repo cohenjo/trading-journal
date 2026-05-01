@@ -207,7 +207,7 @@ export default function SettingsPage() {
                             <div className="flex items-center gap-4">
                                 <CurrencySelector
                                     value={settings.mainCurrency || 'ILS'}
-                                    onChange={c => updateSettings({ mainCurrency: c as any })}
+                                    onChange={c => updateSettings({ mainCurrency: c as 'ILS' | 'USD' | 'EUR' })}
                                     className="w-40"
                                 />
                                 <p className="text-sm text-slate-500">

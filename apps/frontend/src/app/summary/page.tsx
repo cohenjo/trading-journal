@@ -63,9 +63,9 @@ export default function SummaryPage() {
         // Merge Data
         // Find range of years
         const years = new Set<number>();
-        ladderSeries.forEach((d: any) => years.add(new Date(d.date).getFullYear()));
-        divData.forEach((d: any) => years.add(d.year));
-        optData.forEach((d: any) => years.add(d.year));
+        ladderSeries.forEach((d: Record<string, unknown>) => years.add(new Date(d.date as string).getFullYear()));
+        divData.forEach((d: Record<string, unknown>) => years.add(d.year as number));
+        optData.forEach((d: Record<string, unknown>) => years.add(d.year as number));
 
         const maxYear = Math.min(divParams.final_year, optParams.final_year);
         const sortedYears = Array.from(years)
@@ -73,9 +73,9 @@ export default function SummaryPage() {
           .filter((y) => y <= maxYear);
 
         // Create map for quick lookup
-        const ladderMap = new Map(ladderSeries.map((d: any) => [new Date(d.date).getFullYear(), d.value]));
-        const divMap = new Map(divData.map((d: any) => [d.year, d.amount]));
-        const optMap = new Map(optData.map((d: any) => [d.year, d.amount]));
+        const ladderMap = new Map(ladderSeries.map((d: Record<string, unknown>) => [new Date(d.date as string).getFullYear(), d.value as number]));
+        const divMap = new Map(divData.map((d: Record<string, unknown>) => [d.year as number, d.amount as number]));
+        const optMap = new Map(optData.map((d: Record<string, unknown>) => [d.year as number, d.amount as number]));
 
         const merged: StackedChartData[] = sortedYears.map(year => ({
           time: `${year}-01-01`,

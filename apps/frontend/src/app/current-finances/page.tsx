@@ -82,7 +82,6 @@ export default function CurrentFinancesPage() {
   const totalLiabilities = liabilityItems.reduce((sum, i) => sum + convertCurrency(i.value, i.currency || 'ILS', mainCurrency), 0);
 
   const totalAssets = totalRealAssets + totalEquity;
-  const netWorth = totalAssets - totalLiabilities;
 
   // Save logic tied to items update
   // We wrap setItems to also trigger save, or use an effect. 
