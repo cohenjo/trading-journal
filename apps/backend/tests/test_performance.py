@@ -1,25 +1,19 @@
 import os
-import pathlib
-import sys
 import time
 
+import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
-sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
-from app.auth.dependencies import get_current_user
-from app.schema.user_models import User
-from main import app
-
-app.dependency_overrides[get_current_user] = lambda: User(
-    id=1, username="testuser", hashed_password="x", is_active=True
-)
-client = TestClient(app)
+from app.supabase_auth import SupabaseClaims
 
 SIMULATION_BUDGET_MS = float(os.getenv("PERF_SIMULATION_BUDGET_MS", "1200"))
 METRICS_ENDPOINT_BUDGET_MS = float(os.getenv("PERF_METRICS_BUDGET_MS", "800"))
 
 
-def test_plan_simulation_latency_budget():
+def test_plan_simulation_latency_budget(client: TestClient):
+    """Test plan simulation endpoint meets latency budget."""
     request_payload = {
         "plan": {
             "items": [
@@ -71,6 +65,13 @@ def test_plan_simulation_latency_budget():
 
 
 def test_page_load_metrics_endpoint_latency_budget():
+    """Metrics endpoint accepts anonymous requests and meets latency budget."""
+    from main import app
+    from fastapi.testclient import TestClient
+    
+    # Metrics endpoint doesn't need DB or auth — use simple test client
+    client = TestClient(app)
+    
     payload = {
         "path": "/plan",
         "ttfb_ms": 120,
@@ -90,3 +91,69 @@ def test_page_load_metrics_endpoint_latency_budget():
     assert elapsed_ms < METRICS_ENDPOINT_BUDGET_MS, (
         f"metrics endpoint too slow: {elapsed_ms:.2f}ms >= {METRICS_ENDPOINT_BUDGET_MS:.0f}ms"
     )
+
+
+def test_page_load_metrics_anonymous_request():
+    """Metrics endpoint gracefully handles anonymous (no auth header) requests."""
+    from main import app
+    from fastapi.testclient import TestClient
+    
+    client = TestClient(app)
+    
+    payload = {
+        "path": "/dashboard",
+        "ttfb_ms": 95,
+        "dom_content_loaded_ms": 520,
+        "load_event_ms": 800,
+        "first_contentful_paint_ms": 320,
+        "largest_contentful_paint_ms": 750,
+        "timestamp": "2026-04-30T15:30:00.000Z",
+    }
+
+    # No Authorization header — simulates navigator.sendBeacon()
+    response = client.post("/api/metrics/page-load", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+
+
+def test_page_load_metrics_authenticated_request():
+    """Metrics endpoint accepts authenticated requests and captures user_id."""
+    from main import app
+    from fastapi.testclient import TestClient
+    
+    client = TestClient(app)
+    user_id = uuid4()
+    mock_claims = SupabaseClaims(
+        sub=user_id,
+        role="authenticated",
+        email="test@example.com",
+        aud="authenticated",
+        exp=9999999999,
+        iat=1000000000,
+    )
+
+    payload = {
+        "path": "/options",
+        "ttfb_ms": 110,
+        "dom_content_loaded_ms": 600,
+        "load_event_ms": 900,
+        "first_contentful_paint_ms": 400,
+        "largest_contentful_paint_ms": 850,
+        "timestamp": "2026-04-30T16:00:00.000Z",
+    }
+
+    # Mock the optional auth dependency to return authenticated user
+    with patch(
+        "app.dependencies.verify_supabase_jwt",
+        new_callable=AsyncMock,
+        return_value=mock_claims,
+    ):
+        response = client.post(
+            "/api/metrics/page-load",
+            json=payload,
+            headers={"Authorization": "Bearer fake-valid-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"

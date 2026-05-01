@@ -126,6 +126,61 @@ async def get_current_user_id(
 
 
 # ---------------------------------------------------------------------------
+# Optional authentication (for telemetry and other public-ish endpoints)
+# ---------------------------------------------------------------------------
+
+
+async def get_current_user_optional(
+    request: Request,
+    settings: SupabaseAuthSettings = Depends(_get_settings),
+) -> SupabaseClaims | None:
+    """FastAPI dependency that validates auth if present, returns None if absent.
+
+    Use this for endpoints that gracefully degrade when anonymous, such as
+    telemetry that logs user_id when available but still accepts anonymous calls.
+
+    Returns:
+        Validated :class:`~app.supabase_auth.SupabaseClaims` if bearer token
+        is present and valid, ``None`` otherwise.
+
+    Example::
+
+        @router.post("/api/metrics/page-load")
+        async def page_load_metrics(
+            claims: SupabaseClaims | None = Depends(get_current_user_optional),
+            payload: PageLoadPayload,
+        ):
+            user_id = claims.sub if claims else None
+            log_metric(payload, user_id=user_id)
+    """
+    auth_header: str | None = request.headers.get("Authorization")
+    if not auth_header:
+        return None
+
+    parts = auth_header.split(" ", maxsplit=1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        logger.debug(
+            "Malformed Authorization header in optional context — path=%s",
+            request.url.path,
+        )
+        return None
+
+    token = parts[1].strip()
+    if not token:
+        return None
+
+    cache: JWKSCache | None = get_jwks_cache()
+    try:
+        return await verify_supabase_jwt(token, settings, cache)
+    except HTTPException:
+        # Token invalid/expired — degrade to anonymous
+        logger.debug(
+            "Invalid token in optional auth context — path=%s", request.url.path
+        )
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Role-based access control
 # ---------------------------------------------------------------------------
 

@@ -206,7 +206,8 @@ app.include_router(trading.router, dependencies=auth_dep)
 app.include_router(pension.router, dependencies=auth_dep)
 app.include_router(analyze.router, dependencies=auth_dep)
 app.include_router(insurance.router, dependencies=auth_dep)
-app.include_router(telemetry_metrics.router, dependencies=auth_dep)
+# Metrics router handles optional auth internally (telemetry must work with sendBeacon)
+app.include_router(telemetry_metrics.router)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True)
