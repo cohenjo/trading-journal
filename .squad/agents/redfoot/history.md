@@ -153,3 +153,5 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 4. RLS isolation testing with User B (2nd test user)
 
 **Notes**: This was unauthenticated smoke testing. All pages render but may show empty states without auth. Authenticated functional testing is the next phase.
+
+📌 Team update (2026-05-01T19:02:15+03:00): Platform workflows audit — removed 6 squad-* workflows, kept core CI. Flagged test-rls.yml for review. — decided by kujan
