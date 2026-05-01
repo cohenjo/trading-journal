@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from typing import List, Dict, Any
+from typing import Dict, Any
 from uuid import UUID
 from sqlmodel import Session
 
@@ -7,10 +7,7 @@ from app.dal.database import get_session
 from app.dependencies import get_current_user_id
 from app.schema.dividend_models import (
     DividendPosition,
-    DividendPositionCreate,
-    DividendRecord, # Legacy
-    DividendProjectionParams, # Legacy
-    DividendProjectionResponse # Legacy
+    DividendPositionCreate # Legacy
 )
 from app.services import dividend_service
 from app.services.household_service import get_user_household_id
