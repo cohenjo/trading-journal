@@ -2,7 +2,7 @@
 
 ## Overview
 
-This directory contains PR validation workflows. **Vercel's git integration handles all deployments automatically** — no deploy workflows are needed here.
+This directory contains PR validation, backup, and Squad routing workflows. **Vercel's git integration handles all application deployments automatically** — no GitHub Actions deploy/release workflows are needed here.
 
 | File | Trigger | Purpose |
 |---|---|---|
@@ -10,7 +10,17 @@ This directory contains PR validation workflows. **Vercel's git integration hand
 | `pr-backend.yml` | PR touching `apps/backend/**` | Lint (ruff), typecheck (mypy if configured), tests (pytest) |
 | `pr-supabase-migrations.yml` | PR touching `supabase/migrations/**` | Lint migrations, dry-run on shadow Postgres |
 | `branch-protection-status.yml` | PR to `main` | Documents required branch protection checks |
-| `squad-*.yml` | Various | Squad agent infra — **do not modify** |
+| `nightly-backup.yml` | Nightly cron + manual | Encrypted Supabase/Postgres backup artifact and failure issue |
+| `test-rls.yml` | Squad branches + PRs to `main` | Informational pgTAP/RLS regression suite (`continue-on-error`) |
+| `squad-heartbeat.yml` | Issues/PR lifecycle + manual | Squad/Ralph triage heartbeat and Copilot auto-assignment |
+| `squad-issue-assign.yml` | Issue labeled `squad:*` | Comment/assign workflow for Squad-routed issues |
+| `squad-label-enforce.yml` | Issue labeled | Enforces mutually exclusive `go:`, `release:`, `type:`, and `priority:` labels |
+| `squad-triage.yml` | Issue labeled `squad` | Routes new Squad inbox issues to the best agent/member |
+| `sync-squad-labels.yml` | Squad team file changes + manual | Syncs GitHub labels from the Squad roster |
+
+## Removed Squad Template Workflows
+
+The generic Squad template workflows for package CI/release/docs/preview promotion were removed because this repository is the trading-journal app, not the Squad CLI/package repository. Application validation lives in the PR workflows above, and production/preview deploys are owned by Vercel's git integration.
 
 ---
 
