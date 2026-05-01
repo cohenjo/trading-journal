@@ -1,6 +1,7 @@
 from decimal import Decimal
 from typing import List, Literal, Optional
 from datetime import datetime
+from uuid import UUID
 from pydantic import BaseModel
 from sqlalchemy import Column, Numeric
 from sqlmodel import SQLModel, Field
@@ -19,6 +20,7 @@ class DividendAccount(SQLModel, table=True):
     __tablename__ = "dividend_accounts"
     name: str = Field(primary_key=True)
     linked_id: Optional[str] = Field(default=None) # Link to FinanceItem.id
+    household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
 
 class DividendTickerData(SQLModel, table=True):
     __tablename__ = "dividend_ticker_data"
