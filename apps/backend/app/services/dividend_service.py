@@ -2,6 +2,7 @@ import time
 import yfinance as yf
 from datetime import datetime, timedelta
 from typing import List, Dict, Any
+from uuid import UUID
 from sqlmodel import Session, select
 from app.schema.dividend_models import (
     DividendPosition,
@@ -30,22 +31,25 @@ enrich_duration_histogram = meter.create_histogram(
     description="Duration of position enrichment"
 )
 
-def get_all_positions(db: Session, account: str = None) -> List[DividendPosition]:
+def get_all_positions(db: Session, household_id: UUID = None, account: str = None) -> List[DividendPosition]:
     statement = select(DividendPosition).order_by(DividendPosition.ticker)
+    if household_id:
+        statement = statement.where(DividendPosition.household_id == household_id)
     if account:
         statement = statement.where(DividendPosition.account == account)
     return db.exec(statement).all()
 
-def create_position(db: Session, position: DividendPositionCreate) -> DividendPosition:
+def create_position(db: Session, position: DividendPositionCreate, household_id: UUID) -> DividendPosition:
     db_position = DividendPosition.from_orm(position)
+    db_position.household_id = household_id
     db.add(db_position)
     db.commit()
     db.refresh(db_position)
     return db_position
 
-def update_position(db: Session, position_id: int, updates: DividendPositionCreate) -> DividendPosition:
+def update_position(db: Session, position_id: int, updates: DividendPositionCreate, household_id: UUID) -> DividendPosition:
     db_position = db.get(DividendPosition, position_id)
-    if not db_position:
+    if not db_position or db_position.household_id != household_id:
         return None
     
     db_position.account = updates.account
@@ -56,12 +60,13 @@ def update_position(db: Session, position_id: int, updates: DividendPositionCrea
     db.refresh(db_position)
     return db_position
 
-def delete_position(db: Session, position_id: int) -> bool:
+def delete_position(db: Session, position_id: int, household_id: UUID) -> bool:
     db_position = db.get(DividendPosition, position_id)
-    if not db_position:
+    if not db_position or db_position.household_id != household_id:
         return False
     db.delete(db_position)
     db.commit()
+    return True
     return True
 
 def calculate_cagr(start_val: float, end_val: float, years: int) -> float:

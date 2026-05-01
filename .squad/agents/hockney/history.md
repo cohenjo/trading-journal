@@ -219,3 +219,65 @@ Full CRUD API for insurance policies at `/api/insurance` — list (with optional
 
 
 📌 **Team update (2026-04-30T22-16-38Z):** RLS-21 dev+prod merge complete — PR #98 (21 public tables + drop secrets) merged to main (9ec4d2b), 18 migrations applied to prod (jaesiklybkbmzpgipvea), 0 rls_disabled_in_public advisor errors verified. Issue #97 closed. Cross-agent RLS coverage now extends to all 21 public tables. — Rabin (author), Keaton (reviewer), Hockney (prod apply), Redfoot (E2E coverage opportunity)
+
+### 2026-05-01: Wave 2 Narrow Scope - Insurance + Pension User Scoping (PR #123)
+
+**Context:** Wave 2 backend user-scoping sprint - narrowed to 2 pages (insurance + pension) after prior attempt lost work to branch switching with 3x scope.
+
+**Work Completed:**
+
+1. **Insurance API (#108) - 30 minutes** ✅
+   - Added `user_id UUID` column to `insurance_policies` table (FK to auth.users)
+   - RLS policies: SELECT/INSERT/UPDATE/DELETE WHERE user_id = auth.uid()
+   - Updated all routes (GET/POST/PUT/DELETE) to require `Depends(get_current_user_id)`
+   - Filter queries by authenticated user's user_id
+   - Updated `InsurancePolicy` model
+
+2. **Pension API (#109) - 1.5 hours** ✅
+   - Added `user_id UUID` column to `finance_snapshots` table
+   - Changed PK from `(date)` to `(user_id, date)` via partial unique index
+   - RLS policies: SELECT/INSERT/UPDATE/DELETE WHERE user_id = auth.uid()
+   - Updated all routes (upload, reports, dashboard, delete) to require authentication
+   - Updated `FinanceSnapshot` model with composite PK
+
+**Migration:** `20260501022922_wave2_insurance_pension_user_scoping.sql`
+- ✅ Dev (zvbwgxdgxwgduhhzdwjj): 2026-05-01 02:35 UTC
+- ✅ Prod (jaesiklybkbmzpgipvea): 2026-05-01 02:36 UTC
+- Idempotent: DROP POLICY IF EXISTS, ADD COLUMN IF NOT EXISTS
+
+**Seed Data:** `.squad/log/20260501023500-hockney-wave2-narrow-seed.sql`
+- Test user: redfoot-test@example.com (093d1078-7826-4b8f-b825-2ebb80bbf889)
+- 2 insurance policies + 1 finance snapshot with 2 pension items (₪770K net worth)
+
+**Branch:** `squad/wave2-insurance-pension-user-scoping`
+
+**Learnings:**
+
+1. **Auth Dependency Path (PR #122 context):**
+   - New path: `app.dependencies.get_current_user_id` (not `app.auth.dependencies`)
+   - Uses Supabase JWT validation via JWKS
+   - This is the correct import for all new user-scoped endpoints
+
+2. **Finance Snapshots PK Migration Pattern:**
+   - Cannot use `ALTER TABLE ADD PRIMARY KEY` when existing rows have NULL values
+   - Solution: Partial unique index `CREATE UNIQUE INDEX ... (user_id, date) WHERE user_id IS NOT NULL`
+   - Allows new user-scoped rows while legacy NULL rows remain (inaccessible via RLS)
+   - Follow-up ticket needed to migrate/cleanup legacy rows
+
+3. **What Failed Last Round:**
+   - Branch switching lost uncommitted work
+   - Scope was 3x larger (all 4 pages at once)
+   - Didn't narrow focus early enough
+
+4. **What Worked This Round:**
+   - Narrow scope: Only 2 pages (insurance + pension)
+   - Clear classification from prior findings
+   - Dual-apply migrations immediately (dev + prod)
+   - Seed data verification before claiming success
+   - Early git commit to preserve work
+
+**Deferred Work (per coordinator directive):**
+- Holdings API (#119): Mock data → DB migration - blocked behind architectural rework
+- Dividends API (#120): XLSX → DB migration - blocked behind architectural rework
+
+📌 **Team update (2026-05-01):** Wave 2 narrow scope shipped — Insurance + pension APIs now user-scoped with RLS enforcement. PR #123 ready for review. Migrations dual-applied to dev+prod. Seed data verified. Deferred holdings/dividends to avoid blocking on unrelated architecture decisions.
