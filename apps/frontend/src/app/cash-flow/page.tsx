@@ -3,7 +3,6 @@ import { apiFetch } from '@/lib/api-client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '../settings/SettingsContext';
 import { CashFlowSankey } from '@/components/CashFlow/CashFlowSankey';
-import { PlanData } from '@/components/Plan/types';
 
 // Fetch Utilities (Duplicated from PlanPage for now)
 async function fetchLatestPlan() {
@@ -24,11 +23,22 @@ async function fetchFinances() {
     };
 }
 
+interface ProjectionPoint {
+    year: number;
+    time: string;
+    value: number;
+    income?: number;
+    withdrawals?: number;
+    expenses?: number;
+    tax_paid?: number;
+    [key: string]: unknown;
+}
+
 export default function CashFlowPage() {
     const { settings } = useSettings();
-    const [plan, setPlan] = useState<any>(null);
-    const [finances, setFinances] = useState<any>(null);
-    const [projection, setProjection] = useState<any[]>([]);
+    const [plan, setPlan] = useState<Record<string, unknown> | null>(null);
+    const [finances, setFinances] = useState<Record<string, unknown> | null>(null);
+    const [projection, setProjection] = useState<ProjectionPoint[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
@@ -65,16 +75,17 @@ export default function CashFlowPage() {
                     return res.json();
                 })
                 .then(data => {
-                    const formatted = data.map((p: any) => ({
+                    const formatted = data.map((p: Record<string, unknown>) => ({
+                        year: p.year as number,
                         time: `${p.year}-01-01`,
-                        value: p.net_worth,
+                        value: p.net_worth as number,
                         ...p
                     }));
                     setProjection(formatted);
                     if (formatted.length > 0) {
                         // If selected year is invalid, reset to start
                         setSelectedYear(prev => {
-                            const exists = formatted.find((p: any) => p.year === prev);
+                            const exists = formatted.find((p: ProjectionPoint) => p.year === prev);
                             return exists ? prev : formatted[0].year;
                         });
                     }
