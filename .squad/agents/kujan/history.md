@@ -8,6 +8,7 @@
 
 
 ## Learnings
+- 2026-05-01T19:30:41+03:00 — Silent localhost fallbacks in production-facing rewrites hide deployment topology bugs; production config should validate required public URLs at build/start and fail loudly. Backend deployment topology remains unresolved: user must choose public FastAPI deployment or porting API endpoints to Next.js route handlers.
 - 2026-05-01T19:24:00+03:00 — When `main` is checked out in another worktree, use `git push origin HEAD:main` from the active branch to fast-forward the remote `main` without switching worktrees.
 
 📌 **Startup & Access Runbook (2026-04-30 — vercel-06-startup-and-access.md):**
