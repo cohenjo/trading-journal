@@ -2927,3 +2927,98 @@ Attempted authenticated walkthrough of 21 pages using `apps/frontend/e2e/fixture
 
 ---
 
+
+## 2026-05-01 — household_id RLS injection sweep (#134, #135, #136)
+
+**Decision:** Consolidated multi-sweep fix for household_id Row-Level Security (RLS) injection pattern. Root cause: backend endpoints omitted `household_id` when writing to tables with RLS policies requiring `household_id NOT NULL`, causing silent RLS rejections (writes appeared to succeed but rows were invisible to users).
+
+### Root Cause & Wave2 Correction
+
+- **Original Bug (#134):** `finance_snapshots` had RLS requiring `household_id NOT NULL`, but API didn't inject it. Migration 20260501022922 (wave2) incorrectly used `user_id` with user-scoped RLS instead of canonical `household_id` pattern.
+- **Corrected in #134:** Dropped wave2's `user_id` column + user-scoped policies. Backfilled `household_id` from `user_profile.default_household_id`. Applied composite PK `(household_id, date)` with idempotent migration. Reused household-scoped RLS from 20260430160200.
+- **Lesson:** Wave2 set a bad pattern. Always use `household_id` + `is_household_member()` policies for multi-tenant tables.
+
+### Canonical household_id Injection Pattern (Reusable)
+
+**All household-scoped API endpoints must follow this pattern:**
+
+1. **Dependency injection** — Get user's household_id:
+   ```python
+   from app.dependencies import get_current_user_id
+   from app.services.household_service import get_user_household_id
+   
+   @router.get("/resource")
+   def list_resources(
+       db: Session = Depends(get_session),
+       user_id: UUID = Depends(get_current_user_id)
+   ):
+       household_id = get_user_household_id(db, user_id)
+       if not household_id:
+           raise HTTPException(status_code=403, detail="User not associated with any household")
+       statement = select(Resource).where(Resource.household_id == household_id)
+   ```
+
+2. **Write operations** — Always set `household_id` on INSERT; always filter by `household_id` on UPDATE/DELETE
+3. **Read operations** — Always filter SELECT by `household_id` (defense in depth; don't rely on RLS alone)
+4. **Schema** — Use composite PKs: `(household_id, ...)` to ensure household isolation
+
+**Reference implementations:** `dividends.py`, `holdings.py`, `finances.py` (PR #129 + #134)
+
+### Sweep 1: Insurance, Pension, Plans (#135 — Fenster)
+
+| Endpoint | Before | After | Migration | Status |
+|---|---|---|---|---|
+| `insurance.py` (3 writes, 1 read) | `user_id` | `household_id` via `get_user_household_id()` | `20260501120000_align_insurance_policies_household_id.sql` | ✅ |
+| `pension.py` (2 writes, 2 reads) | `user_id` on snapshots | `household_id` on snapshots | None (finance_snapshots fixed in #134) | ✅ |
+| `plans.py` (4 writes, 3 reads) | **NO scoping** (security gap) | Full `household_id` injection | None (column already existed) | ✅ Security gap closed |
+
+- **plans.py gap:** Endpoints had no household_id filtering at all — users could read/modify other households' plans. Fixed by adding `household_id` dependency injection to all 7 endpoints.
+
+### Sweep 2: Dividend Accounts, Trading (#136 — Hockney)
+
+| Endpoint | Before | After | Migration | Status |
+|---|---|---|---|---|
+| `dividend_accounts.py` (3 writes) | No household scoping | `household_id` via `get_user_household_id()` | None (column existed) | ✅ |
+| `trading.py` (write + read) | No household scoping | `household_id` passed to service layer | None | ✅ |
+| `bonds.py` | In-memory mock data only | No change | N/A | ✅ (no-op) |
+
+- **trading_service.py:** Updated `sync_account`, `sync_ibkr`, `sync_schwab`, `sync_to_dividends`, `_update_finance_snapshot` to accept `household_id: UUID` parameter and inject it on all writes.
+
+### Alignment Summary
+
+- **8 endpoints aligned** to canonical household_id pattern: insurance (3), pension (2), plans (3→4), dividend_accounts (3), trading (varies)
+- **1 security gap closed:** plans.py had zero household_id scoping
+- **0 new migrations required** for #135 + #136 (columns + RLS policies already existed from prior migrations)
+- **#134 migration pattern:** Idempotent DO block; drops wave2's user_id + policies; backfills from user_profile.default_household_id; enforces NOT NULL; composite PK
+
+### Migration Checklist (Template for Future Sweeps)
+
+When retrofitting household_id to an existing table:
+1. Add nullable column: `ALTER TABLE t ADD COLUMN household_id UUID`
+2. Backfill or delete orphaned rows
+3. Make NOT NULL: `ALTER TABLE t ALTER COLUMN household_id SET NOT NULL`
+4. Update PK if needed: `DROP CONSTRAINT ... ; ADD PRIMARY KEY (...)`
+5. Enable RLS with household policies (use `is_household_member()` + `is_household_writer()` helpers from 20260430160200)
+6. Drop old `user_id` column and user-scoped RLS policies
+
+### User Action Pending
+
+✋ **Migrations are staged but not live.** To apply:
+```bash
+supabase db push --linked  # Against dev first; verify; then prod
+```
+
+### Related Decisions
+
+- **#129 (Holdings + Dividends):** First household_id pattern implementation
+- **#133 (Snapshot prep):** RLS policy framework (migration 20260430160200)
+
+### Verification
+
+- [x] CI passing on #134, #135, #136
+- [x] No new user_id + user-scoped RLS patterns introduced
+- [x] All endpoints follow canonical dependency injection + filtering
+- [ ] Migrations applied to dev + prod (user action)
+- [ ] E2E test: multi-household user verifies isolation across all 8 endpoints
+
+---
