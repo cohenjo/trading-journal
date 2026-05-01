@@ -8,6 +8,7 @@
 
 
 ## Learnings
+- 2026-05-01T19:36:00+03:00 — **Python on Vercel verdict:** FastAPI works via `mangum` ASGI adapter, but Vercel's 60s timeout and ephemeral filesystem disqualify it for production trading-journal workloads (backtests >60s, IB Gateway socket persistence, cron jobs). Split endpoints across Vercel + local would introduce distributed complexity without benefit. Decision: **keep local Docker backend** (current); migrate to Render.com / Railway / Fly.io only when scaling justifies separate hosting. See `docs/design-hosting/python-hosting-options.md`.
 - 2026-05-01T19:30:41+03:00 — Silent localhost fallbacks in production-facing rewrites hide deployment topology bugs; production config should validate required public URLs at build/start and fail loudly. Backend deployment topology remains unresolved: user must choose public FastAPI deployment or porting API endpoints to Next.js route handlers.
 - 2026-05-01T19:24:00+03:00 — When `main` is checked out in another worktree, use `git push origin HEAD:main` from the active branch to fast-forward the remote `main` without switching worktrees.
 

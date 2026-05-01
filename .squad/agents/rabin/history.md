@@ -66,3 +66,17 @@
 
 
 📌 **Team update (2026-04-30T22-16-38Z):** RLS-21 dev+prod merge complete — PR #98 (21 public tables + drop secrets) merged to main (9ec4d2b), 18 migrations applied to prod (jaesiklybkbmzpgipvea), 0 rls_disabled_in_public advisor errors verified. Issue #97 closed. Cross-agent RLS coverage now extends to all 21 public tables. — Rabin (author), Keaton (reviewer), Hockney (prod apply), Redfoot (E2E coverage opportunity)
+
+### 2026-05-01: RLS Coverage Audit — Frontend-Direct CRUD Targets
+- **Context:** Jony requested pre-Phase-3 verification that frontend-direct CRUD targets have RLS protection before backend no longer injects household_id.
+- **Scope:** 9 tables (finance_snapshots, plans, dividend_positions, dividend_accounts, insurance_policies, bond_holdings, optioncontract, trade/execution/manualtrade/matchedtrade).
+- **Key findings:**
+  - ✅ All 9 tables have RLS enabled with full 4-policy coverage (SELECT/INSERT/UPDATE/DELETE)
+  - ✅ All use household-scoped pattern with `is_household_member()` and `is_household_writer()` helpers
+  - ✅ Helpers include soft-delete boundary check (`households.deleted_at IS NULL`)
+  - ❌ No database-level auto-injection of household_id (no triggers, no current_setting); backend injects via `get_user_household_id()`
+  - ⚠️ When frontend-direct lands, frontend MUST always pass household_id (client-provided); RLS validates ownership
+- **Critical insight:** household_id is NOT auto-set by database; frontend and backend both must inject it from session context. If frontend omits household_id or sends malicious value, RLS will reject (good), but frontend type system must enforce required UUID field to prevent accidental omission.
+- **Top 3 risks:** (1) malicious client crafts household_id not from session → RLS rejects (mitigated) (2) frontend omits household_id → RLS rejects (mitigated by type system) (3) viewers escalate via role check → RLS enforces role (mitigated).
+- **Deliverable:** `docs/design-hosting/rls-coverage-audit.md` (comprehensive per-table checklist, pre-Phase-3 readiness, 3 actionable risks, 6-item mitigation checklist).
+- **Status:** Complete; ready for Keaton/Hockney/Jony review.

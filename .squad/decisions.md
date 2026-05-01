@@ -4479,3 +4479,249 @@ Completed main branch sync and CI workflow cleanup batch:
 `squad/scratch-main-worktree` is now in sync with `origin/main` and can be retired once worktree checkout is no longer needed.
 
 ---
+
+---
+
+### 2026-05-01T19:35:00+03:00: User directive — frontend talks to Supabase directly
+
+**By:** Jony (cohenjo) (via Copilot)
+
+**What:** Frontend should access Supabase directly for simple CRUD. Backend (FastAPI) is reserved for heavy/batch processing and talks directly to the DB. No frontend→backend HTTP. If Python can be deployed on Vercel, the backend may live there too — but simple CRUD still goes directly to the DB from the frontend.
+
+**Why:** Original design intent. Decouples frontend from backend deployment, fits Vercel-native model, leverages Supabase RLS as the security boundary.
+
+---
+
+### 2026-05-01T19:45:07+03:00: User directive — prefer latest tier models
+
+**By:** Jony (cohenjo) (via Copilot)
+
+**What:** Use latest available models when spawning agents:
+- Premium: `claude-opus-4.7` (was opus-4.6)
+- Standard: `claude-sonnet-4.6` (was sonnet-4.5)
+- Premium alt: `gpt-5.5` (was gpt-5.4)
+- Fast: `claude-haiku-4.5` (unchanged)
+
+Charter `Preferred` fields that pin sonnet-4.5 should be treated as "use sonnet 4.6" until explicitly overridden by the user.
+
+**Why:** User wants to ride the latest model tier; sonnet 4.6 noted as more advanced than 4.5.
+
+---
+
+### 2026-05-01T19:30:41+03:00: API Rewrite Hardening — next.config.ts defensive validation
+
+**By:** Kujan (DevOps/Platform)
+
+**What:** `apps/frontend/next.config.ts` now keeps the local-development fallback to `http://127.0.0.1:8000`, but production build/start validates `NEXT_PUBLIC_API_URL` before configuring `/api/:path*` rewrites. Production now fails loudly if the value is missing, empty, malformed, non-HTTP(S), localhost, loopback, or private-address based.
+
+**Why:** Production write paths depend on `/api/*` rewrites. Without validation, deployments silently fail when `NEXT_PUBLIC_API_URL` is misconfigured or missing.
+
+**Open decision:** Backend deployment strategy is OPEN. The user must choose between:
+1. Deploying the FastAPI backend in `apps/backend` publicly and setting Vercel `NEXT_PUBLIC_API_URL` to that public backend URL.
+2. Porting the required API endpoints to Next.js route handlers so Vercel owns the API surface.
+
+Until that decision is made and implemented, production write paths that depend on `/api/*` remain broken.
+
+---
+
+### 2026-05-01: Phase 3 Execution Plan — Frontend↔Supabase Direct
+
+**By:** Keaton (Lead)
+
+**What:** Execute Phase 3 migration per the plan at `docs/design-hosting/phase-3-execution-plan.md`. User reaffirmed architecture directive: "frontend to function with the DB and not be dependent on backend. Backend processing too complex for the frontend should remain in the backend and be processed directly vs the DB. No frontend to backend communications."
+
+**Decision:**
+
+1. **Directive Confirmed:** User's "frontend to DB" matches design doc's "Server Actions calling Supabase-direct." No conflict—proceed.
+
+2. **Endpoint Disposition:**
+   - **MOVE (15+ routers):** Simple CRUD → Server Actions (finances, plans CRUD, holdings, dividends, trades, insurance, pension, bonds, summary, day, ladder, ndx, options CRUD, trading CRUD).
+   - **KEEP (4+ routers/subsets):** Heavy compute → backend workers (backtest, analyze, tax_condor, plans/simulate).
+   - **DEPRECATE (2 routers):** auth (→ Supabase Auth), metrics (→ Vercel Analytics).
+
+3. **Priority Order:**
+   - **Week 1:** finances (broken in prod) → plans CRUD → holdings → dividends.
+   - **Week 2:** trades → insurance → pension → summary dashboards.
+   - **Week 3:** bonds → options CRUD → trading CRUD.
+
+4. **Stop-the-Bleed:** Implement Server Action for POST /api/finances immediately (Fenster, 1 day). Proper fix; no temporary FastAPI deploy.
+
+5. **Risks & Mitigations:**
+   - RLS gaps → Rabin audit before prod deploy.
+   - household_id injection loss → Fenster creates injection helper.
+   - Pydantic validation loss → Port schemas to Zod.
+   - Supabase rate limits → Use pooled connection URL.
+   - Audit trail loss → Preserve created_by/audit_log in Server Actions.
+
+**Next Actions:** Fenster implements finances Server Action (stop-the-bleed); Hockney audits all routers; Rabin audits RLS; Kujan verifies Supabase connection limits.
+
+**References:** `docs/design-hosting/phase-3-execution-plan.md`, `docs/design-hosting/design.md` (§9 Phase 3), Production bug: POST /api/finances → 404.
+
+---
+
+### 2026-05-01: Backend Endpoint Disposition Audit
+
+**By:** Hockney
+
+**What:** Completed full audit of 67 backend endpoints across 19 routers. Disposition matrix documented at `docs/design-hosting/endpoint-disposition.md`.
+
+**Headline Counts:**
+- **32 MOVE** — simple CRUD, migrate to Server Actions
+- **28 KEEP** — heavy compute/batch, stays in FastAPI
+- **7 DEPRECATE** — replaced by Supabase Auth or obsolete
+
+**Key Findings:**
+
+1. **Household ID injection is the primary cross-cutting concern.** 14 routers currently call `get_user_household_id(session, user_id)` to resolve household. MOVE candidates need equivalent RLS policies + Server Action household context.
+
+2. **Mixed routers need careful migration.** 5 routers (analyze, dividends, finances, ndx, trading) have both MOVE + KEEP endpoints. Frontend routing must split calls during Phase 3.
+
+3. **Phase 3 can start immediately with 20 low-hanging fruit endpoints** (holdings, insurance, plans CRUD, summary). These are single-table queries with clear household scoping.
+
+**Recommendations:** Phase 3A (20 simple CRUD) → Phase 3B (5 mixed-router partial) → Phase 3C (defer complex) → Phase 4 (keep 28 heavy/batch in FastAPI).
+
+---
+
+### 2026-05-01: Optional Auth Pattern for Telemetry Endpoints
+
+**By:** Hockney (Backend Dev)
+
+**Issue:** #125 — `/api/metrics/page-load` returns 401 on every page
+
+**Problem:** Metrics endpoint was returning 401 Unauthorized on every authenticated page load, polluting console logs and losing telemetry data.
+
+**Root cause:**
+1. Metrics router mounted with `dependencies=auth_dep` requiring JWT auth
+2. Frontend uses `navigator.sendBeacon()` for page-load telemetry
+3. **sendBeacon() cannot attach custom HTTP headers** (spec limitation)
+4. Result: Every sendBeacon() → 401, even for authenticated users
+
+**Solution:** Created **optional auth pattern** for telemetry endpoints. Metrics router uses `get_current_user_optional()` which validates auth if present, returns None if absent/invalid. Endpoint degrades gracefully: captures `user_id` when available, logs anonymously otherwise.
+
+**Pattern for Future Telemetry:**
+- ✅ Page-load metrics
+- ✅ Error reporting / crash telemetry
+- ✅ Real User Monitoring (RUM)
+- ✅ Analytics events sent via sendBeacon()
+- ❌ NOT for business-critical endpoints with PII/RBAC requirements
+
+**References:** `apps/backend/app/dependencies.py` (get_current_user_optional), `apps/backend/app/api/metrics.py` (first consumer), PR #137.
+
+---
+
+### 2026-05-01: Frontend API Call Site Audit & Supabase Direct Migration Plan
+
+**By:** Fenster (Frontend Dev)
+
+**Context:** Production bug: `/current-finances` page calls `POST /api/finances/` which returns **404 on Vercel** because `next.config.ts` rewrite points at a non-deployed FastAPI host. User directive: "Frontend → Supabase directly for simple CRUD. No frontend↔backend HTTP coupling."
+
+**Decision:** Migrate to **Server Action** (`app/current-finances/actions.ts`) that writes directly to Supabase `finance_snapshots` table. Eliminates FastAPI dependency for this flow.
+
+**Migration shape:**
+- Server Action fetches user → household_id from `user_profile.default_household_id`
+- Upserts row into `finance_snapshots` with composite PK `(household_id, date)`
+- RLS enforces write permission via `is_household_writer(household_id)`
+- Returns `{ success: boolean, error?: string }` to client
+- Client shows inline error banner (replaces `alert()`)
+
+**Key Statistics:**
+- **Total call sites:** 89 across 16 features
+- **Broken call sites:** 1 (`POST /api/finances` → 404 on Vercel)
+- **Missing JWT forwarding:** 5 (TradingAccountDashboard.tsx — direct `fetch()` without `apiFetch` wrapper)
+- **Absolute URL construction:** 6 (Analyze/longterm hooks + pension — uses `NEXT_PUBLIC_API_URL`)
+
+**Decision Criteria:**
+- **Use Server Action when:** Mutation with business logic, data must be written, want to avoid exposing Supabase queries, need server-side context
+- **Use Direct Supabase Client when:** Read-only, real-time subscriptions, optimistic UI, query params user-driven
+
+**Effort:** M-size (2-4 hours) — includes Server Action implementation, improved error UX, unit + E2E tests.
+
+**References:** `docs/design-hosting/frontend-api-callsites.md` (full audit with call site inventory).
+
+---
+
+### 2026-05-01T19:36:00+03:00: Python Backend Hosting — Keep Local Docker
+
+**By:** Kujan (DevOps/Platform) | Approved by Jony
+
+**Question:** Can the FastAPI backend (`apps/backend/`) run on Vercel as serverless functions, or does it need a separate hosted backend?
+
+**Decision:** **Keep local Docker backend. Do not migrate to Vercel Functions.**
+
+**Rationale:**
+1. **Vercel constraints disqualify production workloads:**
+   - 60s max execution (backtests often exceed this)
+   - Ephemeral filesystem (no persistent sockets for IB Gateway)
+   - No native WebSocket/long-poll support
+   - Cold starts 8–15s (blocks interactive requests)
+
+2. **Trading-journal backend has stateful operations:**
+   - `POST /api/backtest/run` — compute-heavy; processes OHLC data with pandas/scipy/numpy
+   - `GET /api/trading/*` — IB Gateway socket connections (requires persistent process)
+   - Scheduled data imports (IBKR/Schwab token sync)
+   - Background workers for async tasks
+
+3. **Splitting endpoints across Vercel + local increases complexity without benefit:**
+   - Two deployment targets to manage
+   - Cross-environment test burden
+   - Auth token passing between backends
+   - No cost savings (hosting still needed for stateful workloads)
+
+4. **Current architecture is sound:**
+   - Local Docker (dev) → Render.com/Railway/Fly.io (prod)
+   - Single deployment model; same image runs everywhere
+   - No timeout risk; no ephemeral filesystem issues
+
+**Implementation:** No changes required. Current hosting topology stands: Frontend (Vercel) | Backend (Docker/Render/Railway/Fly.io) | Database (Supabase).
+
+---
+
+### 2026-05-01: RLS Coverage Audit — Frontend-Direct CRUD Readiness
+
+**By:** Rabin (Security Engineer)
+
+**Issue:** Phase 3 frontend-direct CRUD security readiness
+
+**Status:** ✅ Ready to proceed (database-side protection complete)
+
+**Summary:** Completed comprehensive Row Level Security (RLS) audit on 9 household-scoped tables targeted for frontend-direct CRUD in Phase 3. **All audited tables are database-ready.** RLS policies are fully implemented with consistent household-scoped access control using proven helper functions.
+
+**Key metric:** 9/9 tables fully covered with 4-policy RLS (SELECT/INSERT/UPDATE/DELETE) and household_id validation.
+
+**Findings:**
+
+### ✅ Database Protection: READY
+- finance_snapshots, plans, dividend_positions, dividend_accounts, insurance_policies, bond_holdings, optioncontract, trade, execution, manualtrade, matchedtrade
+- All have RLS enabled with full CRUD policies
+- All use `is_household_member()` (SELECT/READ) and `is_household_writer()` (INSERT/UPDATE/DELETE) helpers
+- All policies check `household_id IS NOT NULL` to prevent NULL-bypass attacks
+- Helpers include soft-delete boundary check (`households.deleted_at IS NULL`)
+
+### ⚠️ Application Responsibility Shift: CRITICAL
+- **Current state (backend injection):** `get_user_household_id(db, user_id)` looks up user's primary household
+- **Future state (frontend-direct):** Frontend reads household_id from Supabase Auth JWT; passes it in all CRUD requests
+- **No database auto-injection:** No triggers, no `current_setting()`, no DEFAULT on household_id columns (intentional)
+- **Frontend must source household_id from auth session, not from user input**
+
+### ⚠️ Top 3 Risks if Mitigation Not Implemented
+1. **Client sends malicious household_id:** RLS will reject (policy checks ownership). **Mitigation:** Frontend must NOT expose household_id as user input; always source from session JWT/profile
+2. **Frontend omits household_id:** RLS policy `household_id IS NOT NULL` check rejects. **Mitigation:** Frontend TypeScript types must make household_id a required field (not optional)
+3. **Viewer role escalates to writer:** RLS uses `is_household_writer()` = (role IN ('owner', 'member')). **Mitigation:** Frontend respects viewer role; DB enforces at RLS layer
+
+**Recommendation for Phase 3:**
+
+### Frontend Work Checklist
+- [ ] TypeScript models for all CRUD operations mark household_id as required (not optional)
+- [ ] Frontend auth hook reads household_id from Supabase JWT/user_profile at session init
+- [ ] All INSERT/UPDATE operations automatically include session household_id (not from user input)
+- [ ] Frontend UI does NOT expose household_id as editable field
+- [ ] Use Supabase anon-key for frontend CRUD (RLS applies automatically based on Auth JWT)
+- [ ] Unit/E2E tests verify RLS rejection when sending mismatched household_id
+
+### Backend Deprecation Plan
+- [ ] Keaton: Document which API endpoints are transitioning to frontend-direct
+- [ ] Keaton: Verify service-role key is reserved for async jobs only
+- [ ] Keaton: Remove household_id injection from deprecated endpoints as Phase 3 cutover completes
+
+**Deliverable:** `docs/design-hosting/rls-coverage-audit.md` (per-table audit matrix, household_id source verification, risk assessment, pre-Phase-3 checklist).
+

@@ -156,3 +156,52 @@ SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co
 - Keep test logic simple: render → no errors → primary CRUD
 
 📌 Team update (2026-05-01T19:02:15+03:00): Platform workflows audit — removed 6 squad-* workflows, kept core CI and frontend jobs. — decided by kujan
+
+## Learnings — Frontend API Call Site Audit (2026-05-01)
+
+**Issue context:** Production bug — `POST /api/finances` → 404 on Vercel. User directive: "Frontend → Supabase directly for simple CRUD. No frontend↔backend HTTP coupling."
+
+**Audit scope:** Complete inventory of all `/api/*` call sites across the frontend codebase. Identified 89 call sites spanning 16 features.
+
+**Key findings:**
+
+1. **Supabase client patterns already established** (PR #86 / TJ-015):
+   - **Server-side:** `src/lib/supabase/server.ts` exports `createClient()` — returns `createServerClient` from `@supabase/ssr` with `getAll`/`setAll` cookie handlers. Use in **Server Components**, **Server Actions**, **Route Handlers**.
+   - **Browser-side:** `src/lib/supabase/browser.ts` exports singleton `supabaseBrowser` and factory `createClient()` — returns `createBrowserClient`. Use in **Client Components** and hooks.
+   - **Auth context:** Middleware refreshes sessions automatically; cookies are HttpOnly/Secure/SameSite=Lax.
+   - **RLS enforcement:** Supabase policies use `auth.uid()` automatically — no manual `user_id` filtering required in application code.
+
+2. **Server Action vs direct client decision criteria:**
+   - **Server Action** for: mutations with business logic, multi-table writes, validation, cache revalidation, form submissions.
+   - **Direct Supabase client** (browser) for: read-only queries, real-time subscriptions, optimistic UI, user-driven filters.
+   - **Example (current-finances):** Save flow requires household lookup + validation + revalidation → **Server Action** is correct shape.
+
+3. **Call site inventory table shape:**
+   - Grouped by feature (current-finances, insurance, pension, dividends, etc.)
+   - Columns: `File:line`, `Method+Path`, `R/W`, `Notes`
+   - Enables effort estimation for future migrations (M-size per feature, L-size for multi-endpoint features like dividends)
+
+4. **Current validation approach:**
+   - Backend uses Pydantic for request/response schemas
+   - Frontend has **zero Zod imports** — validation is manual or deferred to backend
+   - Recommendation: Start with manual validation in Server Actions, introduce Zod once 3+ Server Actions need shared schemas
+
+5. **Error handling pattern (upgrade from `alert()`):**
+   - Server Action returns `{ success: boolean, error?: string }`
+   - Client component shows inline error banner (Tailwind: `bg-red-900/20 border border-red-500`)
+   - Optional: send errors to telemetry endpoint (`/api/telemetry`) in production
+
+6. **Schema note — `finance_snapshots` table:**
+   - Composite PK: `(household_id, date)` per migration 20260501110927
+   - Top-level columns: `data` (jsonb), `net_worth`, `total_assets`, `total_liabilities`
+   - **Missing columns:** `total_savings`, `total_investments` are in Pydantic model but not in DB schema → store in `data` JSON for now
+   - RLS policies: SELECT via `is_household_member()`, INSERT/UPDATE/DELETE via `is_household_writer()`
+
+7. **Testing requirements for Server Action migrations:**
+   - **Unit:** Validation logic (Zod `.safeParse()` if used)
+   - **Integration:** Mock Supabase client, verify `upsert` args, test RLS enforcement
+   - **E2E:** Playwright flow (sign in → navigate → mutate → refresh → verify persistence + RLS isolation)
+
+**Output artifact:** `docs/design-hosting/frontend-api-callsites.md` — 89 call sites inventoried, detailed migration plan for `POST /api/finances`, decision criteria for Server Action vs direct client.
+
+**Branch:** Not yet created — this is planning/audit work only. Implementation PR will follow after team review.

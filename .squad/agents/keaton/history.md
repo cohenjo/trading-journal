@@ -90,3 +90,28 @@
 
 
 📌 **Team update (2026-04-30T22-16-38Z):** RLS-21 dev+prod merge complete — PR #98 (21 public tables + drop secrets) merged to main (9ec4d2b), 18 migrations applied to prod (jaesiklybkbmzpgipvea), 0 rls_disabled_in_public advisor errors verified. Issue #97 closed. Cross-agent RLS coverage now extends to all 21 public tables. — Rabin (author), Keaton (reviewer), Hockney (prod apply), Redfoot (E2E coverage opportunity)
+
+---
+
+## Learnings
+
+### 2026-05-01 — Phase 3 Execution Plan: Frontend↔Supabase Direct
+
+**Context:** User reaffirmed architecture directive—"frontend to function with the DB and not be dependent on backend; simple CRUD things can go directly to the DB." Production bug exposed this: POST /api/finances → 404 because the Vercel rewrite expects a non-deployed FastAPI backend.
+
+**Key Deliverable:** Created `docs/design-hosting/phase-3-execution-plan.md`—a disposition matrix, priority order, and stop-the-bleed recommendation for migrating CRUD endpoints from FastAPI to Server Actions.
+
+**Disposition Framework:**
+- **MOVE → Server Action:** Simple CRUD (finances, plans CRUD, holdings, dividends, trades, insurance, pension, bonds, summary dashboards). RLS-protected single-table or cooked-table reads/writes. 15+ routers.
+- **KEEP → backend worker:** Heavy compute (backtest, analyze, tax_condor, plans/simulate). Multi-API orchestration, portfolio simulations, financial projections. 4 routers + subsets.
+- **DEPRECATE:** auth router (replaced by Supabase Auth); metrics router (replaced by Vercel Analytics + Supabase logs).
+
+**Priority Order:** Broken features first (finances), then high-traffic CRUD (plans/holdings/dividends/trades), then read-only dashboards, then lower-traffic features.
+
+**Stop-the-Bleed Pattern:** For immediate prod unblock, implement a single Server Action for the broken endpoint (POST /api/finances) rather than deploying the entire FastAPI backend. This proves the migration pattern and takes ~30 min vs. hosting setup. Proper fix > band-aid.
+
+**Reaffirmation:** User's "frontend to DB" directive matches design doc's "Server Actions calling Supabase-direct" recommendation. Both converge on the same architecture—only phrasing differs. Phase 3 is go.
+
+**Risks Catalogued:** RLS gaps, household_id injection loss, Pydantic validation loss, Supabase rate limits, audit trail loss. Each has mitigation (Rabin RLS audit, Fenster injection helper, Zod schema ports, connection pooling, audit log preservation).
+
+**Decision file:** `.squad/decisions/inbox/keaton-phase-3-execution-plan.md`

@@ -1,0 +1,9 @@
+{
+  "modelTiers": {
+    "premium": "claude-opus-4.7",
+    "standard": "claude-sonnet-4.6",
+    "premiumAlt": "gpt-5.5",
+    "fast": "claude-haiku-4.5"
+  },
+  "notes": "Directive 2026-05-01: prefer latest tier models. Charter 'Preferred' fields pinning sonnet-4.5 should be auto-bumped to sonnet-4.6."
+}
