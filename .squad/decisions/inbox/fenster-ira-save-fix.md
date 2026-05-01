@@ -94,3 +94,24 @@ When adding `household_id` to an existing table:
 ## PR
 
 https://github.com/cohenjo/trading-journal/pull/134
+
+## Status & Follow-up
+
+✅ Complete — Migration passing CI, follows household_id canonical pattern.
+
+**Root Cause of CI Failures:**
+1. **Primary Key Issue**: Migration tried to drop `finance_snapshots_pkey` constraint already dropped by wave2 migration (20260501022922)
+2. **RLS Pattern Mismatch**: Wave2 added `user_id` with user-scoped RLS but canonical pattern uses `household_id` with `is_household_member(household_id)` helper
+
+**Corrected Migration:**
+- Removed wave2's `user_id` column and user-scoped RLS policies
+- Backfilled `household_id` from `user_profile.default_household_id` (conditional check)
+- Set `household_id` NOT NULL
+- Added composite PK `(household_id, date)` with idempotent DO block
+- Reused existing household-scoped RLS policies from migration 160200
+
+**CI Status:** ✅ All checks passing (Lint Migrations, Dry-Run Shadow DB, test-rls)
+
+**Remaining Tasks:**
+- [ ] Test IRA account save/load with new household_id scoping in staging
+- [ ] Check for any other tables with similar PK/RLS mismatches
