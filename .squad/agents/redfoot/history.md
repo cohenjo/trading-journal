@@ -155,3 +155,39 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 **Notes**: This was unauthenticated smoke testing. All pages render but may show empty states without auth. Authenticated functional testing is the next phase.
 
 📌 Team update (2026-05-01T19:02:15+03:00): Platform workflows audit — removed 6 squad-* workflows, kept core CI. Flagged test-rls.yml for review. — decided by kujan
+
+### 2026-05-02: E2E Harness Extension — Unified Fixtures + Test Tagging (Issue #144, PR #152)
+
+**Context**: Issue #144 requested extending the existing E2E scaffold with unified fixtures and test tagging per `docs/testing/e2e-strategy.md`. Scaffold already existed (fixtures, smoke, flows from prior work). This round adds the household-aware test-user fixture and seed-data helpers.
+
+**What was done:**
+
+- **`e2e/fixtures/test-user.ts`** — new canonical fixture for auth+household tests:
+  - Creates throwaway e2e user via admin API
+  - Injects auth cookie via direct REST password grant (matches `auth-cookie.ts` pattern)
+  - Polls `household_members` table ≤5s for the auto-provision trigger to fire (migration `20260502120000`)
+  - Returns `{ page, userId, email, householdId }` — household ready to seed
+  - Tears down in afterAll (cascade via FK)
+
+- **`e2e/fixtures/seed-data.ts`** — per-test data seeding helpers:
+  - `seedFund(householdId, data)` → upserts Investments FinanceItem into `finance_snapshots.data.items`
+  - `seedAsset(householdId, data)` → upserts Assets FinanceItem into `finance_snapshots.data.items`
+  - `seedTrade(householdId, data)` → inserts IB Flex-format row into `public.trade`
+  - `cleanupHouseholdData(householdId)` → deletes seeded rows from finance_snapshots + trade
+
+- **Tag annotations**: Added `@smoke` to all `e2e/smoke/` tests, `@flow` to all `e2e/flows/` tests. `@auth` and `@rls` reserved for issue #146–#149.
+
+- **npm scripts added**: `test:e2e:smoke`, `test:e2e:flows`, `test:e2e:auth` (using `--grep`)
+
+- **`e2e/README.md`** updated with new fixtures, tagging table, seeding usage examples.
+
+**Verification:**
+- `--list --grep @smoke` → 27 tests (9 × 3 browsers) ✅
+- `--list --grep @flow` → 51 tests (17 × 3 browsers) ✅
+- `tsc --noEmit` → 0 errors in new files ✅
+
+**Blockers:**
+- `testUser` fixture and seed helpers cannot run green without Supabase env vars (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
+- Depends on Hockney's issue #145 (test-user provisioning env) before @auth-tier tests can execute.
+
+**PR:** https://github.com/cohenjo/trading-journal/pull/152 — marked ready-for-review (smoke + flow listing verified; authenticated run pending env from #145).
