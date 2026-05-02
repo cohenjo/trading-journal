@@ -242,25 +242,42 @@ Example: `e2e_1735000000000_a3f7@example.com`
 
 ---
 
-## CI Shape (future)
+## CI — GitHub Actions
 
-Planned: `.github/workflows/playwright-e2e.yml`
+Workflow: `.github/workflows/playwright-e2e.yml`
 
-Triggers:
-- `pull_request` — smoke + auth tiers only
-- `workflow_dispatch` — full suite including flows + rls
+### Triggers
 
-Requirements:
-- `BASE_URL` secret → deployed Vercel preview URL (or `VERCEL_PREVIEW_URL` computed by the workflow)
-- `NEXT_PUBLIC_SUPABASE_URL` secret → dev Supabase project URL
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` secret
-- `SUPABASE_SERVICE_ROLE_KEY` secret → service-role key for fixture setup/teardown
+| Event | Job | Suite |
+|-------|-----|-------|
+| `pull_request` → `main` | `e2e-smoke` | `@smoke` + `@auth` — **merge-blocking** |
+| `schedule` (03:00 UTC nightly) | `e2e-full` | `@smoke` + `@auth` + `@flow` |
+| `workflow_dispatch` | `e2e-dispatch` | Configurable (smoke / auth / flows / all) + custom URL input |
 
-Steps:
-1. Install deps (`npm ci`)
-2. Install Playwright browsers (`npx playwright install --with-deps chromium`)
-3. Run `npm run test:e2e` with appropriate `BASE_URL`
-4. Upload `playwright-report/` and `test-results/` as artifacts on failure
+Nightly failures automatically open a GitHub issue tagged `e2e-testing`.
+
+### Required GitHub Secrets
+
+Go to **repo → Settings → Secrets and variables → Actions → New repository secret** and add each of the following:
+
+| Secret name | Maps to env var | Description |
+|-------------|-----------------|-------------|
+| `E2E_BASE_URL` | `BASE_URL` | Target app URL — Vercel dev deployment or preview URL |
+| `E2E_SUPABASE_URL` | `NEXT_PUBLIC_SUPABASE_URL` | Dev Supabase project URL (e.g. `https://<ref>.supabase.co`) |
+| `E2E_SUPABASE_ANON_KEY` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Dev Supabase anon/publishable key |
+| `E2E_SUPABASE_SERVICE_ROLE_KEY` | `SUPABASE_SERVICE_ROLE_KEY` | Dev Supabase service-role key — **never expose to browser** |
+| `E2E_TEST_USER_EMAIL` | `E2E_TEST_USER_EMAIL` | Pre-seeded test user email (for deterministic auth flows) |
+| `E2E_TEST_USER_PASSWORD` | `E2E_TEST_USER_PASSWORD` | Pre-seeded test user password |
+
+> ⚠️ All secrets must use the **dev** Supabase project — never production.
+> `E2E_SUPABASE_SERVICE_ROLE_KEY` bypasses RLS; treat it as you would a root DB password.
+
+### Artifact retention
+
+| Artifact | Trigger | Retention |
+|----------|---------|-----------|
+| `playwright-report-*` | On failure only | 14 days |
+| `test-results-*` (traces + screenshots) | Always | 7 days |
 
 ---
 
