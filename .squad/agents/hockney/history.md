@@ -88,3 +88,7 @@
 **Key insight:** Frontend-backend HTTP coupling is symptom of incomplete Phase 3. After MOVE migration, `NEXT_PUBLIC_API_URL` should only route to heavy compute endpoints (analyze, backtest, pension upload, plans simulate, trading sync). No round-trip for CRUD — frontend talks to Supabase directly via RLS.
 
 **Deliverable:** `docs/design-hosting/endpoint-disposition.md` — full audit with per-router tables, complexity ratings, and migration recommendations.
+
+---
+
+📌 **Migration dry-run fix (2026-05-02):** Backfill section of `supabase/migrations/20260502120000_auto_provision_household_on_signup.sql` was referencing `auth.users.raw_user_meta_data` (Supabase-hosted column only), causing shadow DB CI dry-run to fail. Simplified backfill CTE to use only standard columns: `coalesce(u.email, 'My Household')`. Trigger function keeps full `raw_user_meta_data` fallback chain since it fires on real auth.users in production. Lesson: shadow DB does not expose `auth.users.raw_user_meta_data`; backfill migrations must use only standard Postgres columns (id, email, etc.).

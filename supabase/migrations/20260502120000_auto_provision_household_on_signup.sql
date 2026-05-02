@@ -43,11 +43,12 @@ language plpgsql
 security definer
 set search_path = public, auth
 as $$
-declare
-  v_household_id uuid;
 begin
   -- Create a personal household for this user.
   -- Name falls back through: full_name metadata → email → generic default.
+  -- The existing `trg_households_add_creator` trigger on public.households
+  -- automatically inserts the matching `household_members` owner row, so we
+  -- intentionally do NOT insert into household_members here (would dup-key).
   insert into public.households (name, created_by)
   values (
     coalesce(
@@ -56,12 +57,7 @@ begin
       'My Household'
     ),
     new.id
-  )
-  returning id into v_household_id;
-
-  -- Add the user as the owner member of their new household.
-  insert into public.household_members (household_id, user_id, role, joined_at)
-  values (v_household_id, new.id, 'owner', now());
+  );
 
   return new;
 end;
@@ -76,34 +72,26 @@ create trigger trg_auth_users_create_household
   for each row execute function public.handle_new_user_household();
 
 -- ================================================================
--- Step 3: Backfill — create household + member rows for all existing auth.users
--- that currently have no active (left_at IS NULL) household_members row.
+-- Step 3: Backfill — create a household for each existing auth.users row
+-- that currently has no active (left_at IS NULL) household_members row.
+--
+-- The `trg_households_add_creator` trigger on public.households will then
+-- automatically create the matching `household_members` owner row, so we
+-- only need to INSERT into public.households here.
 --
 -- This unblocks any user who signed up before this trigger was installed,
 -- including the production account that reported the error.
---
--- Idempotent: safe to re-run. ON CONFLICT DO NOTHING on both inserts.
 -- ================================================================
-with missing_users as (
-  -- Find auth.users rows with no active household membership
-  select
-    u.id   as user_id,
-    coalesce(u.email, 'My Household') as household_name
-  from auth.users u
-  where not exists (
-    select 1
-    from public.household_members m
-    where m.user_id = u.id
-      and m.left_at is null
-  )
-),
-new_households as (
-  insert into public.households (name, created_by)
-  select household_name, user_id from missing_users
-  returning id as household_id, created_by as user_id
-)
-insert into public.household_members (household_id, user_id, role, joined_at)
-select household_id, user_id, 'owner', now()
-from new_households;
+insert into public.households (name, created_by)
+select
+  coalesce(u.email, 'My Household') as name,
+  u.id as created_by
+from auth.users u
+where not exists (
+  select 1
+  from public.household_members m
+  where m.user_id = u.id
+    and m.left_at is null
+);
 
 -- end of migration
