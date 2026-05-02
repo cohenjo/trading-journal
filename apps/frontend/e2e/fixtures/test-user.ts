@@ -20,7 +20,8 @@
  */
 
 import { test as base, type Page } from '@playwright/test';
-import { createE2eUser, deleteE2eUser, makeE2eEmail, getAdminClient } from './admin';
+import { createE2eUser, makeE2eEmail, getAdminClient } from './admin';
+import { teardownTestUser } from '../helpers/provision-test-user';
 
 const PASSWORD = 'E2eTestPass!1';
 
@@ -155,8 +156,10 @@ export const test = base.extend<{ testUser: TestUserFixture }>({
 
     await use({ page, userId, email, householdId });
 
-    // Teardown — cascades household_members + household data via FK on delete cascade
-    await deleteE2eUser(userId).catch((err: Error) =>
+    // Teardown — explicitly cleans household data then deletes auth user.
+    // NOTE: there is no ON DELETE CASCADE from auth.users → household_members,
+    // so teardownTestUser() handles cleanup in the correct FK order.
+    await teardownTestUser(userId).catch((err: Error) =>
       console.warn(`[test-user] teardown warning: ${err.message}`),
     );
   },

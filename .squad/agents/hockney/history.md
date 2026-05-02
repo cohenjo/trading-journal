@@ -7,6 +7,29 @@
 - **Created:** 2026-02-23T22:46:19Z
 
 
+## 2026-05-02: E2E test-user provisioning helper (GH #145) — PR #154
+
+Implemented the full E2E provisioning stack on branch `squad/145-test-user-helper`.
+
+**Deliverables:**
+- `apps/frontend/e2e/helpers/provision-test-user.ts` — `provisionTestUser()` (ephemeral + shared-user CI modes) + `teardownTestUser()` (FK-aware explicit cleanup via RPC)
+- `apps/frontend/e2e/scripts/seed-test-user.ts` — one-shot CLI provisioning script; `--teardown` flag supported. Uses dynamic `await import()` inside `main()` to avoid tsx/CJS hoisting of `SUPABASE_URL` before env is loaded.
+- `apps/frontend/e2e/auth/user-lifecycle.spec.ts` — 6 `@auth`-tagged E2E tests (5 pass, 1 skips gracefully without dev server)
+- `supabase/migrations/20260502140000_e2e_reset_test_user.sql` — SECURITY DEFINER `e2e_reset_test_user(p_email text)` SQL function; applied to prod Supabase
+- Updated `playwright.config.ts` — replaced silent-swallowing `require('dotenv')` try/catch with inline `.env.local` parser (dotenv not installed in this package)
+- Updated `apps/frontend/package.json` — added `test:e2e:seed` + `test:e2e:seed:teardown` scripts
+- Updated `apps/frontend/e2e/fixtures/test-user.ts` — replaced `deleteE2eUser` with `teardownTestUser` import
+
+**Key schema discoveries:**
+- `households` has `created_by` column, NOT `owner_id`
+- No FK cascade from `auth.users → household_members`; teardown must explicitly delete household data before deleting the auth user
+- `tg_household_members_delete_guard` (BEFORE DELETE) and `tg_household_members_guard` (BEFORE UPDATE) triggers block removing the last active owner row — fires even for service_role
+- Fix: `SET LOCAL session_replication_role = replica` inside SECURITY DEFINER function disables non-ALWAYS triggers for the current transaction
+
+**CI env vars required:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_E2E_ALLOW_PROD=true` (project ref `zvbwgxdgxwgduhhzdwjj` has no dev hint in URL). Optional shared-user mode: `E2E_TEST_USER_EMAIL` + `E2E_TEST_USER_PASSWORD`.
+
+**Seed verified live:** user `e2e+playwright@trading-journal.test` + household created in <2s against real Supabase.
+
 ## 2026-05-02: Prod migration verify + unblock — migration was NOT applied; applied now + backfill ran + EXECUTE revoked
 
 Migration `20260502120000_auto_provision_household_on_signup` was absent from prod Supabase (last applied was `20260501022922`). Applied via MCP `apply_migration` (trigger function + backfill). Backfill created households for all existing users without one (including Jony). Security advisor flagged `handle_new_user_household()` callable by `anon`/`authenticated` — immediately revoked EXECUTE on both roles via `execute_sql`. Also added REVOKE to migration file on disk. Issue #145 (E2E test-user provisioning helper) is queued for next session.
