@@ -121,3 +121,30 @@
 - **Canonical env var:** `BASE_URL` (per Redfoot's decision). `PLAYWRIGHT_BASE_URL` kept as legacy alias in playwright.config.ts. The `baseURL` line updated to `process.env.BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000'`.
 - **New script:** `test:e2e:dev` added to `apps/frontend/package.json` targeting the pinned dev deployment URL.
 - **Curl bypass test:** Returned 401 — expected until token is registered in Vercel dashboard.
+
+📌 **E2E GitHub Actions Workflow (2026-05-02 — issue #149, PR #153):**
+
+**Requested by:** Jony via Keaton (issue #149)
+
+**Delivered:** `.github/workflows/playwright-e2e.yml` — three-job Playwright E2E CI workflow.
+
+- **`e2e-smoke`** (PR trigger, merge-blocking): runs `@smoke|@auth` on chromium via `npx playwright test --grep "@smoke|@auth" --project=chromium`. `cancel-in-progress: true` for PR concurrency group.
+- **`e2e-full`** (nightly 03:00 UTC): runs `@smoke|@auth|@flow` full suite; auto-creates a GitHub issue on failure via `actions/github-script`.
+- **`e2e-dispatch`** (workflow_dispatch): configurable suite (smoke/auth/flows/all) + custom base_url input.
+- Artifacts: `playwright-report/` (14d, failure only), `test-results/` (7d, always).
+- Updated `apps/frontend/e2e/README.md` with CI section and secrets table.
+
+**Secrets required (Jony must configure in repo Settings):**
+| Secret | Maps to |
+|--------|---------|
+| `E2E_BASE_URL` | `BASE_URL` |
+| `E2E_SUPABASE_URL` | `NEXT_PUBLIC_SUPABASE_URL` |
+| `E2E_SUPABASE_ANON_KEY` | `NEXT_PUBLIC_SUPABASE_ANON_KEY` |
+| `E2E_SUPABASE_SERVICE_ROLE_KEY` | `SUPABASE_SERVICE_ROLE_KEY` |
+| `E2E_TEST_USER_EMAIL` | `E2E_TEST_USER_EMAIL` |
+| `E2E_TEST_USER_PASSWORD` | `E2E_TEST_USER_PASSWORD` |
+
+**Key learnings:**
+- `git switch -c <new-branch> origin/main` may silently stay on a different branch if run inside a multi-worktree setup — always verify with `git branch --show-current` before committing.
+- `actions/github-script@v7` needs `permissions: issues: write` on the job, not just the workflow level.
+- Chromium-only CI (`--project=chromium`) cuts install time significantly vs all-browsers.
