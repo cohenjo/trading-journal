@@ -16,7 +16,7 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('smoke / settings (unauthenticated)', () => {
-  test('GET /settings does not serve protected UI without auth', async ({ page }) => {
+  test('GET /settings does not serve protected UI without auth @smoke', async ({ page }) => {
     const consoleErrors: string[] = [];
     const serverErrors: string[] = [];
 
@@ -62,7 +62,7 @@ test.describe('smoke / settings (unauthenticated)', () => {
     expect(criticalErrors, `Console errors on /settings: ${criticalErrors.join('\n')}`).toHaveLength(0);
   });
 
-  test('GET /settings page renders some DOM content (not blank)', async ({ page }) => {
+  test('GET /settings page renders some DOM content (not blank) @smoke', async ({ page }) => {
     await page.goto('/settings');
     const body = page.locator('body');
     await expect(body).not.toBeEmpty();

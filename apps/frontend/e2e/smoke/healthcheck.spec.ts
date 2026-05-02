@@ -17,7 +17,7 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 test.describe('smoke / supabase health', () => {
   test.skip(!SUPABASE_URL, 'NEXT_PUBLIC_SUPABASE_URL is not set — skipping Supabase health check');
 
-  test('Supabase Auth health endpoint responds 200', async ({ request }) => {
+  test('Supabase Auth health endpoint responds 200 @smoke', async ({ request }) => {
     const healthUrl = `${SUPABASE_URL}/auth/v1/health`;
     const response = await request.get(healthUrl, { timeout: 10_000 });
 
@@ -28,7 +28,7 @@ test.describe('smoke / supabase health', () => {
     expect(body.length).toBeGreaterThan(0);
   });
 
-  test('Supabase REST endpoint responds (not 5xx)', async ({ request }) => {
+  test('Supabase REST endpoint responds (not 5xx) @smoke', async ({ request }) => {
     // A GET to the PostgREST root returns a schema description — no auth needed
     const restUrl = `${SUPABASE_URL}/rest/v1/`;
     const response = await request.get(restUrl, {
@@ -41,7 +41,7 @@ test.describe('smoke / supabase health', () => {
     expect(response.status(), `Supabase REST at ${restUrl} should not 5xx`).toBeLessThan(500);
   });
 
-  test('app /health/auth route responds (if exists)', async ({ page }) => {
+  test('app /health/auth route responds (if exists) @smoke', async ({ page }) => {
     // Hockney's health route from PR #89 — skip gracefully if not yet deployed
     const response = await page.goto('/health/auth', { waitUntil: 'commit' });
     const status = response?.status() ?? 0;

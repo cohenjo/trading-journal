@@ -18,14 +18,14 @@
 import { test, expect } from '../../e2e/fixtures/auth';
 
 test.describe('P0 flow: / → /summary (authenticated)', () => {
-  test('authenticated user lands on /summary after visiting /', async ({
+  test('authenticated user lands on /summary after visiting / @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/summary/, { timeout: 10_000 });
   });
 
-  test('/summary loads without 5xx errors', async ({ authenticatedUser: { page } }) => {
+  test('/summary loads without 5xx errors @flow', async ({ authenticatedUser: { page } }) => {
     const failedRequests: string[] = [];
     page.on('response', (resp) => {
       if (resp.status() >= 500) failedRequests.push(`${resp.status()} ${resp.url()}`);
@@ -37,7 +37,7 @@ test.describe('P0 flow: / → /summary (authenticated)', () => {
     expect(failedRequests).toHaveLength(0);
   });
 
-  test('/summary renders the income chart container', async ({
+  test('/summary renders the income chart container @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/summary');
@@ -49,7 +49,7 @@ test.describe('P0 flow: / → /summary (authenticated)', () => {
     });
   });
 
-  test('/summary has no console errors', async ({ authenticatedUser: { page } }) => {
+  test('/summary has no console errors @flow', async ({ authenticatedUser: { page } }) => {
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
