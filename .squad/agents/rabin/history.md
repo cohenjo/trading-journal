@@ -80,3 +80,5 @@
 - **Top 3 risks:** (1) malicious client crafts household_id not from session → RLS rejects (mitigated) (2) frontend omits household_id → RLS rejects (mitigated by type system) (3) viewers escalate via role check → RLS enforces role (mitigated).
 - **Deliverable:** `docs/design-hosting/rls-coverage-audit.md` (comprehensive per-table checklist, pre-Phase-3 readiness, 3 actionable risks, 6-item mitigation checklist).
 - **Status:** Complete; ready for Keaton/Hockney/Jony review.
+
+📌 Team update (2026-05-02T09:03:04Z): DB-trigger SECURITY DEFINER is canonical for cross-RLS provisioning. When inserting on behalf of user (e.g., household_members), only SECURITY DEFINER functions can bypass RLS. Applies to user signup provisioning: handle_new_auth_user (profile) and handle_new_user_household chains. — Coordinator

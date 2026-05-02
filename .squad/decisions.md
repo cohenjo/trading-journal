@@ -4725,3 +4725,252 @@ Until that decision is made and implemented, production write paths that depend 
 
 **Deliverable:** `docs/design-hosting/rls-coverage-audit.md` (per-table audit matrix, household_id source verification, risk assessment, pre-Phase-3 checklist).
 
+
+
+# Decision: Pattern for Direct-to-Supabase Server Actions (finances)
+
+**Author:** Fenster (Frontend Dev)  
+**Date:** 2026-07-31  
+**Branch:** squad/finances-server-action  
+**Status:** Implemented
+
+---
+
+## Context
+
+POST `/api/finances` returned 404 on Vercel because `next.config.ts` rewrites
+`/api/*` to a FastAPI backend that is not deployed there. The approved
+architecture directive says: frontend talks to Supabase directly for simple
+CRUD; backend stays for heavy/batch only.
+
+---
+
+## Decision
+
+Replace `apiFetch('/api/finances/*')` calls with Next.js **Server Actions** that
+use the SSR Supabase client (`@/lib/supabase/server`) directly.
+
+---
+
+## Pattern to Copy for the Next 15 Features
+
+### 1. File layout
+
+```
+apps/frontend/src/app/<feature>/
+  actions.ts        ← 'use server' — all Supabase writes/reads
+  page.tsx          ← 'use client' — imports actions, calls them
+  actions.test.ts   ← vitest unit tests (mock @/lib/supabase/server)
+```
+
+### 2. Always resolve household_id from the session
+
+```ts
+// ✅ CORRECT — household_id from DB, scoped to the authenticated user
+const householdId = await resolveHouseholdId(user.id);  // queries household_members
+
+// ❌ NEVER — household_id from caller input
+async function saveX(data: XInput & { household_id: string }) { ... }
+```
+
+The helper:
+```ts
+async function resolveHouseholdId(userId: string): Promise<string | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from('household_members')
+    .select('household_id')
+    .eq('user_id', userId)
+    .is('left_at', null)
+    .limit(1)
+    .maybeSingle();
+  return data?.household_id ?? null;
+}
+```
+
+### 3. Standard Server Action shape
+
+```ts
+'use server';
+import { createClient } from '@/lib/supabase/server';
+
+export type XActionResult = { success: true } | { success: false; error: string };
+
+export async function saveX(payload: XPayload): Promise<XActionResult> {
+  const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return { success: false, error: 'Not authenticated' };
+
+  // Validate inputs here (no Zod yet — manual guards are fine)
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) return { success: false, error: 'No active household found' };
+
+  const { error } = await supabase.from('your_table').upsert({ household_id: householdId, ...payload });
+  if (error) return { success: false, error: 'Failed to save. Please try again.' };
+  return { success: true };
+}
+```
+
+### 4. Client component consumption
+
+```tsx
+'use client';
+import { saveX } from './actions';
+
+// In handler:
+const result = await saveX(payload);
+if (!result.success) setSaveError(result.error);
+```
+
+### 5. Replace alert() with inline error banner
+
+```tsx
+{saveError && (
+  <div role="alert" className="... text-red-300">
+    <span>{saveError}</span>
+    <button onClick={() => setSaveError(null)}>✕</button>
+  </div>
+)}
+```
+
+### 6. Unit test skeleton (vitest)
+
+Mock `@/lib/supabase/server` with `vi.mock(...)` and test:
+- Unauthenticated → error, no DB write
+- No household → error, no DB write  
+- Happy path → household_id from session passed to upsert
+- DB error → error returned to caller
+
+---
+
+## RLS green-light
+
+All target tables have full RLS coverage (Rabin audit, `rls-coverage-audit.md`).
+Using the Supabase anon key with the SSR client means RLS is always enforced.
+**Never use the service-role key in Server Actions that handle user data.**
+
+---
+
+## What stays in FastAPI
+
+Heavy compute: backtest, analyze/*, synthesis, growth-story. These do NOT
+become Server Actions — they stay Docker-local and are called via
+`apiFetch('/api/analyze/...')` with `NEXT_PUBLIC_API_URL`.
+
+# Decision: Auto-provision household on signup via DB trigger
+
+**Author:** Hockney (Backend Dev)  
+**Date:** 2026-05-02  
+**Status:** Implemented — migration `20260502120000_auto_provision_household_on_signup.sql`
+
+## Context
+
+When the frontend migrated from FastAPI `/api/finances` to a Next.js Server Action writing directly to Supabase (PR #140), the `resolveHouseholdId()` helper began returning `null` for users with no `household_members` row. The FastAPI backend had implicitly handled household provisioning at the application layer; there was no DB-level guarantee.
+
+## Decision
+
+**Add a Postgres trigger** (`trg_auth_users_create_household`) on `auth.users` AFTER INSERT that:
+1. Inserts a personal `households` row (name derived from `raw_user_meta_data.full_name` → `email` → `'My Household'`)
+2. Inserts an `owner` row in `household_members`
+
+This follows the same pattern as `trg_auth_users_create_profile` (migration `20260430130400`): SECURITY DEFINER + `SET search_path = public, auth`.
+
+Also included: an idempotent backfill for all existing `auth.users` rows without an active household membership.
+
+## Rationale
+
+- **Trigger is the correct long-term fix**: it fires at the DB layer regardless of whether provisioning comes from FastAPI, a Server Action, OAuth, or a future CLI tool.
+- **Option B (frontend lazy-create)** was rejected: it would require a `service_role` client in a Server Action (bypasses RLS), and it pushes a DB invariant into application code.
+- Minimally invasive: no changes to the Server Action, no new tables, no RLS changes.
+
+## Affected Teams
+
+- **Frontend (Fenster):** No changes required. `resolveHouseholdId` will now always find a row for authenticated users.
+- **Backend (Hockney):** The existing `get_user_household_id()` service function continues to work correctly; it is a pure lookup.
+- **Data (McManus):** The trigger mirrors the `handle_new_auth_user()` pattern already in `20260430130400`. Schema is unchanged.
+
+# Soften /api Rewrite Guard — Skip Instead of Throw
+
+**Author:** Kujan (DevOps)  
+**Date:** 2026-04-30  
+**Status:** MERGED  
+**PR:** #139
+
+## Decision
+
+The production guard in `apps/frontend/next.config.ts` that throws when `NEXT_PUBLIC_API_URL` is missing has been replaced with a **skip-with-warning** pattern.
+
+## Why
+
+The architecture directive is: **frontend talks to Supabase directly via Server Actions — no public backend exists on Vercel.** Therefore, `NEXT_PUBLIC_API_URL` will never be set on Vercel (production or preview), making the original guard block all Vercel builds.
+
+Evidence: PR #138 (`squad/finances-server-action`) failed its Vercel preview deploy due to the missing env var.
+
+## What Changed
+
+1. **When `NODE_ENV === 'production'` and `NEXT_PUBLIC_API_URL` is missing/empty/private/localhost:**
+   - Log a clear warning that `/api/*` rewrites are disabled (this is expected).
+   - Return empty rewrites array (so unmigrated `/api/*` call sites will get a 404 at runtime — fail-fast, desired behavior).
+
+2. **When `NODE_ENV === 'production'` and `NEXT_PUBLIC_API_URL` is a valid public URL:**
+   - Register the rewrite as before (preserves opt-in for self-hosted backend deployments).
+
+3. **Dev environment (`NODE_ENV !== 'production'):**
+   - Fallback to `http://127.0.0.1:8000` (Docker Compose or Aspire) — unchanged.
+
+4. **Invalid URLs in production:**
+   - Still throw with a clear error (bad format, wrong protocol, etc.) — actual configuration errors should fail-fast.
+
+## Key Insight
+
+Guard logic should distinguish between:
+- **Intended absence** (e.g., no backend URL on Vercel) → skip gracefully with warnings
+- **Actual configuration errors** (e.g., invalid URL format) → fail-fast with errors
+
+The architecture directive is the source of truth for what's intended.
+
+## Testing
+
+✓ Production build succeeds without `NEXT_PUBLIC_API_URL`  
+✓ Warning message correctly logged  
+✓ Dev environment fallback verified  
+
+## Impact
+
+- **Unblocks** Vercel preview deploys (PR #138 and future PRs).
+- **Preserves** opt-in rewrite behavior for self-hosted backends.
+- **Improves** error messaging for actual configuration problems.
+### 2026-05-02: DB triggers own user provisioning (new)
+
+**What:**
+Database triggers, not application code, own user provisioning. `handle_new_auth_user` (user_profile) and `handle_new_user_household` (households via `trg_households_add_creator` chain) are the canonical signup hooks. RLS prevents users from inserting their own household_members rows; provisioning must be SECURITY DEFINER.
+
+**Why:**
+RLS policies are per-row; user cannot insert their own household_members rows as owner. Only SECURITY DEFINER functions can bypass RLS for cross-RLS inserts. Keeps provisioning logic in database (closer to data, auditable, transactional) rather than scattered in application layer.
+
+**By:** Hockney, Coordinator
+
+---
+
+### 2026-05-02: Backfill migrations use standard auth columns (new)
+
+**What:**
+Backfill migrations must use only standard auth.users columns (id, email). Supabase-only columns like raw_user_meta_data are absent in the shadow DB harness.
+
+**Why:**
+CI harness runs against a shadow DB that excludes Supabase-only columns. Migrations fail if they reference raw_user_meta_data. Backfills must be portable across all database environments.
+
+**By:** Hockney
+
+---
+
+### 2026-05-02: Never duplicate trigger work downstream (new)
+
+**What:**
+When chaining triggers, never duplicate work the downstream trigger already does. `trg_households_add_creator` is idempotent and authoritative for household_members owner row; don't re-insert it in upstream triggers.
+
+**Why:**
+Duplicate inserts cause constraint violations (unique key on household_id + user_id + role for owner), bloat logs, and hide dependency chains. Idempotency in trigger design requires documenting which trigger owns which side effects.
+
+**By:** Coordinator
