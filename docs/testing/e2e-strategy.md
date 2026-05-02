@@ -286,19 +286,19 @@ CI selects suites via `--grep @smoke`, `--grep "@flow|@auth"`, etc.
 ## 11. Dependency Graph
 
 ```
-#A Playwright harness scaffold
- ├── #C Auth + household smoke test  (depends on A, B)
- ├── #D Current-finances save flow   (depends on A, B)
- ├── #E Trades create + list         (depends on A, B)
- └── #F GitHub Actions workflow      (depends on A)
-      └── #G Production smoke        (depends on A, F)
+#144 Playwright harness scaffold (squad:redfoot)
+ ├── #146 Auth + household smoke test  (depends on #144, #145)
+ ├── #147 Current-finances save flow   (depends on #144, #145)
+ ├── #148 Trades create + list         (depends on #144, #145)
+ └── #149 GitHub Actions workflow      (depends on #144)
+      └── #150 Production smoke        (depends on #144, #149)
 
-#B Test-user provisioning helper
- ├── #C Auth + household smoke test  (depends on A, B)
- ├── #D Current-finances save flow   (depends on A, B)
- └── #E Trades create + list         (depends on A, B)
+#145 Test-user provisioning helper (squad:hockney)
+ ├── #146 Auth + household smoke test  (depends on #144, #145)
+ ├── #147 Current-finances save flow   (depends on #144, #145)
+ └── #148 Trades create + list         (depends on #144, #145)
 
-#H Seed/cleanup data utilities       (independent, enhances B)
+#151 Seed/cleanup data utilities (squad:hockney — independent, enhances #145)
 ```
 
 ## 12. Open Questions
