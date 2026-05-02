@@ -9,6 +9,8 @@
 
 ## Recent Learnings
 
+📌 **Household auto-provisioning gap (2026-05-02):** When the finances POST flow migrated from FastAPI to a Next.js Server Action (PR #140), the household provisioning that the Python layer had been doing implicitly was silently dropped. `resolveHouseholdId()` returned null because no `household_members` row existed for users who signed up via Supabase Auth directly. Fix: `supabase/migrations/20260502120000_auto_provision_household_on_signup.sql` — adds `trg_auth_users_create_household` AFTER INSERT trigger on `auth.users` (SECURITY DEFINER, same pattern as `trg_auth_users_create_profile` in migration 20260430130400) + idempotent backfill. Lesson: every DB-level invariant (household membership, profile existence) must live in a trigger, not application code, once the application layer is no longer the sole write path.
+
 📌 **Team update (2026-04-30T15:00:37Z):** Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
 
 📌 **Vercel runbook created (2026-05-01):**
