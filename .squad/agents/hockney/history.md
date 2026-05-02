@@ -7,6 +7,10 @@
 - **Created:** 2026-02-23T22:46:19Z
 
 
+## 2026-05-02: Prod migration verify + unblock — migration was NOT applied; applied now + backfill ran + EXECUTE revoked
+
+Migration `20260502120000_auto_provision_household_on_signup` was absent from prod Supabase (last applied was `20260501022922`). Applied via MCP `apply_migration` (trigger function + backfill). Backfill created households for all existing users without one (including Jony). Security advisor flagged `handle_new_user_household()` callable by `anon`/`authenticated` — immediately revoked EXECUTE on both roles via `execute_sql`. Also added REVOKE to migration file on disk. Issue #145 (E2E test-user provisioning helper) is queued for next session.
+
 ## Recent Learnings
 
 📌 **Household auto-provisioning gap (2026-05-02):** When the finances POST flow migrated from FastAPI to a Next.js Server Action (PR #140), the household provisioning that the Python layer had been doing implicitly was silently dropped. `resolveHouseholdId()` returned null because no `household_members` row existed for users who signed up via Supabase Auth directly. Fix: `supabase/migrations/20260502120000_auto_provision_household_on_signup.sql` — adds `trg_auth_users_create_household` AFTER INSERT trigger on `auth.users` (SECURITY DEFINER, same pattern as `trg_auth_users_create_profile` in migration 20260430130400) + idempotent backfill. Lesson: every DB-level invariant (household membership, profile existence) must live in a trigger, not application code, once the application layer is no longer the sole write path.
