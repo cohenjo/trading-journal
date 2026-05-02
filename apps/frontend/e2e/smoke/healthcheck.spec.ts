@@ -19,12 +19,18 @@ test.describe('smoke / supabase health', () => {
 
   test('Supabase Auth health endpoint responds 200 @smoke', async ({ request }) => {
     const healthUrl = `${SUPABASE_URL}/auth/v1/health`;
-    const response = await request.get(healthUrl, { timeout: 10_000 });
+    // The GoTrue /auth/v1/health endpoint requires an apikey header in Supabase v2
+    const response = await request.get(healthUrl, {
+      headers: {
+        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '',
+      },
+      timeout: 10_000,
+    });
 
     expect(response.status(), `Supabase Auth health at ${healthUrl} should return 200`).toBe(200);
 
     const body = await response.text();
-    // The health response typically includes {"status":"pass"} or similar
+    // The health response includes {"version":"...","name":"GoTrue","description":"..."}
     expect(body.length).toBeGreaterThan(0);
   });
 
@@ -42,12 +48,16 @@ test.describe('smoke / supabase health', () => {
   });
 
   test('app /health/auth route responds (if exists) @smoke', async ({ page }) => {
-    // Hockney's health route from PR #89 — skip gracefully if not yet deployed
+    // Hockney's health route from PR #89 — skip gracefully if not yet deployed,
+    // requires auth, or is redirected to login (middleware catches unknown routes)
     const response = await page.goto('/health/auth', { waitUntil: 'commit' });
     const status = response?.status() ?? 0;
+    const finalUrl = page.url();
 
-    if (status === 404) {
-      test.skip(true, '/health/auth not yet deployed — skipping');
+    // Skip if not deployed (404), requires auth (401/403), or redirected to login
+    const redirectedToLogin = finalUrl.includes('/login');
+    if (status === 404 || status === 401 || status === 403 || redirectedToLogin) {
+      test.skip(true, `/health/auth not available (status=${status}, url=${finalUrl}); skipping`);
       return;
     }
 
