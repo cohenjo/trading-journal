@@ -4974,3 +4974,36 @@ When chaining triggers, never duplicate work the downstream trigger already does
 Duplicate inserts cause constraint violations (unique key on household_id + user_id + role for owner), bloat logs, and hide dependency chains. Idempotency in trigger design requires documenting which trigger owns which side effects.
 
 **By:** Coordinator
+
+---
+
+### 2026-05-02: Automated E2E Testing Flow (Testing Directive)
+
+**What:**
+Build an automated E2E testing flow (Playwright preferred) that exercises the live app click-by-click — including a dedicated test user — so we can verify "save asset / save fund / save finance" works end-to-end without manual checks. Track work via GitHub issues assigned to squad members.
+
+**Why:**
+Repeated regressions on save flows ("No active household found", 404s) are surfacing in production and only get caught by the user manually clicking. Need automated coverage as a gate.
+
+**Status:** 🟢 In Progress (PRs #143–#156 shipped; 30 passed / 2 skipped / 0 failed locally)
+
+**By:** Coordinator (from Jony directive)
+
+**Related PRs:** #143 (strategy), #152 (harness), #153 (CI), #154 (test-user), #156 (green iteration)
+
+---
+
+### 2026-05-02: Production Household Unblock (Emergency Fix)
+
+**What:**
+Prod Household Unblock — migration `20260502120000_auto_provision_household_on_signup` was not applied to production Supabase. Manually applied via `apply_migration` (with REVOKE for security advisor fix), backfilled all users without active household_members rows, and revoked EXECUTE from `anon` and `authenticated` roles on `handle_new_user_household()`.
+
+**Why:**
+Emergency blocker: users seeing "No active household found for your account" on `/current-finances`. Backfill + RLS fix resolves all household scoping issues for both existing users and e2e test provisioning.
+
+**Status:** ✅ Resolved (Jony unblocked; E2E test-user provisioning ready for #145)
+
+**By:** Hockney (Backend Dev), Coordinator (follow-up)
+
+**Related Issues:** #142 (PR; fixed), #145 (E2E test-user provisioning; queued)
+
