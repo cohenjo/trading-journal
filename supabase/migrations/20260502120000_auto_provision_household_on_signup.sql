@@ -88,11 +88,7 @@ with missing_users as (
   -- Find auth.users rows with no active household membership
   select
     u.id   as user_id,
-    coalesce(
-      nullif(trim(u.raw_user_meta_data->>'full_name'), ''),
-      u.email,
-      'My Household'
-    ) as household_name
+    coalesce(u.email, 'My Household') as household_name
   from auth.users u
   where not exists (
     select 1
