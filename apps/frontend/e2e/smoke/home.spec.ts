@@ -11,7 +11,7 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('smoke / home', () => {
-  test('GET / resolves (redirect to /summary) without 5xx or console errors', async ({ page }) => {
+  test('GET / resolves (redirect to /summary) without 5xx or console errors @smoke', async ({ page }) => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
 
@@ -46,7 +46,7 @@ test.describe('smoke / home', () => {
     await expect(page.locator('body')).not.toBeEmpty();
   });
 
-  test('page title is present', async ({ page }) => {
+  test('page title is present @smoke', async ({ page }) => {
     await page.goto('/');
     const title = await page.title();
     expect(title.length, 'Page should have a non-empty title').toBeGreaterThan(0);

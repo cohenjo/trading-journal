@@ -13,6 +13,9 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
+    "test:e2e:smoke": "playwright test --grep @smoke",
+    "test:e2e:flows": "playwright test --grep @flow",
+    "test:e2e:auth": "playwright test --grep @auth",
     "test:e2e:dev": "BASE_URL=https://trading-journal-avqth0l0g-cohenjos-projects.vercel.app playwright test",
     "test:e2e:cleanup": "tsx e2e/scripts/cleanup-stale-users.ts"
   },

@@ -25,7 +25,7 @@
 import { test, expect } from '../../e2e/fixtures/auth';
 
 test.describe('P0 flow: /current-finances (authenticated)', () => {
-  test('/current-finances loads without 5xx', async ({ authenticatedUser: { page } }) => {
+  test('/current-finances loads without 5xx @flow', async ({ authenticatedUser: { page } }) => {
     const serverErrors: string[] = [];
     page.on('response', (resp) => {
       if (resp.status() >= 500) serverErrors.push(`${resp.status()} ${resp.url()}`);
@@ -37,7 +37,7 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
     expect(serverErrors).toHaveLength(0);
   });
 
-  test('/current-finances renders the finance editor heading', async ({
+  test('/current-finances renders the finance editor heading @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/current-finances');
@@ -47,7 +47,7 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test('/current-finances renders at least one donut chart or chart container', async ({
+  test('/current-finances renders at least one donut chart or chart container @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/current-finances');
@@ -57,7 +57,7 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test('/current-finances has no console errors on load', async ({
+  test('/current-finances has no console errors on load @flow', async ({
     authenticatedUser: { page },
   }) => {
     const consoleErrors: string[] = [];

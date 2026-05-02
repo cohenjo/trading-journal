@@ -6,6 +6,15 @@
 # Local dev server (must be running separately)
 cd apps/frontend && npm run test:e2e
 
+# Run only smoke tests (no auth required — fast)
+npm run test:e2e:smoke
+
+# Run only flow tests (requires Supabase env)
+npm run test:e2e:flows
+
+# Run only auth tests (requires Supabase env)
+npm run test:e2e:auth
+
 # Against a deployed Vercel preview / dev URL
 BASE_URL=https://trading-journal-git-main-cohenjos-projects.vercel.app npm run test:e2e:dev
 
@@ -34,12 +43,18 @@ e2e/
 ├── auth/                   ← P1: login + logout flow against dev Supabase
 │   └── (next round — after Kujan confirms env boots)
 ├── flows/                  ← P1: critical user flows
-│   └── (next round — after Fenster's page audit lands in docs/design-hosting/page-audit.md)
+│   ├── root.spec.ts
+│   ├── current-finances.spec.ts
+│   ├── plan.spec.ts
+│   └── summary.spec.ts
 ├── rls/                    ← P2: data isolation tests
 │   └── (next round — maps to pgTAP tests in supabase/tests/)
 ├── fixtures/
 │   ├── admin.ts            ← Supabase service-role admin client (server-only)
-│   └── auth.ts             ← authenticatedUser + householdOwner Playwright fixtures
+│   ├── auth.ts             ← authenticatedUser + householdOwner Playwright fixtures
+│   ├── auth-cookie.ts      ← cookie-injection auth (preferred over auth.ts)
+│   ├── test-user.ts        ← unified fixture: user + household provisioning (issue #144)
+│   └── seed-data.ts        ← per-test data seeding helpers (issue #144)
 └── scripts/
     └── cleanup-stale-users.ts  ← delete e2e_* users older than 1h
 ```
@@ -109,18 +124,106 @@ Reads from env:
 - `NEXT_PUBLIC_SUPABASE_URL` — shared with the app
 - `SUPABASE_SERVICE_ROLE_KEY` — test-only; **never prefix with NEXT_PUBLIC_**
 
-### `fixtures/auth.ts` — Playwright fixtures
+### `fixtures/auth-cookie.ts` — preferred auth fixture (cookie injection)
+
+Directly calls the Supabase REST password-grant endpoint, builds the
+`@supabase/ssr` cookie format, and injects it into the browser context.
+This is more reliable than the CDN-based `auth.ts` fixture because it
+sets cookies correctly for the Next.js SSR middleware.
+
+### `fixtures/test-user.ts` — unified user + household fixture (issue #144)
+
+The canonical fixture for tests that need a fully provisioned user.
+
+**What it does:**
+1. Creates a throwaway Supabase user via admin API.
+2. Injects auth cookie using the `auth-cookie.ts` pattern.
+3. Polls `household_members` until the auto-provision trigger fires (≤5s timeout).
+4. Returns `{ page, userId, email, householdId }`.
+5. Tears down (deletes user → cascades household data) in afterAll.
+
+**Usage:**
+```typescript
+import { test } from '../fixtures/test-user';
+
+test('my auth flow @auth', async ({ testUser: { page, householdId } }) => {
+  await page.goto('/current-finances');
+  // householdId available for seeding via seed-data.ts helpers
+});
+```
+
+### `fixtures/seed-data.ts` — per-test data seeding (issue #144)
+
+Data seeding helpers scoped to a household. All helpers use the admin client (bypass RLS).
+
+| Helper | Table | Description |
+|--------|-------|-------------|
+| `seedFund(householdId, data)` | `finance_snapshots` | Inserts an Investments-category FinanceItem |
+| `seedAsset(householdId, data)` | `finance_snapshots` | Inserts an Assets-category FinanceItem |
+| `seedTrade(householdId, data)` | `public.trade` | Inserts an IB Flex-format trade row |
+| `cleanupHouseholdData(householdId)` | multiple | Deletes all seeded rows for the household |
+
+**Usage:**
+```typescript
+import { test } from '../fixtures/test-user';
+import { seedFund, seedTrade, cleanupHouseholdData } from '../fixtures/seed-data';
+
+test.describe('holdings flow', () => {
+  let householdId: string;
+
+  test.beforeEach(async ({ testUser }) => {
+    householdId = testUser.householdId;
+    await seedFund(householdId, { name: 'S&P 500 ETF', value: 50_000 });
+    await seedTrade(householdId, { symbol: 'SPY', side: 'BUY', quantity: 10, price: 500 });
+  });
+
+  test.afterEach(async () => {
+    await cleanupHouseholdData(householdId);
+  });
+
+  test('holdings page shows seeded fund @flow', async ({ testUser: { page } }) => {
+    await page.goto('/holdings');
+    await expect(page.locator('text=S&P 500 ETF')).toBeVisible();
+  });
+});
+```
+
+### `fixtures/auth.ts` — Playwright fixtures (legacy)
 
 Exports two custom fixtures:
 
 **`authenticatedUser`** — creates a throwaway Supabase user, signs in via the
 browser login flow, and returns `{ page, user }`. Tears down (deletes user)
-after the test.
+after the test. ⚠️ Uses CDN-loaded supabase-js — prefer `auth-cookie.ts` or
+`test-user.ts` for new tests.
 
 **`householdOwner`** — builds on `authenticatedUser`; additionally creates a
 household and membership row via the admin API, then returns `{ page, user, householdId }`.
 
 ---
+
+## Test Tagging Conventions
+
+Tests use inline tags in the test name to enable `--grep` filtering:
+
+| Tag | Tier | Meaning |
+|-----|------|---------|
+| `@smoke` | P0 | No auth, no seed data — just proves page renders |
+| `@auth` | P1 | Requires Supabase auth (uses `testUser` fixture) |
+| `@flow` | P1 | End-to-end user flow (requires auth + optional seed data) |
+| `@rls` | P2 | Data-isolation / Row Level Security verification |
+
+**Example:**
+```typescript
+test('user sees only their own trades @rls', async ({ testUser: { page } }) => { ... });
+```
+
+**Running tagged subsets:**
+```bash
+npm run test:e2e:smoke    # --grep @smoke
+npm run test:e2e:flows    # --grep @flow
+npm run test:e2e:auth     # --grep @auth
+```
 
 ## Test Data Hygiene
 

@@ -25,7 +25,7 @@
 import { test, expect } from '../../e2e/fixtures/auth';
 
 test.describe('P0 flow: /summary (authenticated)', () => {
-  test('/summary loads without 5xx', async ({ authenticatedUser: { page } }) => {
+  test('/summary loads without 5xx @flow', async ({ authenticatedUser: { page } }) => {
     const serverErrors: string[] = [];
     page.on('response', (resp) => {
       if (resp.status() >= 500) serverErrors.push(`${resp.status()} ${resp.url()}`);
@@ -37,7 +37,7 @@ test.describe('P0 flow: /summary (authenticated)', () => {
     expect(serverErrors).toHaveLength(0);
   });
 
-  test('/summary renders chart area or loading state (not blank)', async ({
+  test('/summary renders chart area or loading state (not blank) @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/summary');
@@ -45,7 +45,7 @@ test.describe('P0 flow: /summary (authenticated)', () => {
     await expect(page.locator('text=Application error')).toHaveCount(0);
   });
 
-  test('/summary renders a canvas or chart container', async ({
+  test('/summary renders a canvas or chart container @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/summary');
@@ -57,7 +57,7 @@ test.describe('P0 flow: /summary (authenticated)', () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test('/summary has no console errors on load', async ({ authenticatedUser: { page } }) => {
+  test('/summary has no console errors on load @flow', async ({ authenticatedUser: { page } }) => {
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -77,7 +77,7 @@ test.describe('P0 flow: /summary (authenticated)', () => {
     expect(critical).toHaveLength(0);
   });
 
-  test('/summary legend renders (or is absent when no data)', async ({
+  test('/summary legend renders (or is absent when no data) @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/summary');

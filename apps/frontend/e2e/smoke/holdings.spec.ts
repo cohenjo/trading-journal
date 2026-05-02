@@ -9,7 +9,7 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('smoke / holdings (unauthenticated)', () => {
-  test('GET /holdings does not serve portfolio data without auth', async ({ page }) => {
+  test('GET /holdings does not serve portfolio data without auth @smoke', async ({ page }) => {
     const consoleErrors: string[] = [];
     const serverErrors: string[] = [];
 
@@ -52,7 +52,7 @@ test.describe('smoke / holdings (unauthenticated)', () => {
     expect(criticalErrors, `Console errors: ${criticalErrors.join('\n')}`).toHaveLength(0);
   });
 
-  test('GET /holdings renders some DOM (not blank page)', async ({ page }) => {
+  test('GET /holdings renders some DOM (not blank page) @smoke', async ({ page }) => {
     await page.goto('/holdings');
     await expect(page.locator('body')).not.toBeEmpty();
     const html = await page.content();

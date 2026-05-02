@@ -25,7 +25,7 @@
 import { test, expect } from '../../e2e/fixtures/auth';
 
 test.describe('P0 flow: /plan (authenticated)', () => {
-  test('/plan loads without 5xx', async ({ authenticatedUser: { page } }) => {
+  test('/plan loads without 5xx @flow', async ({ authenticatedUser: { page } }) => {
     const serverErrors: string[] = [];
     page.on('response', (resp) => {
       if (resp.status() >= 500) serverErrors.push(`${resp.status()} ${resp.url()}`);
@@ -37,7 +37,7 @@ test.describe('P0 flow: /plan (authenticated)', () => {
     expect(serverErrors).toHaveLength(0);
   });
 
-  test('/plan renders the plan editor or loading state (not blank)', async ({
+  test('/plan renders the plan editor or loading state (not blank) @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/plan');
@@ -47,7 +47,7 @@ test.describe('P0 flow: /plan (authenticated)', () => {
     await expect(page.locator('text=Application error')).toHaveCount(0);
   });
 
-  test('/plan renders projection chart or plan editor heading', async ({
+  test('/plan renders projection chart or plan editor heading @flow', async ({
     authenticatedUser: { page },
   }) => {
     await page.goto('/plan');
@@ -61,7 +61,7 @@ test.describe('P0 flow: /plan (authenticated)', () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test('/plan has no console errors on load', async ({ authenticatedUser: { page } }) => {
+  test('/plan has no console errors on load @flow', async ({ authenticatedUser: { page } }) => {
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
