@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from app.services.trading_batch import run_trading_sync_batch
 from app.worker.bonds_scanner import refresh_bond_scanner_results
 
 JobPayload = dict[str, object]
@@ -25,6 +26,12 @@ class JobSchedule:
 
 JOB_HANDLERS: dict[str, JobHandler] = {}
 JOB_SCHEDULES: list[JobSchedule] = [
+    JobSchedule(
+        job_id="trading_sync",
+        kind="interval",
+        seconds=15 * 60,
+        handler=run_trading_sync_batch,
+    ),
     JobSchedule(
         job_id="bonds_scanner_refresh",
         kind="cron",

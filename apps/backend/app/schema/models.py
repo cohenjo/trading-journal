@@ -1,6 +1,7 @@
 from datetime import datetime, date as date_type
 from decimal import Decimal
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import BigInteger, Column, Numeric
 from sqlmodel import Field, SQLModel
@@ -149,6 +150,7 @@ class DailyBar(SQLModel, table=True):
 
 class Execution(SQLModel, table=True):
     execId: str = Field(primary_key=True, index=True)
+    household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
     permId: int
     orderId: int
     clientId: int
@@ -177,6 +179,7 @@ class MatchedTrade(SQLModel, table=True):
     close_price: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     pnl: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     notes: Optional[str] = None
+
 
 # Import backtest models to register them with SQLModel.metadata
 # Import finance models for alebmic registration

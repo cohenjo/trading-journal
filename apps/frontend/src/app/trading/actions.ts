@@ -16,6 +16,7 @@ export interface TradingAccountConfig {
   linked_account_id: string | null;
   account_id: string | null;
   last_synced: string | null;
+  last_synced_at: string | null;
 }
 
 export interface TradingAccountConfigInput {
@@ -69,6 +70,7 @@ const CONFIG_SELECT = [
   'linked_account_id',
   'account_id',
   'last_synced',
+  'last_synced_at',
 ].join(', ');
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
