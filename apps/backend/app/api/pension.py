@@ -261,12 +261,8 @@ def _matches_pension_record(item: dict[str, Any], payload: dict[str, Any]) -> bo
     if payload_account_number or item_account_number:
         return bool(payload_account_number) and item_account_number == payload_account_number
 
-    return (
-        _safe_text(details.get("pension_product")) in {"", payload_product_name}
-        and (
-            payload_fund_name in legacy_names
-            or payload_display_name in legacy_names
-        )
+    return _safe_text(details.get("pension_product")) in {"", payload_product_name} and (
+        payload_fund_name in legacy_names or payload_display_name in legacy_names
     )
 
 
@@ -281,26 +277,10 @@ def _apply_pension_metadata(item: dict[str, Any], payload: dict[str, Any]) -> di
 
 def _recalculate_snapshot(snapshot: FinanceSnapshot) -> None:
     items = snapshot.data.get("items", [])
-    total_savings = sum(
-        _safe_float(item.get("value"))
-        for item in items
-        if item.get("category") == "Savings"
-    )
-    total_investments = sum(
-        _safe_float(item.get("value"))
-        for item in items
-        if item.get("category") == "Investments"
-    )
-    assets_category_total = sum(
-        _safe_float(item.get("value"))
-        for item in items
-        if item.get("category") == "Assets"
-    )
-    total_liabilities = sum(
-        _safe_float(item.get("value"))
-        for item in items
-        if item.get("category") == "Liabilities"
-    )
+    total_savings = sum(_safe_float(item.get("value")) for item in items if item.get("category") == "Savings")
+    total_investments = sum(_safe_float(item.get("value")) for item in items if item.get("category") == "Investments")
+    assets_category_total = sum(_safe_float(item.get("value")) for item in items if item.get("category") == "Assets")
+    total_liabilities = sum(_safe_float(item.get("value")) for item in items if item.get("category") == "Liabilities")
 
     calculated_total_assets = total_savings + total_investments + assets_category_total
     snapshot.data["items"] = items
@@ -316,11 +296,7 @@ def _recalculate_snapshot(snapshot: FinanceSnapshot) -> None:
 def upsert_snapshot_pension(snapshot: FinanceSnapshot, payload: dict[str, Any]) -> None:
     items = snapshot.data.get("items", [])
     existing_item = next(
-        (
-            item
-            for item in items
-            if item.get("type") == "Pension" and _matches_pension_record(item, payload)
-        ),
+        (item for item in items if item.get("type") == "Pension" and _matches_pension_record(item, payload)),
         None,
     )
 
@@ -340,8 +316,7 @@ def upsert_plan_pension(plan: Plan, payload: dict[str, Any]) -> None:
         (
             item
             for item in plan_items
-            if (item.get("account_settings") or {}).get("type") == "Pension"
-            and _matches_pension_record(item, payload)
+            if (item.get("account_settings") or {}).get("type") == "Pension" and _matches_pension_record(item, payload)
         ),
         None,
     )
@@ -392,10 +367,7 @@ def _is_spouse_owner(owner: str) -> bool:
 
 
 def _owner_birth_year(settings: dict[str, Any], owner: str) -> int:
-    primary_birth_year = int(
-        settings.get("birthYear")
-        or settings.get("primaryUser", {}).get("birthYear", 1980)
-    )
+    primary_birth_year = int(settings.get("birthYear") or settings.get("primaryUser", {}).get("birthYear", 1980))
     if _is_spouse_owner(owner):
         return int(settings.get("spouse", {}).get("birthYear", primary_birth_year))
     return primary_birth_year
@@ -488,16 +460,12 @@ def build_pension_dashboard_payload(
 
     if plan:
         for milestone in plan.data.get("milestones", []):
-            if milestone.get("type") == "Retirement" or "Retirement" in milestone.get(
-                "name", ""
-            ):
+            if milestone.get("type") == "Retirement" or "Retirement" in milestone.get("name", ""):
                 owner = milestone.get("owner", "You")
                 milestone_date = milestone.get("date")
                 if milestone_date:
                     try:
-                        milestone_year = datetime.strptime(
-                            milestone_date[:10], "%Y-%m-%d"
-                        ).year
+                        milestone_year = datetime.strptime(milestone_date[:10], "%Y-%m-%d").year
                     except ValueError:
                         continue
                     retirement_years[owner] = milestone_year
@@ -548,8 +516,7 @@ def build_pension_dashboard_payload(
                         or account.get("details", {}).get("monthly_contribution")
                     )
                     current_projection_values[series_id] = (
-                        current_projection_values[series_id] * (1 + monthly_rate)
-                        + deposits
+                        current_projection_values[series_id] * (1 + monthly_rate) + deposits
                     )
                 point[series_id] = current_projection_values[series_id]
             projections.append(point)
@@ -571,126 +538,143 @@ def remove_pension_identity(
     return [item for item in items if not _matches_pension_identity(item, pension_id)]
 
 
-@router.post("/upload")
+def apply_pension_analysis_result(
+    db: Session,
+    household_id: UUID,
+    owner: str,
+    result: dict[str, Any],
+    filename: Optional[str],
+) -> dict[str, Any]:
+    """Persist one parsed pension PDF result into household snapshots and plan data."""
+
+    target_date = parse_report_date(result.get("Report Date"))
+    payload = extract_pension_payload(owner, result, filename, target_date)
+    upload_warnings = _validate_pension_payload(payload)
+
+    snapshot = db.exec(
+        select(FinanceSnapshot).where(
+            FinanceSnapshot.household_id == household_id,
+            FinanceSnapshot.date == target_date,
+        )
+    ).first()
+    snapshot_updated = False
+
+    if not snapshot:
+        closest_past = db.exec(
+            select(FinanceSnapshot)
+            .where(
+                FinanceSnapshot.household_id == household_id,
+                FinanceSnapshot.date < target_date,
+            )
+            .order_by(FinanceSnapshot.date.desc())
+            .limit(1)
+        ).first()
+        if closest_past:
+            new_data = copy.deepcopy(closest_past.data) if closest_past.data else copy.deepcopy(EMPTY_SNAPSHOT_DATA)
+            snapshot = FinanceSnapshot(
+                household_id=household_id,
+                date=target_date,
+                data=new_data,
+                net_worth=closest_past.net_worth,
+                total_assets=closest_past.total_assets,
+                total_liabilities=closest_past.total_liabilities,
+            )
+        else:
+            snapshot = FinanceSnapshot(
+                household_id=household_id,
+                date=target_date,
+                data=copy.deepcopy(EMPTY_SNAPSHOT_DATA),
+                net_worth=0.0,
+                total_assets=0.0,
+                total_liabilities=0.0,
+            )
+
+    if snapshot:
+        upsert_snapshot_pension(snapshot, payload)
+        flag_modified(snapshot, "data")
+        db.add(snapshot)
+        snapshot_updated = True
+
+    latest_snapshot = db.exec(
+        select(FinanceSnapshot)
+        .where(FinanceSnapshot.household_id == household_id)
+        .order_by(FinanceSnapshot.date.desc())
+        .limit(1)
+    ).first()
+    latest_snapshot_updated = False
+    if latest_snapshot and latest_snapshot.date != target_date:
+        upsert_snapshot_pension(latest_snapshot, payload)
+        flag_modified(latest_snapshot, "data")
+        db.add(latest_snapshot)
+        latest_snapshot_updated = True
+
+    plan = db.exec(
+        select(Plan).where(Plan.household_id == household_id).order_by(Plan.updated_at.desc()).limit(1)
+    ).first()
+    plan_updated = False
+    if plan:
+        upsert_plan_pension(plan, payload)
+        flag_modified(plan, "data")
+        db.add(plan)
+        plan_updated = True
+
+    if snapshot_updated or plan_updated or latest_snapshot_updated:
+        db.commit()
+        if snapshot_updated:
+            db.refresh(snapshot)
+        if latest_snapshot_updated:
+            db.refresh(latest_snapshot)
+        if plan_updated:
+            db.refresh(plan)
+
+    result["Pension Product"] = payload["details"]["pension_product"]
+    result["Pension Fund Name"] = payload["details"]["pension_fund_name"]
+    result["Pension Display Name"] = payload["details"]["pension_display_name"]
+    result["Account Number"] = payload["details"].get("account_number")
+
+    snapshot_dates = [target_date.isoformat()]
+    if latest_snapshot_updated and latest_snapshot:
+        snapshot_dates.append(latest_snapshot.date.isoformat())
+
+    response: dict[str, Any] = {
+        "status": "success",
+        "result": result,
+        "analysis_result": result,
+        "snapshot_updated": snapshot_updated,
+        "latest_snapshot_updated": latest_snapshot_updated,
+        "plan_updated": plan_updated,
+        "inserted_rows": int(snapshot_updated) + int(latest_snapshot_updated) + int(plan_updated),
+        "snapshot_dates": snapshot_dates,
+    }
+    if upload_warnings:
+        response["warnings"] = upload_warnings
+    return response
+
+
+@router.post("/upload", deprecated=True)
 async def upload_pension_report(
     owner: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_session),
     user_id: UUID = Depends(get_current_user_id),
 ):
-    """Upload and analyze a pension report PDF, updating snapshots and plans (household-scoped)."""
+    """Deprecated HTTP upload path retained for local/admin fallback only."""
+
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     try:
         root_dir = Path(__file__).parent.parent.parent.parent.parent
         reports_dir = root_dir / "reports" / owner
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        file_path = reports_dir / file.filename
+        file_path = reports_dir / (file.filename or "pension-report.pdf")
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
         result = await analyze_report(str(file_path))
-        target_date = parse_report_date(result.get("Report Date"))
-        payload = extract_pension_payload(owner, result, file.filename, target_date)
-
-        upload_warnings = _validate_pension_payload(payload)
-
-        # Query household-scoped snapshot
-        snapshot = db.exec(
-            select(FinanceSnapshot).where(
-                FinanceSnapshot.household_id == household_id,
-                FinanceSnapshot.date == target_date
-            )
-        ).first()
-        snapshot_updated = False
-
-        if not snapshot:
-            closest_past = db.exec(
-                select(FinanceSnapshot)
-                .where(
-                    FinanceSnapshot.household_id == household_id,
-                    FinanceSnapshot.date < target_date
-                )
-                .order_by(FinanceSnapshot.date.desc())
-                .limit(1)
-            ).first()
-
-            if closest_past:
-                new_data = copy.deepcopy(closest_past.data) if closest_past.data else copy.deepcopy(EMPTY_SNAPSHOT_DATA)
-                snapshot = FinanceSnapshot(
-                    household_id=household_id,
-                    date=target_date,
-                    data=new_data,
-                    net_worth=closest_past.net_worth,
-                    total_assets=closest_past.total_assets,
-                    total_liabilities=closest_past.total_liabilities,
-                )
-            else:
-                snapshot = FinanceSnapshot(
-                    household_id=household_id,
-                    date=target_date,
-                    data=copy.deepcopy(EMPTY_SNAPSHOT_DATA),
-                    net_worth=0.0,
-                    total_assets=0.0,
-                    total_liabilities=0.0,
-                )
-
-        if snapshot:
-            upsert_snapshot_pension(snapshot, payload)
-            flag_modified(snapshot, "data")
-            db.add(snapshot)
-            snapshot_updated = True
-
-        # Bug fix: also propagate to the latest snapshot so the pension
-        # appears on the dashboard immediately, even when later snapshots exist.
-        latest_snapshot = db.exec(
-            select(FinanceSnapshot)
-            .where(FinanceSnapshot.household_id == household_id)
-            .order_by(FinanceSnapshot.date.desc())
-            .limit(1)
-        ).first()
-        latest_snapshot_updated = False
-        if latest_snapshot and latest_snapshot.date != target_date:
-            upsert_snapshot_pension(latest_snapshot, payload)
-            flag_modified(latest_snapshot, "data")
-            db.add(latest_snapshot)
-            latest_snapshot_updated = True
-
-        plan = db.exec(select(Plan).limit(1)).first()
-        plan_updated = False
-        if plan:
-            upsert_plan_pension(plan, payload)
-            flag_modified(plan, "data")
-            db.add(plan)
-            plan_updated = True
-
-        if snapshot_updated or plan_updated or latest_snapshot_updated:
-            db.commit()
-            if snapshot_updated:
-                db.refresh(snapshot)
-            if latest_snapshot_updated:
-                db.refresh(latest_snapshot)
-            if plan_updated:
-                db.refresh(plan)
-
-        result["Pension Product"] = payload["details"]["pension_product"]
-        result["Pension Fund Name"] = payload["details"]["pension_fund_name"]
-        result["Pension Display Name"] = payload["details"]["pension_display_name"]
-        result["Account Number"] = payload["details"].get("account_number")
-
-        response = {
-            "status": "success",
-            "result": result,
-            "snapshot_updated": snapshot_updated,
-            "latest_snapshot_updated": latest_snapshot_updated,
-            "plan_updated": plan_updated,
-        }
-        if upload_warnings:
-            response["warnings"] = upload_warnings
-        return response
+        return apply_pension_analysis_result(db, household_id, owner, result, file.filename)
     except Exception as exc:
         import traceback
 
@@ -707,7 +691,7 @@ def list_pension_reports(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     try:
         root_dir = Path(__file__).parent.parent.parent.parent.parent
         reports_root = root_dir / "reports"
@@ -719,12 +703,14 @@ def list_pension_reports(
             owner = owner_dir.name
             for pdf in sorted(owner_dir.glob("*.pdf"), key=lambda p: p.stat().st_mtime, reverse=True):
                 stat = pdf.stat()
-                report_files.append({
-                    "filename": pdf.name,
-                    "owner": owner,
-                    "uploaded_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "size_bytes": stat.st_size,
-                })
+                report_files.append(
+                    {
+                        "filename": pdf.name,
+                        "owner": owner,
+                        "uploaded_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        "size_bytes": stat.st_size,
+                    }
+                )
 
         # Compute per-snapshot pension totals for delta comparison (household-scoped)
         snapshots = db.exec(
@@ -735,34 +721,35 @@ def list_pension_reports(
 
         snapshot_totals: list[dict[str, Any]] = []
         for snapshot in snapshots:
-            pension_items = [
-                item for item in snapshot.data.get("items", [])
-                if item.get("type") == "Pension"
-            ]
+            pension_items = [item for item in snapshot.data.get("items", []) if item.get("type") == "Pension"]
             if not pension_items:
                 continue
             total_value = sum(_safe_float(item.get("value")) for item in pension_items)
             accounts = []
             for item in pension_items:
                 details = item.get("details") or {}
-                accounts.append({
-                    "id": get_pension_identity(item) or item.get("id", ""),
-                    "owner": _safe_text(item.get("owner")) or "Unknown",
-                    "name": _safe_text(details.get("pension_display_name"))
-                    or _safe_text(item.get("name"))
-                    or "Unknown",
-                    "value": _safe_float(item.get("value")),
-                    "deposits": _safe_float(details.get("deposits")),
-                    "earnings": _safe_float(details.get("earnings")),
-                    "fees": _safe_float(details.get("fees")),
-                    "insurance_fees": _safe_float(details.get("insurance_fees")),
-                })
-            snapshot_totals.append({
-                "date": snapshot.date.isoformat(),
-                "total_value": total_value,
-                "account_count": len(pension_items),
-                "accounts": accounts,
-            })
+                accounts.append(
+                    {
+                        "id": get_pension_identity(item) or item.get("id", ""),
+                        "owner": _safe_text(item.get("owner")) or "Unknown",
+                        "name": _safe_text(details.get("pension_display_name"))
+                        or _safe_text(item.get("name"))
+                        or "Unknown",
+                        "value": _safe_float(item.get("value")),
+                        "deposits": _safe_float(details.get("deposits")),
+                        "earnings": _safe_float(details.get("earnings")),
+                        "fees": _safe_float(details.get("fees")),
+                        "insurance_fees": _safe_float(details.get("insurance_fees")),
+                    }
+                )
+            snapshot_totals.append(
+                {
+                    "date": snapshot.date.isoformat(),
+                    "total_value": total_value,
+                    "account_count": len(pension_items),
+                    "accounts": accounts,
+                }
+            )
 
         return {
             "status": "success",
@@ -785,7 +772,7 @@ def get_pension_dashboard(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     try:
         snapshots = db.exec(
             select(FinanceSnapshot)
@@ -811,7 +798,7 @@ def delete_pension(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     try:
         snapshots = db.exec(
             select(FinanceSnapshot)

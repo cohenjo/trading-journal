@@ -1,20 +1,26 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import PensionChart from '@/components/Pension/PensionChart';
 import PensionTable from '@/components/Pension/PensionTable';
 import ReportHistory from '@/components/Pension/ReportHistory';
 import SnapshotDetail from '@/components/Pension/SnapshotDetail';
-import { deletePensionReport, getPensionDashboard, listPensionReports } from './actions';
-import type { PensionDashboardResponse, PensionSnapshotSummary } from '@/components/Pension/pensionTypes';
+import { deletePensionReport, getPensionDashboard, listPensionReports, uploadPensionPdf } from './actions';
+import { subscribeToComputeJob, type ComputeJob } from '@/lib/compute-jobs';
+import type { PensionAccount, PensionDashboardResponse, PensionSeriesPoint, PensionSnapshotSummary } from '@/components/Pension/pensionTypes';
 
-interface PensionUploadResponse {
+interface PensionUploadJobResult {
     status: string;
-    result: Record<string, string | number | null | undefined>;
-    snapshot_updated: boolean;
-    plan_updated: boolean;
+    result?: Record<string, string | number | null | undefined>;
+    analysis_result?: Record<string, string | number | null | undefined>;
+    snapshot_updated?: boolean;
+    latest_snapshot_updated?: boolean;
+    plan_updated?: boolean;
+    inserted_rows?: number;
+    snapshot_dates?: string[];
 }
+
+type UploadStatus = 'idle' | 'uploading' | 'parsing' | 'done' | 'failed';
 
 const formatUploadNumber = (value: string | number | null | undefined) => {
     if (typeof value === 'number') return new Intl.NumberFormat().format(value);
@@ -25,11 +31,36 @@ const formatUploadNumber = (value: string | number | null | undefined) => {
 const formatUploadText = (...values: Array<string | number | null | undefined>) =>
     values.find((value) => value !== null && value !== undefined && String(value).trim() !== '') ?? 'N/A';
 
+const toChartPoints = (points: PensionSeriesPoint[]) => points.map((point) => {
+    const chartPoint: { date: string; [key: string]: string | number } = { date: point.date };
+    for (const [key, value] of Object.entries(point)) {
+        if (key !== 'date' && value !== undefined) chartPoint[key] = value;
+    }
+    return chartPoint;
+});
+
+const toChartAccounts = (accounts: PensionAccount[]) => accounts.map((account) => ({
+    id: account.id,
+    series_id: account.series_id,
+    owner: account.owner,
+    name: account.name,
+}));
+
+const toTableAccounts = (accounts: PensionAccount[]) => accounts.map((account) => ({
+    id: account.id,
+    owner: account.owner,
+    name: account.name,
+    value: account.value,
+    details: account.details ?? {},
+}));
+
 export default function PensionPage() {
     const [owner, setOwner] = useState('You');
     const [file, setFile] = useState<File | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [result, setResult] = useState<PensionUploadResponse | null>(null);
+    const [uploadStatus, setUploadStatus] = useState<UploadStatus>('idle');
+    const [jobId, setJobId] = useState<string | null>(null);
+    const [storagePath, setStoragePath] = useState<string | null>(null);
+    const [result, setResult] = useState<PensionUploadJobResult | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [dashboardData, setDashboardData] = useState<PensionDashboardResponse | null>(null);
     const [selectedSnapshot, setSelectedSnapshot] = useState<PensionSnapshotSummary | null>(null);
@@ -38,6 +69,7 @@ export default function PensionPage() {
     const [refreshKey, setRefreshKey] = useState(0);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const loading = uploadStatus === 'uploading' || uploadStatus === 'parsing';
 
     const fetchDashboard = async () => {
         try {
@@ -92,6 +124,31 @@ export default function PensionPage() {
         e.preventDefault();
     };
 
+    const handleJobUpdate = useCallback(async (job: ComputeJob) => {
+        if (job.status === 'running' || job.status === 'pending') {
+            setUploadStatus('parsing');
+            return;
+        }
+        if (job.status === 'failed') {
+            setUploadStatus('failed');
+            setError(job.error ?? 'Pension parser failed.');
+            return;
+        }
+        if (job.status === 'done') {
+            setUploadStatus('done');
+            setResult(job.result as PensionUploadJobResult);
+            await fetchDashboard();
+            setRefreshKey((k) => k + 1);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!jobId) return undefined;
+        return subscribeToComputeJob(jobId, (job) => {
+            void handleJobUpdate(job);
+        });
+    }, [handleJobUpdate, jobId]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -100,41 +157,21 @@ export default function PensionPage() {
             return;
         }
 
-        setLoading(true);
+        setUploadStatus('uploading');
         setError(null);
         setResult(null);
-
-        const formData = new FormData();
-        formData.append('owner', owner);
-        formData.append('file', file);
+        setJobId(null);
+        setStoragePath(null);
 
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-            const response = await apiFetch(`${apiUrl}/api/pension/upload`, {
-                method: 'POST',
-                body: formData,
-            });
-
-            if (!response.ok) {
-                const errorData = await response.text();
-                throw new Error(`Failed to upload: ${response.status} ${errorData}`);
-            }
-
-            const data = await response.json();
-            setResult(data);
-
-            // Refresh dashboard and report history after successful upload
-            await fetchDashboard();
-            setRefreshKey((k) => k + 1);
+            const data = await uploadPensionPdf(file, owner);
+            setJobId(data.jobId);
+            setStoragePath(data.storagePath);
+            setUploadStatus('parsing');
         } catch (err: unknown) {
             console.error(err);
-            if (err instanceof Error) {
-                setError(err.message || 'An error occurred during upload.');
-            } else {
-                setError('An error occurred during upload.');
-            }
-        } finally {
-            setLoading(false);
+            setUploadStatus('failed');
+            setError(err instanceof Error ? err.message : 'An error occurred during upload.');
         }
     };
 
@@ -156,6 +193,8 @@ export default function PensionPage() {
         }
     };
 
+    const extractedResult = result?.analysis_result ?? result?.result ?? {};
+
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 pb-24">
             <div className="max-w-7xl mx-auto space-y-8">
@@ -170,12 +209,12 @@ export default function PensionPage() {
                 {dashboardData && dashboardData.history && dashboardData.history.length > 0 && (
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
                         <PensionChart
-                            history={dashboardData.history}
-                            projections={dashboardData.projections}
-                            accounts={dashboardData.accounts}
+                            history={toChartPoints(dashboardData.history)}
+                            projections={toChartPoints(dashboardData.projections)}
+                            accounts={toChartAccounts(dashboardData.accounts)}
                             milestones={dashboardData.milestones}
                         />
-                        <PensionTable accounts={dashboardData.accounts} onDelete={handleDelete} />
+                        <PensionTable accounts={toTableAccounts(dashboardData.accounts)} onDelete={handleDelete} />
                     </div>
                 )}
 
@@ -290,9 +329,9 @@ export default function PensionPage() {
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                         </svg>
-                                        Analyzing Report...
+                                        {uploadStatus === 'uploading' ? 'Uploading PDF...' : 'Parsing PDF...'}
                                     </span>
-                                ) : 'Analyze and Update'}
+                                ) : 'Upload and Parse'}
                             </button>
                         </form>
                     </div>
@@ -308,11 +347,19 @@ export default function PensionPage() {
                         )}
 
                         {loading && (
-                            <div className="text-slate-400 text-sm flex items-center space-x-2 animate-pulse">
-                                <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                                <div className="w-2 h-2 rounded-full bg-blue-500 animation-delay-200"></div>
-                                <div className="w-2 h-2 rounded-full bg-blue-500 animation-delay-400"></div>
-                                <span>Copilot agent is reading the PDF...</span>
+                            <div className="space-y-2">
+                                <div className="text-slate-400 text-sm flex items-center space-x-2 animate-pulse">
+                                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                                    <div className="w-2 h-2 rounded-full bg-blue-500 animation-delay-200"></div>
+                                    <div className="w-2 h-2 rounded-full bg-blue-500 animation-delay-400"></div>
+                                    <span>{uploadStatus === 'uploading' ? 'Uploading to private Storage...' : 'Worker is parsing the PDF...'}</span>
+                                </div>
+                                {(jobId || storagePath) && (
+                                    <div className="text-xs text-slate-500 break-all">
+                                        {jobId && <div>Job: {jobId}</div>}
+                                        {storagePath && <div>Storage path: {storagePath}</div>}
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -329,41 +376,41 @@ export default function PensionPage() {
                                     <div className="grid grid-cols-2 gap-4 text-sm">
                                         <div className="col-span-2">
                                             <span className="block text-slate-500">Pension Fund Name</span>
-                                            <span className="block text-slate-200 font-medium">{formatUploadText(result.result['Pension Fund Name'], result.result['Name'])}</span>
+                                            <span className="block text-slate-200 font-medium">{formatUploadText(extractedResult['Pension Fund Name'], extractedResult['Name'])}</span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Total Amount</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {formatUploadNumber(result.result['Total Amount'])}
+                                                {formatUploadNumber(extractedResult['Total Amount'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Deposits</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {formatUploadNumber(result.result['Deposits'])}
+                                                {formatUploadNumber(extractedResult['Deposits'] ?? extractedResult['Monthly Deposits'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Earnings</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {formatUploadNumber(result.result['Earnings'])}
+                                                {formatUploadNumber(extractedResult['Earnings'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Fees</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {formatUploadNumber(result.result['Fees'])}
+                                                {formatUploadNumber(extractedResult['Fees'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Insurance Fees</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {formatUploadNumber(result.result['Insurance Fees'])}
+                                                {formatUploadNumber(extractedResult['Insurance Fees'])}
                                             </span>
                                         </div>
                                     </div>
