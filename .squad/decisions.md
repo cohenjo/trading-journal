@@ -5007,3 +5007,54 @@ Emergency blocker: users seeing "No active household found for your account" on 
 
 **Related Issues:** #142 (PR; fixed), #145 (E2E test-user provisioning; queued)
 
+
+---
+
+### 2026-05-03: Security Officer Reviews All Security-Sensitive PRs
+
+**What:**
+All PRs touching authentication, secrets, credentials, database access control, or encrypted data must be reviewed by Rabin (Security Engineer) before merge. Ratified as policy via INC-2026-05-03-001.
+
+**Why:**
+INC-2026-05-03-001 (Supabase service-role key leak) demonstrated need for dedicated security review gate to catch credential management missteps before they reach main.
+
+**By:** Rabin
+
+---
+
+### 2026-05-03: Secrets Only in Gitignored Files (Policy)
+
+**What:**
+All secrets (API keys, JWT tokens, OAuth credentials, DB passwords) must be stored in `.env.local` only (gitignored). Pre-commit `gitleaks` scanning + GitHub push protection mandatory. No live credential values in session logs, inbox, or decision documents. Use `<REDACTED>` or env-var references instead.
+
+**Why:**
+Codifies defense-in-depth from INC-2026-05-03-001: gitignore + pre-commit scanning + push protection catch leaks at each layer.
+
+**By:** Rabin
+
+---
+
+### 2026-05-03: Pre-commit Gitleaks & CI Secret-Scan Workflow Mandatory
+
+**What:**
+All developers run `pre-commit install` after clone; CI runs pre-commit checks on all PRs. `.pre-commit-config.yaml` includes gitleaks. GitHub push protection enabled. Service-role keys rotated immediately upon confirmed/suspected leak.
+
+**Why:**
+Detects secrets before commit/push. When alert fires: stop, rotate credential, resolve alert in GitHub as "revoked".
+
+**By:** Rabin
+
+---
+
+### 2026-05-02: E2E Testing Strategy (Approved)
+
+**What:**
+Use Playwright for browser-driven E2E tests in `apps/frontend/e2e/`. Hybrid environment: Dev Supabase for CI (exercises RLS + triggers); local Supabase for developer iteration; prod read-only smoke post-deploy. Throwaway test users (`e2e_<ts>_<rand>@example.com`) provisioned via service-role admin API, injected via auth cookies, deleted in `afterAll`.
+
+**Why:**
+Dev Supabase catches prod-only issues (migration drift, trigger behavior) that local can't replicate. No prod mutations eliminates data pollution. Existing scaffold avoids rebuild.
+
+**Status:** 🟢 In Progress (#144–#151 tracked; #143 approved)
+
+**By:** Keaton (Lead)
+
