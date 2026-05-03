@@ -13,10 +13,7 @@ const PAGES = [
  * compute route calls FastAPI over `/api/*`; this array goes to `[]` once the
  * TJ-020 Phase B migrations in #208-#217 land.
  */
-const TEMPORARILY_ALLOWED_COMPUTE_API_PATHS: string[] = [
-  '/api/backtest',
-  '/api/pension',
-];
+const TEMPORARILY_ALLOWED_COMPUTE_API_PATHS: string[] = [];
 
 /**
  * Returns true if the response URL/error is known-acceptable noise that should
