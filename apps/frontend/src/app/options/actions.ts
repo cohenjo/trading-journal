@@ -1,11 +1,28 @@
 'use server';
 
+import Decimal from 'decimal.js';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
 export interface OptionsRecord {
   year: number;
   amount: number;
+}
+
+export interface OptionsProjectionInput {
+  growth_rate: number;
+  cutoff_year: number;
+  final_year: number;
+}
+
+export interface OptionsProjectionPoint {
+  year: number;
+  amount: number;
+  type: 'historical' | 'projected';
+}
+
+export interface OptionsProjectionResult {
+  data: OptionsProjectionPoint[];
 }
 
 export type OptionsActionResult =
@@ -16,6 +33,17 @@ interface OptionsIncomeRow {
   year: number | string;
   amount: number | string;
 }
+
+interface OptionsProjectionRecord {
+  year: number;
+  amount: Decimal;
+}
+
+const MIN_PROJECTION_YEAR = 1900;
+const MAX_PROJECTION_YEAR = 2200;
+const MAX_PROJECTION_YEARS = 200;
+const MIN_GROWTH_RATE = -1;
+const MAX_GROWTH_RATE = 10;
 
 /**
  * Looks up the calling user's active household_id from the authenticated
@@ -60,6 +88,91 @@ function normalizeOptionsRecord(row: OptionsIncomeRow): OptionsRecord {
     year: Number(row.year),
     amount: toNumber(row.amount),
   };
+}
+
+function normalizeProjectionRecord(row: OptionsIncomeRow): OptionsProjectionRecord {
+  return {
+    year: Number(row.year),
+    amount: new Decimal(String(row.amount)),
+  };
+}
+
+function assertValidProjectionInput(input: OptionsProjectionInput): void {
+  if (!Number.isFinite(input.growth_rate)) {
+    throw new Error('Options projection growth_rate must be finite');
+  }
+  if (input.growth_rate <= MIN_GROWTH_RATE || input.growth_rate > MAX_GROWTH_RATE) {
+    throw new Error('Options projection growth_rate is outside the supported range');
+  }
+  if (!Number.isInteger(input.cutoff_year) || !Number.isInteger(input.final_year)) {
+    throw new Error('Options projection years must be integers');
+  }
+  if (
+    input.cutoff_year < MIN_PROJECTION_YEAR ||
+    input.cutoff_year > MAX_PROJECTION_YEAR ||
+    input.final_year < MIN_PROJECTION_YEAR ||
+    input.final_year > MAX_PROJECTION_YEAR
+  ) {
+    throw new Error('Options projection years are outside the supported range');
+  }
+}
+
+function decimalToResponseNumber(value: Decimal): number {
+  return value.toDecimalPlaces(10).toNumber();
+}
+
+function calculateOptionsProjection(
+  historicalRecords: OptionsProjectionRecord[],
+  input: OptionsProjectionInput,
+): OptionsProjectionResult {
+  assertValidProjectionInput(input);
+
+  if (historicalRecords.length === 0) return { data: [] };
+
+  const historical = [...historicalRecords].sort((a, b) => a.year - b.year);
+  const total = historical.reduce((sum, record) => sum.plus(record.amount), new Decimal(0));
+  const baseAmount = total.dividedBy(historical.length);
+
+  const historicalPoints: OptionsProjectionPoint[] = historical.map((record) => ({
+    year: record.year,
+    amount: decimalToResponseNumber(record.amount),
+    type: 'historical',
+  }));
+
+  if (baseAmount.lessThanOrEqualTo(0)) return { data: historicalPoints };
+
+  const lastHistoricalYear = historical[historical.length - 1]?.year;
+  if (lastHistoricalYear === undefined || input.final_year <= lastHistoricalYear) {
+    return { data: historicalPoints };
+  }
+  if (input.final_year - lastHistoricalYear > MAX_PROJECTION_YEARS) {
+    throw new Error('Options projection horizon exceeds the supported range');
+  }
+
+  const points: OptionsProjectionPoint[] = [...historicalPoints];
+  const growthFactor = new Decimal(1).plus(input.growth_rate);
+  let cutoffValue: Decimal | null = null;
+
+  for (let year = lastHistoricalYear + 1; year <= input.final_year; year += 1) {
+    let currentAmount: Decimal;
+
+    if (year <= input.cutoff_year) {
+      const yearsFromLastHistorical = year - lastHistoricalYear;
+      currentAmount = baseAmount.times(growthFactor.pow(yearsFromLastHistorical));
+      if (year === input.cutoff_year) cutoffValue = currentAmount;
+    } else {
+      cutoffValue ??= baseAmount;
+      currentAmount = cutoffValue;
+    }
+
+    points.push({
+      year,
+      amount: decimalToResponseNumber(currentAmount),
+      type: 'projected',
+    });
+  }
+
+  return { data: points };
 }
 
 function validateOptionsRecords(payload: unknown): OptionsActionResult {
@@ -118,6 +231,32 @@ export async function listOptionsRecords(): Promise<OptionsRecord[]> {
   }
 
   return ((data ?? []) as OptionsIncomeRow[]).map(normalizeOptionsRecord);
+}
+
+/**
+ * Projects options income for the authenticated household using the legacy
+ * FastAPI formula: average historical income compounds until cutoff_year, then
+ * stays flat through final_year. Monetary math stays in Decimal until response
+ * serialization to match the prior JSON shape consumed by the UI.
+ */
+export async function getOptionsProjection(input: OptionsProjectionInput): Promise<OptionsProjectionResult> {
+  const household = await requireHousehold();
+  if (!household.ok) return { data: [] };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('options_income')
+    .select('year, amount')
+    .eq('household_id', household.householdId)
+    .order('year', { ascending: true });
+
+  if (error) {
+    console.error('[getOptionsProjection] query error:', error.message);
+    return { data: [] };
+  }
+
+  const historical = ((data ?? []) as OptionsIncomeRow[]).map(normalizeProjectionRecord);
+  return calculateOptionsProjection(historical, input);
 }
 
 /**
