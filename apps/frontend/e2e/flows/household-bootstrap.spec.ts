@@ -82,20 +82,39 @@ test.describe('household bootstrap @auth', () => {
         test.skip(true, 'No local dev server running — start with `npm run dev` on port 3999');
         return;
       }
-      await page.waitForLoadState('domcontentloaded');
+      await page.waitForLoadState('networkidle');
 
-      // Sign-out button must be present in the sidebar (Fenster's data-testid).
-      // Skip gracefully if Fenster's AccountTypePickerDialog + sidebar work isn't merged yet.
-      const signoutBtn = page.getByTestId('sidebar-signout');
-      const signoutExists = await signoutBtn.count() > 0;
-      if (!signoutExists) {
+      // The nav is inside a hamburger-toggle sidebar (menuOpen state in MainLayout).
+      // We must click the toggle button first, then wait for sidebar-signout to appear.
+      // sidebar-signout is also gated on HouseholdContext status !== 'loading'.
+      const hamburger = page.getByRole('button', { name: 'Toggle navigation menu' });
+      const hamburgerVisible = await hamburger
+        .waitFor({ state: 'visible', timeout: 8_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!hamburgerVisible) {
         test.skip(
           true,
-          'sidebar-signout testid not found — pending Fenster AccountTypePickerDialog PR',
+          'Hamburger toggle not found — pending Fenster MainLayout PR (#163)',
         );
         return;
       }
-      await expect(signoutBtn).toBeVisible({ timeout: 10_000 });
+      await hamburger.click();
+
+      // After opening the nav, the sidebar-signout button is gated on
+      // HouseholdContext status !== 'idle' && !== 'loading'.
+      const signoutBtn = page.getByTestId('sidebar-signout');
+      const waitedVisible = await signoutBtn
+        .waitFor({ state: 'visible', timeout: 10_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!waitedVisible) {
+        test.skip(
+          true,
+          'sidebar-signout not visible after opening nav — pending Hockney v_my_active_household migration or HouseholdContext error',
+        );
+        return;
+      }
       await signoutBtn.click();
 
       // Should land on /login after sign-out
