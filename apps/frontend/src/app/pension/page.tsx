@@ -6,14 +6,24 @@ import PensionChart from '@/components/Pension/PensionChart';
 import PensionTable from '@/components/Pension/PensionTable';
 import ReportHistory from '@/components/Pension/ReportHistory';
 import SnapshotDetail from '@/components/Pension/SnapshotDetail';
-import type { PensionSnapshotSummary } from '@/components/Pension/pensionTypes';
+import { deletePensionReport, getPensionDashboard, listPensionReports } from './actions';
+import type { PensionDashboardResponse, PensionSnapshotSummary } from '@/components/Pension/pensionTypes';
 
 interface PensionUploadResponse {
     status: string;
-    result: Record<string, any>;
+    result: Record<string, string | number | null | undefined>;
     snapshot_updated: boolean;
     plan_updated: boolean;
 }
+
+const formatUploadNumber = (value: string | number | null | undefined) => {
+    if (typeof value === 'number') return new Intl.NumberFormat().format(value);
+    if (typeof value === 'string' && value.trim()) return value;
+    return 'N/A';
+};
+
+const formatUploadText = (...values: Array<string | number | null | undefined>) =>
+    values.find((value) => value !== null && value !== undefined && String(value).trim() !== '') ?? 'N/A';
 
 export default function PensionPage() {
     const [owner, setOwner] = useState('You');
@@ -21,7 +31,7 @@ export default function PensionPage() {
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState<PensionUploadResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [dashboardData, setDashboardData] = useState<any>(null);
+    const [dashboardData, setDashboardData] = useState<PensionDashboardResponse | null>(null);
     const [selectedSnapshot, setSelectedSnapshot] = useState<PensionSnapshotSummary | null>(null);
     const [previousSnapshot, setPreviousSnapshot] = useState<PensionSnapshotSummary | null>(null);
     const [allSnapshots, setAllSnapshots] = useState<PensionSnapshotSummary[]>([]);
@@ -31,12 +41,9 @@ export default function PensionPage() {
 
     const fetchDashboard = async () => {
         try {
-            const res = await apiFetch('/api/pension/dashboard');
-            if (res.ok) {
-                const data = await res.json();
-                if (data.status === 'success') {
-                    setDashboardData(data);
-                }
+            const data = await getPensionDashboard();
+            if (data.status === 'success') {
+                setDashboardData(data);
             }
         } catch (err) {
             console.error("Failed to load dashboard data:", err);
@@ -57,12 +64,11 @@ export default function PensionPage() {
         }
     }, [allSnapshots]);
 
-    // Keep allSnapshots in sync by fetching from reports endpoint
+    // Keep allSnapshots in sync by fetching from reports Server Action.
     useEffect(() => {
-        apiFetch('/api/pension/reports')
-            .then((res) => res.ok ? res.json() : null)
+        listPensionReports()
             .then((json) => {
-                if (json?.snapshots) {
+                if (json.snapshots) {
                     setAllSnapshots(json.snapshots);
                 }
             })
@@ -138,14 +144,12 @@ export default function PensionPage() {
         }
 
         try {
-            const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-            const res = await apiFetch(`${apiUrl}/api/pension/${id}`, {
-                method: 'DELETE',
-            });
+            const res = await deletePensionReport(id);
             if (res.ok) {
                 await fetchDashboard();
+                setRefreshKey((k) => k + 1);
             } else {
-                console.error("Failed to delete pension item");
+                console.error("Failed to delete pension item", res.error);
             }
         } catch (err) {
             console.error(err);
@@ -325,41 +329,41 @@ export default function PensionPage() {
                                     <div className="grid grid-cols-2 gap-4 text-sm">
                                         <div className="col-span-2">
                                             <span className="block text-slate-500">Pension Fund Name</span>
-                                            <span className="block text-slate-200 font-medium">{result.result['Pension Fund Name'] || result.result['Name'] || 'N/A'}</span>
+                                            <span className="block text-slate-200 font-medium">{formatUploadText(result.result['Pension Fund Name'], result.result['Name'])}</span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Total Amount</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {result.result['Total Amount'] ? new Intl.NumberFormat().format(result.result['Total Amount']) : 'N/A'}
+                                                {formatUploadNumber(result.result['Total Amount'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Deposits</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {result.result['Deposits'] ? new Intl.NumberFormat().format(result.result['Deposits']) : 'N/A'}
+                                                {formatUploadNumber(result.result['Deposits'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Earnings</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {result.result['Earnings'] ? new Intl.NumberFormat().format(result.result['Earnings']) : 'N/A'}
+                                                {formatUploadNumber(result.result['Earnings'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Fees</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {result.result['Fees'] ? new Intl.NumberFormat().format(result.result['Fees']) : 'N/A'}
+                                                {formatUploadNumber(result.result['Fees'])}
                                             </span>
                                         </div>
 
                                         <div>
                                             <span className="block text-slate-500">Insurance Fees</span>
                                             <span className="block text-slate-200 font-medium">
-                                                {result.result['Insurance Fees'] ? new Intl.NumberFormat().format(result.result['Insurance Fees']) : 'N/A'}
+                                                {formatUploadNumber(result.result['Insurance Fees'])}
                                             </span>
                                         </div>
                                     </div>

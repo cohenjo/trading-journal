@@ -18,9 +18,10 @@ type AccountDef = {
 type Props = {
     accounts: AccountDef[];
     onDelete?: (id: string, name: string) => void;
+    onToggleOwner?: (id: string, owner: string) => void;
 };
 
-export default function PensionTable({ accounts, onDelete }: Props) {
+export default function PensionTable({ accounts, onDelete, onToggleOwner }: Props) {
     const formatCurrency = (val?: number) => {
         if (val === undefined || val === null) return '-';
         return new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 }).format(val);
@@ -52,9 +53,13 @@ export default function PensionTable({ accounts, onDelete }: Props) {
                         accounts.map((acc, idx) => (
                             <tr key={idx} className="hover:bg-slate-800/50 transition-colors">
                                 <td className="px-6 py-4 font-medium text-slate-200">
-                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${acc.owner === 'You' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => onToggleOwner?.(acc.id, acc.owner)}
+                                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${acc.owner === 'You' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}
+                                    >
                                         {acc.owner}
-                                    </span>
+                                    </button>
                                 </td>
                                 <td className="px-6 py-4 text-slate-200">{acc.name}</td>
                                 <td className="px-6 py-4 text-right text-emerald-400 font-medium">

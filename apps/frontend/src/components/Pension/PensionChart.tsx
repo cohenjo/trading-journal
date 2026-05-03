@@ -1,6 +1,6 @@
 "use client";
 
-import { createChart, IChartApi, ISeriesApi, ColorType, SeriesMarker, AreaSeries, createSeriesMarkers, ISeriesMarkersPluginApi, LineStyle } from "lightweight-charts";
+import { createChart, IChartApi, ISeriesApi, ColorType, SeriesMarker, AreaSeries, createSeriesMarkers, ISeriesMarkersPluginApi, LineStyle, Time } from "lightweight-charts";
 import { useEffect, useRef } from "react";
 
 export type PensionDataPoint = {
@@ -9,6 +9,8 @@ export type PensionDataPoint = {
 };
 
 type AccountDef = {
+    id: string;
+    series_id?: string;
     owner: string;
     name: string;
 };
@@ -16,8 +18,13 @@ type AccountDef = {
 type MilestoneDef = {
     owner: string;
     name: string;
-    date: string;
+    date?: string;
     year: number;
+};
+
+type SeriesPoint = {
+    time: string;
+    value: number;
 };
 
 type Props = {
@@ -41,7 +48,7 @@ export default function PensionChart({ history, projections, accounts, milestone
 
     const historySeriesRefs = useRef<ISeriesApi<"Area">[]>([]);
     const projSeriesRefs = useRef<ISeriesApi<"Area">[]>([]);
-    const markersPluginRef = useRef<ISeriesMarkersPluginApi<any> | null>(null);
+    const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -101,10 +108,10 @@ export default function PensionChart({ history, projections, accounts, milestone
 
         // Clean up old series safely
         historySeriesRefs.current.forEach(s => {
-            if (s) try { chart.removeSeries(s); } catch (e) { }
+            if (s) try { chart.removeSeries(s); } catch { }
         });
         projSeriesRefs.current.forEach(s => {
-            if (s) try { chart.removeSeries(s); } catch (e) { }
+            if (s) try { chart.removeSeries(s); } catch { }
         });
         historySeriesRefs.current = [];
         projSeriesRefs.current = [];
@@ -151,7 +158,7 @@ export default function PensionChart({ history, projections, accounts, milestone
             // Sum up to index (inclusive)
             for (let j = 0; j <= upToIndex; j++) {
                 const acc = sortedAccounts[j];
-                const key = `${acc.owner}_${acc.name}`;
+                const key = acc.series_id || acc.id;
                 sum += Number(dataPoint[key] || 0);
             }
             return sum;
@@ -163,14 +170,14 @@ export default function PensionChart({ history, projections, accounts, milestone
             const upToIndex = sortedAccounts.length - 1 - idx;
 
             let hasStarted = false;
-            const hData = history.reduce((acc, d) => {
+            const hData = history.reduce<SeriesPoint[]>((acc, d) => {
                 const val = computeStack(d, upToIndex);
                 if (val > 0) hasStarted = true;
                 if (hasStarted) {
                     acc.push({ time: d.date, value: val });
                 }
                 return acc;
-            }, [] as any[]);
+            }, []);
 
             const pData = projections.map(d => ({
                 time: d.date,
@@ -178,7 +185,7 @@ export default function PensionChart({ history, projections, accounts, milestone
             }));
 
             // Connect projection to the last history point for seamless line
-            if (history.length > 0 && pData.length > 0) {
+            if (history.length > 0 && pData.length > 0 && hData.length > 0) {
                 pData.unshift(hData[hData.length - 1]);
             }
 
@@ -187,10 +194,10 @@ export default function PensionChart({ history, projections, accounts, milestone
         }
 
         // Add Markers for milestones
-        const markers: SeriesMarker<any>[] = [];
+        const markers: SeriesMarker<Time>[] = [];
         milestones.forEach(m => {
             markers.push({
-                time: m.date.startsWith(m.year.toString()) ? m.date : `${m.year}-01-01`, // Rough approximation if date is weird
+                time: ((m.date?.startsWith(m.year.toString()) ? m.date : `${m.year}-01-01`)) as Time, // Rough approximation if date is weird
                 position: "aboveBar",
                 color: "#10b981", // Emerald
                 shape: "arrowDown",
