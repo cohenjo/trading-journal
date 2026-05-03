@@ -20,13 +20,12 @@ function LoadingState({ elapsedSeconds }: { elapsedSeconds: number }) {
           <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500" />
         </span>
         <span className="text-lg font-semibold text-white">
-          Analyzing...{" "}
+          Loading cached story...{" "}
           <span className="text-blue-400 font-mono">{elapsedSeconds}s</span>
         </span>
       </div>
       <p className="text-sm text-slate-400 max-w-md mx-auto">
-        Reading SEC filings, scanning news &amp; social sentiment, building
-        scenario models. This typically takes 30–60 seconds.
+        Reading the latest scheduled backend analysis from Supabase.
       </p>
       <div className="mt-6 w-full max-w-xs mx-auto h-1.5 bg-slate-800 rounded-full overflow-hidden">
         <div
@@ -46,11 +45,10 @@ function GenerateButton({ onGenerate }: { onGenerate: () => void }) {
         onClick={onGenerate}
         className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl transition-colors text-lg"
       >
-        Generate Growth Story
+        Load Growth Story
       </button>
       <p className="text-sm text-slate-400 mt-3 max-w-sm mx-auto">
-        Uses AI to analyze news, social sentiment, and financial data to build a
-        three-scenario outlook.
+        Shows the latest daily backend-generated AI story from Supabase.
       </p>
     </div>
   );

@@ -19,6 +19,14 @@ interface LongTermViewProps {
   ticker: string;
 }
 
+function formatRefresh(refreshedAt: string | null): string {
+  if (!refreshedAt) return "Analysis not refreshed yet";
+  const diffMs = Date.now() - Date.parse(refreshedAt);
+  if (!Number.isFinite(diffMs)) return "Analysis not refreshed yet";
+  const hours = Math.max(0, Math.round(diffMs / (60 * 60 * 1000)));
+  return hours < 1 ? "Last refreshed less than 1 hour ago" : `Last refreshed ${hours}h ago`;
+}
+
 export default function LongTermView({ ticker }: LongTermViewProps) {
   const [period, setPeriod] = useState("1y");
   const [showGrowthStory, setShowGrowthStory] = useState(false);
@@ -76,14 +84,19 @@ export default function LongTermView({ ticker }: LongTermViewProps) {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-slate-300">
-        Long-Term Analysis — <span className="text-white font-mono">{ticker}</span>
-        {fundamentals.data?.name && (
-          <span className="text-slate-500 font-normal text-base ml-2">
-            {fundamentals.data.name} · {fundamentals.data.sector}
-          </span>
-        )}
-      </h2>
+      <div className="flex flex-col gap-1">
+        <h2 className="text-lg font-semibold text-slate-300">
+          Long-Term Analysis — <span className="text-white font-mono">{ticker}</span>
+          {fundamentals.data?.name && (
+            <span className="text-slate-500 font-normal text-base ml-2">
+              {fundamentals.data.name} · {fundamentals.data.sector}
+            </span>
+          )}
+        </h2>
+        <p className={fundamentals.isStale ? "text-sm text-amber-300" : "text-sm text-slate-500"}>
+          {formatRefresh(fundamentals.refreshedAt)}{fundamentals.isStale ? " · Backend offline or stale" : ""}
+        </p>
+      </div>
 
       {/* Per-section errors for non-critical data */}
       {priceHistory.error && <ErrorBanner message={priceHistory.error} onRetry={priceHistory.refetch} />}

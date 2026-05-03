@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTickerAnalysis } from "@/app/analyze/actions";
 import { useState, useEffect, useCallback } from "react";
 
 export interface OHLCVBar {
@@ -30,19 +30,15 @@ export function usePriceHistory(ticker: string): UsePriceHistoryResult {
     setLoading(true);
     setError(null);
 
-    apiFetch(`/api/analyze/price-history/${ticker}?period=1y&interval=1d`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to fetch price history for ${ticker}`);
-        return res.json();
+    getTickerAnalysis(ticker)
+      .then((result) => {
+        if (!result.ok) throw new Error(result.error);
+        const priceHistory = result.data?.data.sections?.price_history_1y_1d as { data?: OHLCVBar[] } | undefined;
+        if (!priceHistory?.data) throw new Error(`No cached price history for ${ticker} yet`);
+        setData(priceHistory.data);
       })
-      .then((json: OHLCVBar[]) => {
-        setData(json);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load price history"))
+      .finally(() => setLoading(false));
   }, [ticker]);
 
   useEffect(() => {

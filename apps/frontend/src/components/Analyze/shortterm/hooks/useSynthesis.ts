@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTickerAnalysis } from "@/app/analyze/actions";
 import { useState, useEffect, useCallback } from "react";
 
 export interface PriceActionSummary {
@@ -30,19 +30,15 @@ export function useSynthesis(ticker: string): UseSynthesisResult {
     setLoading(true);
     setError(null);
 
-    apiFetch(`/api/analyze/synthesis/${ticker}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to fetch synthesis for ${ticker}`);
-        return res.json();
+    getTickerAnalysis(ticker)
+      .then((result) => {
+        if (!result.ok) throw new Error(result.error);
+        const synthesis = result.data?.data.sections?.synthesis as SynthesisData | undefined;
+        if (!synthesis) throw new Error(`No cached synthesis for ${ticker} yet`);
+        setData(synthesis);
       })
-      .then((json: SynthesisData) => {
-        setData(json);
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load synthesis"))
+      .finally(() => setLoading(false));
   }, [ticker]);
 
   useEffect(() => {

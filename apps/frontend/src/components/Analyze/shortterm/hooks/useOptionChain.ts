@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTickerAnalysis } from "@/app/analyze/actions";
 import { useState, useEffect, useCallback } from "react";
 
 export interface PutOption {
@@ -44,26 +44,16 @@ export function useOptionChain(ticker: string): UseOptionChainResult {
     setLoading(true);
     setError(null);
 
-    const url = expiry
-      ? `/api/analyze/options/${ticker}?expiry=${expiry}`
-      : `/api/analyze/options/${ticker}`;
-
-    apiFetch(url)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to fetch options for ${ticker}`);
-        return res.json();
+    getTickerAnalysis(ticker)
+      .then((result) => {
+        if (!result.ok) throw new Error(result.error);
+        const options = result.data?.data.sections?.options as OptionChainData | undefined;
+        if (!options) throw new Error(`No cached options for ${ticker} yet`);
+        setData(options);
+        if (!expiry && options.expirations.length > 0) setExpiry(options.expirations[0]);
       })
-      .then((json: OptionChainData) => {
-        setData(json);
-        if (!expiry && json.expirations.length > 0) {
-          setExpiry(json.expirations[0]);
-        }
-        setLoading(false);
-      })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : "Failed to load options"))
+      .finally(() => setLoading(false));
   }, [ticker, expiry]);
 
   useEffect(() => {

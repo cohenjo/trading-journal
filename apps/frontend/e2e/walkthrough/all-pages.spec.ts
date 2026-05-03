@@ -16,7 +16,7 @@ const PAGES = [
 const TEMPORARILY_ALLOWED_COMPUTE_API_PATHS: string[] = [
   '/api/tax-condor',
   '/api/backtest',
-  '/api/analyze',
+  '/api/bonds/scanner',
   '/api/ndx/sync',
   '/api/trading/sync',
   '/api/pension',

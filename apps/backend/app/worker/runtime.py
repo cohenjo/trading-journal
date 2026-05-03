@@ -7,6 +7,7 @@ import os
 import signal
 import time
 
+from app.worker import analyze_schedules
 from app.worker import ndx_daily_sync  # noqa: F401 - imports schedule registration side effect
 from app.worker import price_cache as _price_cache  # noqa: F401 - registers scheduled jobs
 from app.worker.job_queue import poll_compute_jobs
@@ -52,6 +53,8 @@ def start_worker() -> None:
         _poll_interval_seconds(),
         poll_compute_jobs,
     )
+
+    analyze_schedules.run_startup_analyze_refreshes()
 
     scheduler.start()
     logger.info("Worker scheduler started with %d job(s)", len(scheduler.get_jobs()))

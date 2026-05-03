@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTickerAnalysis } from "@/app/analyze/actions";
 import { useState, useEffect, useCallback } from "react";
 
 interface MacdData {
@@ -38,6 +38,8 @@ interface UseTechnicalsResult {
   data: TechnicalsData | null;
   loading: boolean;
   error: string | null;
+  refreshedAt: string | null;
+  isStale: boolean;
   refetch: () => void;
 }
 
@@ -45,6 +47,8 @@ export function useTechnicals(ticker: string): UseTechnicalsResult {
   const [data, setData] = useState<TechnicalsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState(false);
 
   const fetchData = useCallback(() => {
     if (!ticker) return;
@@ -52,24 +56,27 @@ export function useTechnicals(ticker: string): UseTechnicalsResult {
     setLoading(true);
     setError(null);
 
-    apiFetch(`/api/analyze/technicals/${ticker}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`Failed to fetch technicals for ${ticker}`);
-        return res.json();
+    getTickerAnalysis(ticker)
+      .then((result) => {
+        if (!result.ok) throw new Error(result.error);
+        const row = result.data;
+        const technicals = row?.data.sections?.technicals as TechnicalsData | undefined;
+        if (!row || !technicals) throw new Error(`No cached technicals for ${ticker} yet`);
+        setData(technicals);
+        setRefreshedAt(row.refreshed_at);
+        setIsStale(row.isStale);
       })
-      .then((json: TechnicalsData) => {
-        setData(json);
-        setLoading(false);
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load technicals");
+        setRefreshedAt(null);
+        setIsStale(false);
       })
-      .catch((err) => {
-        setError(err.message);
-        setLoading(false);
-      });
+      .finally(() => setLoading(false));
   }, [ticker]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, refetch: fetchData };
+  return { data, loading, error, refreshedAt, isStale, refetch: fetchData };
 }
