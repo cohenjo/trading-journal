@@ -21,7 +21,12 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }));
 
-import { getLatestFinanceSnapshot } from './actions';
+import {
+  deleteFinanceSnapshot,
+  getFinanceHistory,
+  getLatestFinanceSnapshot,
+  saveFinanceSnapshot,
+} from '../actions';
 import { createClient } from '@/lib/supabase/server';
 
 const MOCK_USER_ID = 'user-uuid-1234';
@@ -166,6 +171,95 @@ describe('getLatestFinanceSnapshot — snapshot retrieval', () => {
     // Verify order: descending date was requested
     expect(snapshotsChain.order).toHaveBeenCalledWith('date', { ascending: false });
     expect(snapshotsChain.limit).toHaveBeenCalledWith(1);
+  });
+});
+
+// ── History / write actions ───────────────────────────────────────────────────
+
+describe('getFinanceHistory', () => {
+  it('returns snapshots ordered by date desc with the requested limit', async () => {
+    authOk();
+    const rows = [
+      {
+        date: '2025-06-15',
+        household_id: MOCK_HOUSEHOLD_ID,
+        net_worth: 500000,
+        total_assets: 600000,
+        total_liabilities: 100000,
+        data: { items: [], net_worth: 500000, total_assets: 600000, total_liabilities: 100000, total_savings: 200000, total_investments: 300000 },
+      },
+    ];
+    const historyChain = { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), order: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue({ data: rows, error: null }) };
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn((table: string) => {
+      if (table === 'household_members') return fluentChain({ data: { household_id: MOCK_HOUSEHOLD_ID }, error: null });
+      if (table === 'finance_snapshots') return historyChain;
+      throw new Error(`Unexpected table: ${table}`);
+    }) });
+    const result = await getFinanceHistory(25);
+    expect(result).toEqual(rows);
+    expect(historyChain.eq).toHaveBeenCalledWith('household_id', MOCK_HOUSEHOLD_ID);
+    expect(historyChain.order).toHaveBeenCalledWith('date', { ascending: false });
+    expect(historyChain.limit).toHaveBeenCalledWith(25);
+  });
+
+  it('returns an empty array when not authenticated', async () => {
+    authFail();
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn() });
+    await expect(getFinanceHistory()).resolves.toEqual([]);
+  });
+});
+
+describe('saveFinanceSnapshot', () => {
+  const payload = { items: [], net_worth: 500000, total_assets: 600000, total_liabilities: 100000, total_savings: 200000, total_investments: 300000 };
+
+  it('upserts by session household and date using the composite conflict target', async () => {
+    authOk();
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn((table: string) => {
+      if (table === 'household_members') return fluentChain({ data: { household_id: MOCK_HOUSEHOLD_ID }, error: null });
+      if (table === 'finance_snapshots') return { upsert };
+      throw new Error(`Unexpected table: ${table}`);
+    }) });
+    const result = await saveFinanceSnapshot('2025-06-15', payload);
+    expect(result.success).toBe(true);
+    expect(upsert).toHaveBeenCalledWith({ date: '2025-06-15', household_id: MOCK_HOUSEHOLD_ID, data: payload, net_worth: payload.net_worth, total_assets: payload.total_assets, total_liabilities: payload.total_liabilities }, { onConflict: 'household_id,date' });
+  });
+
+  it('rejects invalid dates before writing', async () => {
+    authOk();
+    const upsert = vi.fn();
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn(() => ({ upsert })) });
+    const result = await saveFinanceSnapshot('06/15/2025', payload);
+    expect(result.success).toBe(false);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('deleteFinanceSnapshot', () => {
+  it('deletes by session household and date', async () => {
+    authOk();
+    const deleteEq = vi.fn();
+    const deleteChain = { eq: deleteEq };
+    deleteEq.mockReturnValueOnce(deleteChain).mockResolvedValueOnce({ error: null });
+    const deleteFromTable = vi.fn().mockReturnValue(deleteChain);
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn((table: string) => {
+      if (table === 'household_members') return fluentChain({ data: { household_id: MOCK_HOUSEHOLD_ID }, error: null });
+      if (table === 'finance_snapshots') return { delete: deleteFromTable };
+      throw new Error(`Unexpected table: ${table}`);
+    }) });
+    const result = await deleteFinanceSnapshot('2025-06-15');
+    expect(result.success).toBe(true);
+    expect(deleteFromTable).toHaveBeenCalledOnce();
+    expect(deleteEq).toHaveBeenNthCalledWith(1, 'household_id', MOCK_HOUSEHOLD_ID);
+    expect(deleteEq).toHaveBeenNthCalledWith(2, 'date', '2025-06-15');
+  });
+
+  it('returns an error when not authenticated', async () => {
+    authFail();
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn() });
+    const result = await deleteFinanceSnapshot('2025-06-15');
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error).toMatch(/not authenticated/i);
   });
 });
 

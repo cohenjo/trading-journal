@@ -1,29 +1,22 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from 'react';
 import { ProgressChart } from '@/components/Progress/ProgressChart';
 import { ProgressTable } from '@/components/Progress/ProgressTable';
 import { AddHistoryModal, ProgressSummary } from '@/components/Progress/AddHistoryModal';
 import { useSettings } from '../settings/SettingsContext';
+import { deleteFinanceSnapshot, getFinanceHistory, saveFinanceSnapshot } from '../finances/actions';
 
-async function fetchHistory() {
+async function fetchHistory(): Promise<ProgressSummary[]> {
     try {
-        const res = await apiFetch('/api/finances/history?limit=100');
-        if (!res.ok) throw new Error('Failed to fetch history');
-        const data = await res.json();
-        // Map backend model to frontend summary
-        // Backend returns FinanceSnapshot objects which contain data dict
-        return data.map((d: any) => ({
+        const data = await getFinanceHistory(100);
+        return data.map((d) => ({
             date: d.date,
             net_worth: d.net_worth,
             total_assets: d.total_assets,
             total_liabilities: d.total_liabilities,
-            // The following might be in d.data (the json column) or computed if we updated backend to return them.
-            // Based on my backend update, I didn't add them as columns on FinanceSnapshot, 
-            // so they are in d.data.total_savings etc.
             total_savings: d.data.total_savings || 0,
-            total_investments: d.data.total_investments || 0
+            total_investments: d.data.total_investments || 0,
         }));
     } catch (err) {
         console.error(err);
@@ -32,43 +25,29 @@ async function fetchHistory() {
 }
 
 async function saveHistory(summary: ProgressSummary) {
-    try {
-        const payload = {
-            items: [],
-            date: summary.date,
-            net_worth: summary.net_worth,
-            total_assets: summary.total_assets,
-            total_liabilities: summary.total_liabilities,
-            total_savings: summary.total_savings,
-            total_investments: summary.total_investments
-        };
+    const result = await saveFinanceSnapshot(summary.date, {
+        items: [],
+        net_worth: summary.net_worth,
+        total_assets: summary.total_assets,
+        total_liabilities: summary.total_liabilities,
+        total_savings: summary.total_savings,
+        total_investments: summary.total_investments,
+    });
 
-        const res = await apiFetch('/api/finances/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-        });
-
-        if (!res.ok) throw new Error('Failed to save history');
-        return await res.json();
-    } catch (err) {
-        console.error(err);
+    if (!result.success) {
+        console.error(result.error);
         alert('Failed to save.');
     }
 }
 
 async function deleteHistory(date: string) {
-    try {
-        const res = await apiFetch(`/api/finances/${date}`, {
-            method: 'DELETE',
-        });
-        if (!res.ok) throw new Error('Failed to delete history');
-        return true;
-    } catch (err) {
-        console.error(err);
+    const result = await deleteFinanceSnapshot(date);
+    if (!result.success) {
+        console.error(result.error);
         alert('Failed to delete.');
         return false;
     }
+    return true;
 }
 
 export default function ProgressPage() {
