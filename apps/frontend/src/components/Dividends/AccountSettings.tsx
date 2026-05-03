@@ -1,8 +1,15 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from "react";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
+import {
+    getDividendAccounts,
+    getImportableAccounts,
+    createDividendAccount,
+    importDividendAccount,
+    deleteDividendAccount,
+} from "@/app/dividends/actions";
+import type { ImportableAccount } from "@/app/dividends/actions";
 
 interface AccountSettingsProps {
     onAccountsChange: () => void;
@@ -10,8 +17,8 @@ interface AccountSettingsProps {
 
 export default function AccountSettings({ onAccountsChange }: AccountSettingsProps) {
     const [accounts, setAccounts] = useState<string[]>([]);
-    const [importableAccounts, setImportableAccounts] = useState<any[]>([]);
-    const [selectedImport, setSelectedImport] = useState<any>(null);
+    const [importableAccounts, setImportableAccounts] = useState<ImportableAccount[]>([]);
+    const [selectedImport, setSelectedImport] = useState<ImportableAccount | null>(null);
     const [newAccount, setNewAccount] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
@@ -25,19 +32,12 @@ export default function AccountSettings({ onAccountsChange }: AccountSettingsPro
 
     const fetchAccounts = async () => {
         try {
-            const [accRes, impRes] = await Promise.all([
-                apiFetch("/api/dividends/accounts"),
-                apiFetch("/api/dividends/accounts/importable")
+            const [accs, importable] = await Promise.all([
+                getDividendAccounts(),
+                getImportableAccounts(),
             ]);
-
-            if (accRes.ok) {
-                const data = await accRes.json();
-                setAccounts(data);
-            }
-            if (impRes.ok) {
-                const data = await impRes.json();
-                setImportableAccounts(data);
-            }
+            setAccounts(accs);
+            setImportableAccounts(importable);
         } catch (err) {
             console.error(err);
         }
@@ -68,32 +68,22 @@ export default function AccountSettings({ onAccountsChange }: AccountSettingsPro
         setError("");
 
         try {
-            let res;
+            let result: { ok: boolean; error?: string };
             if (selectedImport) {
-                res = await apiFetch("/api/dividends/accounts/import", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        linked_id: selectedImport.id,
-                        name: newAccount
-                    })
-                });
+                result = await importDividendAccount(selectedImport.id, newAccount);
             } else {
-                res = await apiFetch("/api/dividends/accounts?name=" + encodeURIComponent(newAccount), {
-                    method: "POST"
-                });
+                result = await createDividendAccount(newAccount);
             }
 
-            if (res.ok) {
+            if (result.ok) {
                 setNewAccount("");
                 setSelectedImport(null);
                 await fetchAccounts();
                 onAccountsChange();
             } else {
-                const data = await res.json();
-                setError(data.detail || "Failed to add account");
+                setError(result.error ?? "Failed to add account");
             }
-        } catch (err) {
+        } catch {
             setError("Error adding account");
         } finally {
             setLoading(false);
@@ -109,19 +99,16 @@ export default function AccountSettings({ onAccountsChange }: AccountSettingsPro
         setIsDeleting(true);
 
         try {
-            const res = await apiFetch(`/api/dividends/accounts/${encodeURIComponent(deleteModal.name)}`, {
-                method: "DELETE"
-            });
+            const result = await deleteDividendAccount(deleteModal.name);
 
-            if (res.ok) {
+            if (result.ok) {
                 await fetchAccounts();
                 onAccountsChange();
                 setDeleteModal({ isOpen: false, name: null });
             } else {
-                const data = await res.json();
-                alert(data.detail || "Failed to delete account");
+                alert(result.error ?? "Failed to delete account");
             }
-        } catch (err) {
+        } catch {
             alert("Error deleting account");
         } finally {
             setIsDeleting(false);
