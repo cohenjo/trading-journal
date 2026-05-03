@@ -1,26 +1,23 @@
 /**
  * e2e/flows/current-finances.spec.ts
  *
- * P0 flow: /current-finances
+ * P0 flow: /current-finances  @flow
  *
  * Live net worth snapshot editor — assets, savings, investments, liabilities.
  * This is P0 because financial data stored here drives the rest of the app
  * (plan simulation, cash-flow projection, after-I-leave guide).
  *
- * Critical UI elements (from Fenster's audit):
+ * Critical UI elements:
  *   - 4× donut charts (assets / savings / investments / liabilities)
  *   - Finance tabs editor (add / edit / delete items)
  *
- * Auth note:
- *   /current-finances currently has NO auth guard on `main`.  The FastAPI
- *   endpoint (/api/finances/latest) will respond without a JWT.  Once Fenster's
- *   auth-guard PR lands, this fixture will provide the JWT the endpoint needs
- *   to scope results per household.
+ * Regression coverage:
+ *   PR #168 — onConflict fix: upsert now uses composite key (household_id,date)
+ *   rather than date alone, which was causing PostgREST 42P10 errors when a
+ *   household was already provisioned.
  *
- * ⚠️  Depends on Fenster's auth-guard PR for full JWT-scoped behaviour.
- *    Data-seeding via admin client is skipped because the FastAPI endpoint is
- *    not accessible through Supabase service-role client — use test.fixme for
- *    the mutation path until the backend exposes a test seed endpoint.
+ * Auth strategy: testUser fixture (throwaway user + auto-provisioned household).
+ * The save path uses Next.js Server Actions → Supabase; no FastAPI dependency.
  */
 import { test, expect } from '../../e2e/fixtures/auth';
 import { test as testWithUser } from '../fixtures/test-user';
@@ -100,12 +97,13 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
   });
 });
 
-// ── Regression: fund-save with active household (Jony's bug) ─────────────────
+// ── Regression #168: fund-save with active household ─────────────────────────
 //
 // Regression guard for the bug where saving on /current-finances failed with
 // "Failed to save snapshot. Please try again." when the user had an active
 // household.  Root cause: `onConflict: 'date'` did not match the composite PK
 // (household_id, date) on finance_snapshots, causing a PostgREST 42P10 error.
+// Fixed in PR #168 — onConflict now uses 'household_id,date'.
 //
 // The save path goes through the Next.js server action (saveFinanceSnapshot in
 // actions.ts), which calls Supabase directly — no FastAPI dependency.
@@ -113,12 +111,11 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
 // Unit-level regression is covered by actions.test.ts
 // ("regression: upsert uses onConflict household_id,date — not date alone").
 //
-// The E2E below covers the full browser → server action → Supabase path once
-// a deployed Supabase env is available.
+// This E2E covers the full browser → server action → Supabase round-trip.
 
-testWithUser.describe('regression: fund save with household @auth', () => {
-  testWithUser.skip(
-    'adding a fund saves successfully when a household is present @auth',
+testWithUser.describe('regression #168: fund save with household @flow', () => {
+  testWithUser(
+    'adding an asset saves successfully and persists after page reload @flow',
     async ({ testUser: { page, householdId } }) => {
       // Postcondition cleanup — remove seeded snapshot data after this test
       testWithUser.afterAll(async () => {
@@ -130,30 +127,67 @@ testWithUser.describe('regression: fund save with household @auth', () => {
       await page.goto('/current-finances');
       await page.waitForLoadState('domcontentloaded');
 
-      // Locate the "Add fund" / "Add item" button (exact selector TBD once
-      // the component renders in a fully authenticated context)
-      const addFundBtn = page
-        .getByRole('button', { name: /add fund|add item|new fund/i })
+      // Wait for the page to finish loading (past the "Loading finances..." state)
+      await expect(
+        page.locator('h1').filter({ hasText: /Current Finances/i })
+      ).toBeVisible({ timeout: 10_000 });
+
+      // --- Step 1: click the "Assets" tab (default active tab) ---
+      // The tab may already be active; ensure we're on it.
+      const assetsTab = page.getByRole('button', { name: /^assets/i });
+      if (await assetsTab.isVisible()) {
+        await assetsTab.click();
+      }
+
+      // --- Step 2: click "Add Asset" (empty-state button or quick-add below list) ---
+      const addBtn = page
+        .getByRole('button', { name: /add asset/i })
         .first();
-      await expect(addFundBtn).toBeVisible({ timeout: 10_000 });
-      await addFundBtn.click();
+      await expect(addBtn).toBeVisible({ timeout: 5_000 });
+      await addBtn.click();
 
-      // Fill in the minimal required fields
-      await page.getByLabel(/name|fund name/i).fill('E2E Regression Fund');
-      await page.getByLabel(/value|amount|balance/i).fill('50000');
+      // --- Step 3: select type (first card in the type-selection grid) ---
+      // The PlanModal first shows a type-selection screen. Pick "House" or the first card.
+      const typeCard = page.locator('button').filter({ hasText: /^(House|Custom Asset)/i }).first();
+      await expect(typeCard).toBeVisible({ timeout: 5_000 });
+      await typeCard.click();
 
-      // Submit the form
-      const saveBtn = page.getByRole('button', { name: /save|confirm|add/i }).last();
-      await expect(saveBtn).toBeVisible();
-      await saveBtn.click();
+      // --- Step 4: fill in the Name field ---
+      const nameInput = page.locator('input[type="text"]').first();
+      await expect(nameInput).toBeVisible({ timeout: 5_000 });
+      await nameInput.clear();
+      await nameInput.fill('E2E Regression Asset');
 
-      // The new fund must appear in the finance items list — no error toast
-      const fundEntry = page.getByText('E2E Regression Fund');
-      await expect(fundEntry).toBeVisible({ timeout: 10_000 });
+      // --- Step 5: fill in the Current Value field ---
+      const valueInput = page.locator('input[type="number"]').first();
+      await expect(valueInput).toBeVisible();
+      await valueInput.clear();
+      await valueInput.fill('123456');
 
-      // Assert no error toast / alert appeared
-      const errorToast = page.locator('[role="alert"]').filter({ hasText: /error|failed|could not/i });
-      await expect(errorToast).not.toBeVisible({ timeout: 3_000 });
+      // --- Step 6: click "Add Item" to save ---
+      const addItemBtn = page.getByRole('button', { name: /add item/i });
+      await expect(addItemBtn).toBeVisible();
+      await addItemBtn.click();
+
+      // --- Step 7: assert no error toast (regression: PR #168) ---
+      // The onConflict fix means the server action should succeed silently.
+      await page.waitForTimeout(1_500); // allow server action to settle
+      const errorAlert = page
+        .locator('[role="alert"]')
+        .filter({ hasText: /Failed to save snapshot/i });
+      await expect(errorAlert).not.toBeVisible({ timeout: 3_000 });
+
+      // --- Step 8: the new item should appear in the list ---
+      await expect(
+        page.getByText('E2E Regression Asset')
+      ).toBeVisible({ timeout: 10_000 });
+
+      // --- Step 9: reload and verify DB persistence ---
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2_000);
+      await expect(
+        page.getByText('E2E Regression Asset')
+      ).toBeVisible({ timeout: 10_000 });
     },
   );
 });
