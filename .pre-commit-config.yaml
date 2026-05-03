@@ -50,6 +50,13 @@ repos:
         language: fail
         files: '\.env$'
 
+  # Secret scanning with gitleaks — catches tokens, API keys, service-role keys, etc.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.27.2
+    hooks:
+      - id: gitleaks
+        name: Detect secrets with gitleaks
+
   # Prevent commits to protected branches
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
