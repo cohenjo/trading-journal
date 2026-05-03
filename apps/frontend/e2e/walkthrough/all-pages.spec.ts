@@ -9,6 +9,28 @@ const PAGES = [
 ];
 
 /**
+ * Path prefixes for FastAPI endpoints that have not yet been migrated to
+ * Server Actions and therefore 404 in environments without the FastAPI
+ * backend deployed (i.e. CI and Vercel). Tracked under TJ-018 (#71); each
+ * sub-issue listed below should remove its entry as the migration lands.
+ *
+ * - /api/plans/simulate    → #173
+ * - /api/finances/history  → #177
+ * - /api/trading/configs   → #177
+ * - /api/ladder/income     → #177
+ * - /api/options           → #177
+ * - /api/insurance         → #177
+ */
+const UNMIGRATED_FASTAPI_PATHS = [
+  '/api/plans/simulate',
+  '/api/finances/history',
+  '/api/trading/configs',
+  '/api/ladder/income',
+  '/api/options',
+  '/api/insurance',
+];
+
+/**
  * Returns true if the response URL/error is known-acceptable noise that should
  * not fail the walkthrough assertion.
  */
@@ -16,13 +38,8 @@ function isKnownAcceptableApiError(url: string, status: number): boolean {
   // Telemetry 401s — tracked in #125, not a product bug
   if (url.includes('/metrics/page-load') && status === 401) return true;
 
-  // TODO #173: /api/plans/simulate 404 until simulate migration lands
-  if (url.includes('/api/plans/simulate') && status === 404) return true;
-
-  // TODO #177: remaining un-migrated FastAPI endpoints (TJ-018 / #71 follow-ups)
-  if (url.includes('/api/finances/history') && status === 404) return true;
-  if (url.includes('/api/trading/configs') && status === 404) return true;
-  if (url.includes('/api/ladder/income') && status === 404) return true;
+  // Un-migrated FastAPI endpoints — see UNMIGRATED_FASTAPI_PATHS above
+  if (status === 404 && UNMIGRATED_FASTAPI_PATHS.some(p => url.includes(p))) return true;
 
   return false;
 }
@@ -34,25 +51,18 @@ function isKnownAcceptableConsoleError(text: string): boolean {
   // Telemetry 401 noise — tracked in #125
   if (text.includes('/metrics/page-load')) return true;
 
-  // TODO #173: simulate 404 until migration lands
-  if (text.includes('/api/plans/simulate')) return true;
+  // Un-migrated FastAPI endpoints — see UNMIGRATED_FASTAPI_PATHS above
+  if (UNMIGRATED_FASTAPI_PATHS.some(p => text.includes(p))) return true;
 
-  // Simulation error is a downstream consequence of simulate 404
+  // App-level downstream errors caused by the same un-migrated endpoints
   if (text.includes('Simulation failed') || text.includes('Simulation error')) return true;
-
-  // TODO #177: remaining un-migrated FastAPI endpoints (TJ-018 / #71 follow-ups)
-  if (text.includes('/api/finances/history')) return true;
-  if (text.includes('/api/trading/configs')) return true;
-  if (text.includes('/api/ladder/income')) return true;
+  if (text.includes('Failed to fetch history')) return true;
+  if (text.includes('Failed to fetch summary data')) return true;
 
   // Generic browser console companion of the 404s we already allow-list above.
   // The browser logs "Failed to load resource: ... 404" without the URL, so we
   // filter the bare message; specific URL noise is filtered by the network handler.
   if (text.includes('Failed to load resource: the server responded with a status of 404')) return true;
-
-  // App-level downstream errors caused by the same un-migrated endpoints (#177)
-  if (text.includes('Failed to fetch history')) return true;
-  if (text.includes('Failed to fetch summary data')) return true;
 
   // React dev-mode warnings / hydration hints
   if (text.includes('Warning:') || text.includes('React does not recognize')) return true;
