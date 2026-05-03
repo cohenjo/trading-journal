@@ -6,12 +6,8 @@ import { PlanEditor } from '@/components/Plan/PlanEditor';
 import { PlanDetailsPane } from '@/components/Plan/PlanDetailsPane';
 import { Plan, PlanData } from '@/components/Plan/types';
 import { useSettings } from '../settings/SettingsContext';
-
-async function fetchLatestPlan() {
-    const res = await apiFetch('/api/plans/latest');
-    if (res.ok) return res.json();
-    return null;
-}
+import { getLatestPlan } from './actions';
+import { getLatestFinanceSnapshot } from '../finances/actions';
 
 async function createPlan(data: PlanData) {
     const res = await apiFetch('/api/plans/', {
@@ -31,21 +27,6 @@ async function updatePlan(id: number, data: PlanData) {
     return res.json();
 }
 
-async function fetchFinances() {
-    const res = await apiFetch('/api/finances/latest');
-    if (res.ok) {
-        return res.json();
-    }
-    // Return complete mock to satisfy backend validation
-    return {
-        net_worth: 0,
-        total_assets: 0,
-        total_liabilities: 0,
-        date: new Date().toISOString().split('T')[0],
-        data: { items: [], total_investments: 0, total_savings: 0 }
-    };
-}
-
 export default function PlanPage() {
     const { settings } = useSettings();
     const [plan, setPlan] = useState<Plan | null>(null);
@@ -56,7 +37,7 @@ export default function PlanPage() {
 
     // Initial Load
     useEffect(() => {
-        Promise.all([fetchLatestPlan(), fetchFinances()]).then(([planData, financeData]) => {
+        Promise.all([getLatestPlan(), getLatestFinanceSnapshot()]).then(([planData, financeData]) => {
             setFinances(financeData);
             if (planData) {
                 setPlan(planData);
