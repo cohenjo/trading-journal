@@ -14,7 +14,7 @@
 - **Context:** First comprehensive security review of trading journal codebase
 - **Findings:** Identified critical vulnerabilities: exposed credentials in `.env`, zero authentication/authorization across all API endpoints, unrestricted CORS policy
 - **Impact:** Application not production-ready; 17 API modules completely unprotected
-- **Key Concerns:** 
+- **Key Concerns:**
   - Interactive Brokers credentials in plaintext (live & paper accounts)
   - All financial data accessible without authentication
   - CORS allows any origin with credentials
@@ -59,7 +59,7 @@
 
 ### 2026-04-30 — YOLO Direct-Apply Round: TJ-022 Sharing RLS + 581 pgTAP Tests
 
-**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
 **Work:** Implemented 5 SECURITY DEFINER helper functions with `SET search_path = public, pg_temp` (stricter than design spec) to prevent temp-table injection. Built comprehensive 581-line pgTAP test suite validating all RLS scenarios. Documented 4 key tradeoffs: search_path convention, household hard-delete limits, cooked-table write-access coexistence, trigger firing order safety.
 
 **Key Insight:** Strict search_path configuration provides defense-in-depth; pgTAP is essential for RLS correctness validation at scale.
@@ -82,3 +82,24 @@
 - **Status:** Complete; ready for Keaton/Hockney/Jony review.
 
 📌 Team update (2026-05-02T09:03:04Z): DB-trigger SECURITY DEFINER is canonical for cross-RLS provisioning. When inserting on behalf of user (e.g., household_members), only SECURITY DEFINER functions can bypass RLS. Applies to user signup provisioning: handle_new_auth_user (profile) and handle_new_user_household chains. — Coordinator
+### 2026-05-03: Security Incident INC-2026-05-03-001 — Supabase Service-Role Key Leak
+
+- **Context:** GitHub secret-scanning alert #1 fired. Supabase service-role key for project `zvbwgxdgxwgduhhzdwjj` found in `.squad/decisions.md` on `origin/main`.
+- **Investigation findings:**
+  - Key first introduced: commit `5a75bd1` (2026-05-01 01:52) in E2E test file + `.secrets/` directory (local branch `squad/wave1-all-pages` — never pushed to remote)
+  - Key propagated to `main`: via `.squad/decisions/inbox/` session-log shell snippets merged by Scribe into `decisions.md`
+  - Key confirmed in `origin/main` tip (`c3c38fa`) in `.squad/decisions.md` at line 2977
+  - Additional credentials exposed (local branch only): Google OAuth client secrets (dev + prod), Vercel 2FA recovery codes, E2E test user password
+  - `.secrets/test-user-redfoot.txt` was still tracked in git HEAD — untracked in this PR
+  - `.gitignore` had `**/secrets/**` but NOT `.secrets/` — leading-dot variant added
+- **Actions taken (Rabin security lead):**
+  - Redacted service-role key + anon key from working tree (superseded by branch evolution on `squad/secret-scan-hardening`)
+  - Untracked `.secrets/test-user-redfoot.txt` via `git rm --cached`
+  - Added `.secrets/` and `docs/security/**` exception patterns to `.gitignore`
+  - Filed incident report: `docs/security/incident-2026-05-03-supabase-service-role.md`
+  - Filed policy: `.squad/decisions/inbox/rabin-secret-handling-policy.md`
+  - Created sign-off GitHub issue for Hockney + Kujan
+  - Confirmed GitHub push protection: ✅ already enabled
+- **History rewrite decision:** NOT recommended. Service-role key is a rotatable JWT — rotation invalidates it. Rewrite only if forensic evidence of unauthorized use found in Supabase audit logs.
+- **Policy codified:** Secrets in `.env.local` only; `.env.example` placeholders only; pre-commit gitleaks; push protection enabled; service-role keys rotated on every leak.
+- **PR:** `squad/secret-scan-hardening` → `security: incident report + remediation tracker (Supabase service-role rotation)`
