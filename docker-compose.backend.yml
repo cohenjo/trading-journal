@@ -1,18 +1,20 @@
 services:
   backend:
+    # Worker container: reads from Supabase, computes locally, writes result tables.
+    # This is not a public web service; only /health is bound to localhost for debugging.
     container_name: trading_journal_backend_supabase
     build:
       context: ./apps/backend
       dockerfile: Dockerfile
     command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       DATABASE_URL: ${DIRECT_DATABASE_URL:?Set DIRECT_DATABASE_URL to the Supabase Postgres or pooler connection string}
-      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL to https://zvbwgxdgxwgduhhzdwjj.supabase.co}
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL to your Supabase project URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
-      BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3000,https://trading-journal-cohenjos-projects.vercel.app,https://*.vercel.app}
-      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-trading-journal-backend-local-docker}
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-trading-journal-backend-worker-local-docker}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://127.0.0.1:4317}
     restart: unless-stopped
     healthcheck:

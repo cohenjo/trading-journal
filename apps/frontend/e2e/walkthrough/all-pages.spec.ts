@@ -9,22 +9,21 @@ const PAGES = [
 ];
 
 /**
- * Path prefixes for FastAPI endpoints that have not yet been migrated to
- * Server Actions and therefore 404 in environments without the FastAPI
- * backend deployed (i.e. CI and Vercel). Tracked under TJ-018 (#71); each
- * sub-issue listed below should remove its entry as the migration lands.
- *
- * - /api/plans/simulate    → #173
- * - /api/finances/history  → #177
- * - /api/options/projection → #189 / TJ-019
+ * Temporary safety net for Phase A only. The frontend end-state is that no
+ * compute route calls FastAPI over `/api/*`; this array goes to `[]` once the
+ * TJ-020 Phase B migrations in #208-#217 land.
  */
-const UNMIGRATED_FASTAPI_PATHS = [
+const TEMPORARILY_ALLOWED_COMPUTE_API_PATHS: string[] = [
   '/api/plans/simulate',
-  '/api/finances/history',
   '/api/options/projection',
+  '/api/tax-condor',
   '/api/backtest',
+  '/api/analyze',
+  '/api/bonds/scanner',
+  '/api/finances/price',
+  '/api/ndx/sync',
+  '/api/trading/sync',
   '/api/pension',
-  '/api/holdings',
 ];
 
 /**
@@ -35,8 +34,13 @@ function isKnownAcceptableApiError(url: string, status: number): boolean {
   // Telemetry 401s — tracked in #125, not a product bug
   if (url.includes('/metrics/page-load') && status === 401) return true;
 
-  // Un-migrated FastAPI endpoints — see UNMIGRATED_FASTAPI_PATHS above
-  if (status === 404 && UNMIGRATED_FASTAPI_PATHS.some(p => url.includes(p))) return true;
+  if (
+    TEMPORARILY_ALLOWED_COMPUTE_API_PATHS.length > 0 &&
+    status === 404 &&
+    TEMPORARILY_ALLOWED_COMPUTE_API_PATHS.some(p => url.includes(p))
+  ) {
+    return true;
+  }
 
   return false;
 }
@@ -48,18 +52,17 @@ function isKnownAcceptableConsoleError(text: string): boolean {
   // Telemetry 401 noise — tracked in #125
   if (text.includes('/metrics/page-load')) return true;
 
-  // Un-migrated FastAPI endpoints — see UNMIGRATED_FASTAPI_PATHS above
-  if (UNMIGRATED_FASTAPI_PATHS.some(p => text.includes(p))) return true;
+  if (
+    TEMPORARILY_ALLOWED_COMPUTE_API_PATHS.length > 0 &&
+    TEMPORARILY_ALLOWED_COMPUTE_API_PATHS.some(p => text.includes(p))
+  ) {
+    return true;
+  }
 
-  // App-level downstream errors caused by the same un-migrated endpoints
   if (text.includes('Simulation failed') || text.includes('Simulation error')) return true;
   if (text.includes('Failed to fetch history')) return true;
   if (text.includes('Failed to fetch summary data')) return true;
   if (text.includes('Failed to fetch years')) return true;
-
-  // Generic browser console companion of the 404s we already allow-list above.
-  // The browser logs "Failed to load resource: ... 404" without the URL, so we
-  // filter the bare message; specific URL noise is filtered by the network handler.
   if (text.includes('Failed to load resource: the server responded with a status of 404')) return true;
 
   // React dev-mode warnings / hydration hints
