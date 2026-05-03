@@ -19,7 +19,6 @@ const TEMPORARILY_ALLOWED_COMPUTE_API_PATHS: string[] = [
   '/api/backtest',
   '/api/analyze',
   '/api/bonds/scanner',
-  '/api/finances/price',
   '/api/ndx/sync',
   '/api/trading/sync',
   '/api/pension',

@@ -1,5 +1,6 @@
-import { apiFetch } from '@/lib/api-client';
+import Decimal from 'decimal.js';
 import React from 'react';
+import { getPrice } from '@/app/finances/actions';
 import { PlanItem, PlanMilestone } from './types';
 import { CurrencySelector } from '../Common/CurrencySelector';
 
@@ -10,7 +11,11 @@ interface Props {
     milestones?: PlanMilestone[];
 }
 
+type AccountType = NonNullable<PlanItem['account_settings']>['type'];
+type DividendPayoutStartCondition = NonNullable<NonNullable<PlanItem['account_settings']>['dividend_payout_start_condition']>;
+
 export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'planning', milestones = [] }) => {
+    const [priceCacheStatus, setPriceCacheStatus] = React.useState<string | null>(null);
 
     const defaults = {
         type: 'Taxable' as const,
@@ -48,21 +53,27 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
         return (settings.rsu_grants || []).reduce((sum, g) => sum + (g.vested || 0), 0);
     }, [settings.rsu_grants, settings.type]);
 
-    // Helper to fetch data
-    const fetchMarketData = async (symbol: string, type: 'price' | 'yield') => {
+    // Helper to read the scheduled Supabase price cache.
+    const fetchMarketData = async (symbol: string) => {
         try {
-            const res = await apiFetch(`/api/finances/price/${symbol}`);
-            if (!res.ok) throw new Error('Failed to fetch');
-            const data = await res.json();
+            setPriceCacheStatus('Loading cached price…');
+            const data = await getPrice(symbol, item.currency || 'USD');
+            if (!data) {
+                setPriceCacheStatus('No cached price yet. It refreshes hourly when the worker is running.');
+                return;
+            }
 
-            if (type === 'price' && data.price) {
-                updateSettings({ current_price: data.price });
-            }
-            if (type === 'yield' && data.dividend_yield !== undefined) {
-                updateSettings({ dividend_yield: data.dividend_yield });
-            }
+            const price = new Decimal(data.price);
+            updateSettings({ current_price: price.toNumber() });
+            const refreshedAt = new Date(data.refreshed_at).toLocaleString();
+            setPriceCacheStatus(
+                data.isStale
+                    ? `Cached price is stale (last refreshed ${refreshedAt}).`
+                    : `Cached price refreshed ${refreshedAt}.`,
+            );
         } catch (e) {
             console.error(e);
+            setPriceCacheStatus('Failed to read cached price.');
         }
     };
 
@@ -70,18 +81,11 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
     React.useEffect(() => {
         if (mode === 'snapshot' && settings.type === 'RSU' && settings.stock_symbol && settings.stock_symbol.length > 1) {
             const timer = setTimeout(() => {
-                fetchMarketData(settings.stock_symbol!, 'price');
+                fetchMarketData(settings.stock_symbol!);
             }, 800);
             return () => clearTimeout(timer);
         }
     }, [settings.stock_symbol, mode, settings.type]);
-
-    // Auto-fetch Yield in Planning Mode on mount
-    React.useEffect(() => {
-        if (mode === 'planning' && settings.type === 'RSU' && settings.stock_symbol) {
-            fetchMarketData(settings.stock_symbol, 'yield');
-        }
-    }, [mode, settings.type, settings.stock_symbol]);
 
     return (
         <div className="space-y-4">
@@ -131,7 +135,7 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
                         <select
                             className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
                             value={settings.type}
-                            onChange={e => updateSettings({ type: e.target.value as any })}
+                            onChange={e => updateSettings({ type: e.target.value as AccountType })}
                         >
                             <option value="Taxable">Taxable (Generic)</option>
                             <option value="Broker">Brokerage</option>
@@ -147,6 +151,11 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
                         </select>
                     </div>
                 </div>
+                {settings.type === 'RSU' && priceCacheStatus && (
+                    <p className={`text-xs ${priceCacheStatus.includes('stale') ? 'text-amber-300' : 'text-slate-400'}`}>
+                        {priceCacheStatus}
+                    </p>
+                )}
             </div>
 
             {/* SAVINGS SPECIFIC FIELDS */}
@@ -581,7 +590,7 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
                                             <select
                                                 className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white text-sm"
                                                 value={settings.dividend_payout_start_condition || 'Immediate'}
-                                                onChange={e => updateSettings({ dividend_payout_start_condition: e.target.value as any })}
+                                                onChange={e => updateSettings({ dividend_payout_start_condition: e.target.value as DividendPayoutStartCondition })}
                                             >
                                                 <option value="Immediate">Immediate</option>
                                                 <option value="Age">At Age...</option>

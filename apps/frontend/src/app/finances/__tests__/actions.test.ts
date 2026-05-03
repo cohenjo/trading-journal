@@ -11,7 +11,7 @@
  *  6. Returns null when not authenticated.
  *  7. Returns null when user has no active household.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Supabase mock infrastructure ──────────────────────────────────────────────
 
@@ -25,6 +25,7 @@ import {
   deleteFinanceSnapshot,
   getFinanceHistory,
   getLatestFinanceSnapshot,
+  getPrice,
   saveFinanceSnapshot,
 } from '../actions';
 import { createClient } from '@/lib/supabase/server';
@@ -71,6 +72,10 @@ function fluentChain(result: unknown) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 // ── Auth / access control ─────────────────────────────────────────────────────
@@ -175,6 +180,54 @@ describe('getLatestFinanceSnapshot — snapshot retrieval', () => {
 });
 
 // ── History / write actions ───────────────────────────────────────────────────
+
+describe('getPrice', () => {
+  it('returns a cached price with stale status', async () => {
+    authOk();
+    vi.setSystemTime(new Date('2026-05-03T18:30:00Z'));
+    const priceChain = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({
+        data: {
+          price: '123.450000',
+          as_of: '2026-05-03T12:00:00Z',
+          refreshed_at: '2026-05-03T13:00:00Z',
+        },
+        error: null,
+      }),
+    };
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table === 'price_cache') return priceChain;
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    });
+
+    const result = await getPrice(' aapl ', ' usd ');
+
+    expect(result).toEqual({
+      price: '123.45',
+      as_of: '2026-05-03T12:00:00Z',
+      refreshed_at: '2026-05-03T13:00:00Z',
+      isStale: true,
+    });
+    expect(priceChain.eq).toHaveBeenNthCalledWith(1, 'symbol', 'AAPL');
+    expect(priceChain.eq).toHaveBeenNthCalledWith(2, 'currency', 'USD');
+  });
+
+  it('returns null when no cache row exists', async () => {
+    authOk();
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeSupabaseMock({
+        price_cache: () => fluentChain({ data: null, error: null }),
+      }),
+    );
+
+    await expect(getPrice('MSFT', 'USD')).resolves.toBeNull();
+  });
+});
 
 describe('getFinanceHistory', () => {
   it('returns snapshots ordered by date desc with the requested limit', async () => {
