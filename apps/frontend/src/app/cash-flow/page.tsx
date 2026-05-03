@@ -4,25 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '../settings/SettingsContext';
 import { CashFlowSankey } from '@/components/CashFlow/CashFlowSankey';
 import { PlanData } from '@/components/Plan/types';
-
-// Fetch Utilities (Duplicated from PlanPage for now)
-async function fetchLatestPlan() {
-    const res = await apiFetch('/api/plans/latest');
-    if (res.ok) return res.json();
-    return null;
-}
-
-async function fetchFinances() {
-    const res = await apiFetch('/api/finances/latest');
-    if (res.ok) return res.json();
-    return {
-        net_worth: 0,
-        total_assets: 0,
-        total_liabilities: 0,
-        date: new Date().toISOString().split('T')[0],
-        data: { items: [], total_investments: 0, total_savings: 0 }
-    };
-}
+import { getLatestPlan } from '../plan/actions';
+import { getLatestFinanceSnapshot } from '../finances/actions';
 
 export default function CashFlowPage() {
     const { settings } = useSettings();
@@ -34,7 +17,7 @@ export default function CashFlowPage() {
 
     // Initial Load
     useEffect(() => {
-        Promise.all([fetchLatestPlan(), fetchFinances()]).then(([planData, financeData]) => {
+        Promise.all([getLatestPlan(), getLatestFinanceSnapshot()]).then(([planData, financeData]) => {
             setFinances(financeData);
             if (planData) setPlan(planData);
             setLoading(false);

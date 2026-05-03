@@ -2,6 +2,7 @@
 import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from "react";
+import { getLatestFinanceSnapshot } from '@/app/finances/actions';
 
 export default function TradingAccountSettings() {
     const [configs, setConfigs] = useState<any[]>([]);
@@ -40,12 +41,9 @@ export default function TradingAccountSettings() {
 
     const fetchFinanceAccounts = async () => {
         try {
-            const res = await apiFetch("/api/finances/latest");
-            if (res.ok) {
-                const data = await res.json();
-                if (data && data.data && data.data.items) {
-                    setFinanceAccounts(data.data.items.filter((i: any) => i.category === "Investments"));
-                }
+            const snapshot = await getLatestFinanceSnapshot();
+            if (snapshot?.data?.items) {
+                setFinanceAccounts(snapshot.data.items.filter((i) => i.category === "Investments"));
             }
         } catch (err) {
             console.error("Error fetching finance accounts:", err);

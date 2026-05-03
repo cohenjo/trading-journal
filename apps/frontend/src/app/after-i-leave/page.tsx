@@ -6,6 +6,7 @@ import { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
 import CollapsibleSection from '@/components/AfterILeave/CollapsibleSection';
 import SummaryTable from '@/components/AfterILeave/SummaryTable';
 import { Lang, translations } from '@/components/AfterILeave/translations';
+import { getLatestFinanceSnapshot } from '../finances/actions';
 
 interface InsurancePolicy {
   id?: string;
@@ -34,10 +35,8 @@ async function fetchInsurancePolicies(): Promise<InsurancePolicy[]> {
 
 async function fetchFinanceData(): Promise<FinanceItem[]> {
   try {
-    const res = await apiFetch('/api/finances/latest');
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.data?.items || [];
+    const snapshot = await getLatestFinanceSnapshot();
+    return snapshot?.data?.items ?? [];
   } catch {
     return [];
   }
