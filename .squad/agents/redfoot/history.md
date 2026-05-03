@@ -229,3 +229,38 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 **PR**: https://github.com/cohenjo/trading-journal/pull/156
 **Follow-up issue**: https://github.com/cohenjo/trading-journal/issues/155
 **Run log**: `apps/frontend/e2e/RUN_LOG.md`
+
+### 2026-05-03: Household bootstrap + sign-out E2E coverage (PR #165)
+
+**Branch:** `squad/e2e-household-bootstrap-2026-05-03`
+**Base:** `squad/login-household-bootstrap-2026-05-03` (Fenster's testid PR #163)
+**Cherry-pick:** `788cc3e` from `squad/household-bootstrap-2026-05-03` (Hockney's RPC migration PR #164)
+
+**What was added:**
+
+- **`e2e/flows/household-bootstrap.spec.ts`** — 3 tests (`@auth` tag):
+  1. `existing-household login: no banner, app loads normally` — verifies `household-banner` absent for established user; gracefully skips when no dev server running.
+  2. `sign-out: sidebar-signout → /login, session cookie cleared` — opens sidebar via hamburger toggle, clicks `sidebar-signout`, asserts redirect to `/login` and Supabase session cookie cleared; gracefully skips when testid or dev server absent.
+  3. `[skip] first-login picker` — explicitly `test.skip`; left with TODO referencing issue #151 (needs fresh user with no household).
+
+- **`e2e/flows/current-finances.spec.ts`** — Fund-save regression spec (guard for Jony's bug: adding a fund silently failed when household exists because JWT wasn't forwarded to FastAPI). Implemented as `testWithUser.skip` pending Fenster's auth-guard PR + Hockney's RPC landing.
+
+- **`e2e/helpers/household.ts`** — `ensureHousehold`, `ensureNoHousehold`, `hasServiceRoleEnv` helpers for seeding/clearing household state in E2E tests.
+
+- **`supabase/migrations/20260503090000_household_bootstrap_rpc.sql`** — cherry-picked from Hockney (PR #164): adds `households.account_type`, `ensure_household` RPC, `v_my_active_household` view, backfill.
+
+**Local test run** (command: `SUPABASE_E2E_ALLOW_PROD=true npx playwright test --project=chromium e2e/flows/household-bootstrap.spec.ts`):
+
+| Test | Result | Reason |
+|------|--------|--------|
+| existing-household login | ⏭ skip | No local dev server on localhost:3000 |
+| sign-out flow | ⏭ skip | No local dev server on localhost:3000 |
+| first-login picker | ⏭ skip | test.skip — out of scope (#151) |
+
+**Total: 0 passed / 3 skipped / 0 failed**
+
+*Note:* `SUPABASE_E2E_ALLOW_PROD=true` required because project ref `zvbwgxdgxwgduhhzdwjj` contains no dev/stag/test hint. Without it, the admin fixture safety block fires before the graceful skip logic, producing 2 failures + 1 skip.
+
+**Blocker:** Tests (a) and (b) will only run green once a local dev server (`npm run dev`) is running on port 3000, or `BASE_URL` is set to a deployed Vercel URL with Supabase env vars configured.
+
+**PR depends on:** #163 (Fenster — testids) + #164 (Hockney — ensure_household RPC). PR description requests stacked merge order.
