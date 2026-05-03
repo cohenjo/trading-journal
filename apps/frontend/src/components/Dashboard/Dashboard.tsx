@@ -1,16 +1,12 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from "react";
+import { getLatestMonthSummary, getMonthSummary, type DailySummary } from "@/app/summary/actions";
 import TradesList from "./TradesList";
 import AddTradeForm from "./AddTradeForm";
 import PnLCurve from "./PnLCurve";
 import CalendarView from "./Calendar";
 
-interface DailySummary {
-  date: string;
-  total_pnl: number;
-}
 
 export default function Dashboard() {
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -19,11 +15,7 @@ export default function Dashboard() {
   useEffect(() => {
     const initializeDate = async () => {
       try {
-        const response = await apiFetch("/api/summary/latest-month");
-        if (!response.ok) {
-          return;
-        }
-        const latest: { year: number; month: number } | null = await response.json();
+        const latest = await getLatestMonthSummary();
         if (!latest) {
           return;
         }
@@ -41,11 +33,7 @@ export default function Dashboard() {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1;
       try {
-        const response = await apiFetch(`/api/summary/${year}/${month}`);
-        if (!response.ok) {
-          throw new Error("Network response was not ok");
-        }
-        const summaries: DailySummary[] = await response.json();
+        const summaries: DailySummary[] = await getMonthSummary(year, month);
 
         summaries.sort(
           (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()

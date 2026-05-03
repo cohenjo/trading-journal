@@ -1,7 +1,7 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import { useState } from "react";
+import { createTrade } from "@/app/trades/actions";
 
 export default function AddTradeForm() {
   const [symbol, setSymbol] = useState("SPY");
@@ -25,11 +25,11 @@ export default function AddTradeForm() {
       pnl,
     };
 
-    await apiFetch("/api/trades", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(trade),
-    });
+    const result = await createTrade(trade);
+    if (!result.ok) {
+      console.error("Failed to create trade:", result.error);
+      return;
+    }
 
     // In a real app, you'd probably want to trigger a refetch of the trades list
     window.location.reload();

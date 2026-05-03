@@ -1,16 +1,11 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from "react";
+import { getMonthSummary, type DailySummary } from "@/app/summary/actions";
 import { useRouter } from "next/navigation";
 import Calendar, { type CalendarProps } from "react-calendar";
 import "react-calendar/dist/Calendar.css";
 import "./Calendar.css";
-
-type DailySummary = {
-  date: string;
-  total_pnl: number;
-};
 
 type CalendarViewProps = {
   date: Date;
@@ -25,8 +20,7 @@ export default function CalendarView({ date, onDateChange }: CalendarViewProps) 
     const fetchSummaries = async () => {
       const year = date.getFullYear();
       const month = date.getMonth() + 1;
-      const response = await apiFetch(`/api/summary/${year}/${month}`);
-      const data = await response.json();
+      const data = await getMonthSummary(year, month);
       setSummaries(data);
     };
     fetchSummaries();

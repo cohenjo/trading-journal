@@ -1,48 +1,8 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-
-// Define types for the data we expect from the backend
-interface MatchedTrade {
-  id: number;
-  symbol: string;
-  open_date: string;
-  close_date: string;
-  open_price: number;
-  close_price: number;
-  pnl: number;
-  notes?: string;
-}
-
-interface DailySummary {
-  date: string;
-  total_pnl: number;
-  winning_trades: number;
-  losing_trades: number;
-  win_rate: number;
-  avg_win: number;
-  avg_loss: number;
-}
-
-interface DailyBar {
-  symbol: string;
-  date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
-
-interface DayDetails {
-  summary: DailySummary | null;
-  trades: [];
-  note: { content: string } | null;
-  matched_trades: MatchedTrade[];
-  market_data: DailyBar | null;
-}
+import { getDayDetails, type DayDetails } from '@/app/day/actions';
 
 import TradesTable from '@/components/Dashboard/TradesTable';
 import SummaryGauges from '@/components/Dashboard/SummaryGauges';
@@ -57,10 +17,13 @@ export default function DayPage() {
 
   useEffect(() => {
     if (date) {
-      apiFetch(`/api/day/${date}`)
-        .then((res) => res.json())
+      getDayDetails(date)
         .then((data) => {
           setDayDetails(data);
+          setLoading(false);
+        })
+        .catch((error: unknown) => {
+          console.error('Failed to load day details:', error);
           setLoading(false);
         });
     }

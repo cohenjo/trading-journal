@@ -8,7 +8,7 @@ interface MatchedTrade {
   open_price: number;
   close_price: number;
   pnl: number;
-  notes?: string;
+  notes?: string | null;
 }
 
 export default function TradesTable({ trades }: { trades: MatchedTrade[] }) {

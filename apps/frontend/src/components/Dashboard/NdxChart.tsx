@@ -1,16 +1,8 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useRef } from 'react';
+import { getNdxChartData, type NdxChartData } from '@/app/ndx/actions';
 import { createChart, IChartApi, CandlestickData, UTCTimestamp, SeriesMarker, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
-
-interface ChartData {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
 
 // Using the same MatchedTrade interface from DayPage
 interface MatchedTrade {
@@ -21,7 +13,7 @@ interface MatchedTrade {
   open_price: number;
   close_price: number;
   pnl: number;
-  notes?: string;
+  notes?: string | null;
 }
 
 export default function NdxChart({ date, trades }: { date: string, trades: MatchedTrade[] }) {
@@ -56,42 +48,39 @@ export default function NdxChart({ date, trades }: { date: string, trades: Match
       });
 
       if (date) {
-        apiFetch(`/api/ndx/sync/${date}`, { method: 'POST' })
-          .then(() => {
-            apiFetch(`/api/ndx/${date}`)
-              .then((res) => res.json())
-              .then((data: ChartData[]) => {
-                const formattedData: CandlestickData[] = data.map(item => ({
-                    time: item.time as UTCTimestamp,
-                    open: item.open,
-                    high: item.high,
-                    low: item.low,
-                    close: item.close,
-                }));
-                candlestickSeries.setData(formattedData);
+        getNdxChartData(date)
+          .then((data: NdxChartData[]) => {
+            const formattedData: CandlestickData[] = data.map(item => ({
+                time: item.time as UTCTimestamp,
+                open: item.open,
+                high: item.high,
+                low: item.low,
+                close: item.close,
+            }));
+            candlestickSeries.setData(formattedData);
 
-                if (trades && trades.length > 0) {
-                  const markers: SeriesMarker<UTCTimestamp>[] = [];
-                  trades.forEach(trade => {
-                    markers.push({
-                      time: (new Date(trade.open_date).getTime() / 1000) as UTCTimestamp,
-                      position: 'aboveBar',
-                      color: '#22c55e',
-                      shape: 'arrowDown',
-                      text: `Open ${trade.symbol}`,
-                    });
-                    markers.push({
-                      time: (new Date(trade.close_date).getTime() / 1000) as UTCTimestamp,
-                      position: 'belowBar',
-                      color: '#ef4444',
-                      shape: 'arrowUp',
-                      text: `Close ${trade.symbol}`,
-                    });
-                  });
-                  createSeriesMarkers(candlestickSeries, markers);
-                }
+            if (trades && trades.length > 0) {
+              const markers: SeriesMarker<UTCTimestamp>[] = [];
+              trades.forEach(trade => {
+                markers.push({
+                  time: (new Date(trade.open_date).getTime() / 1000) as UTCTimestamp,
+                  position: 'aboveBar',
+                  color: '#22c55e',
+                  shape: 'arrowDown',
+                  text: `Open ${trade.symbol}`,
+                });
+                markers.push({
+                  time: (new Date(trade.close_date).getTime() / 1000) as UTCTimestamp,
+                  position: 'belowBar',
+                  color: '#ef4444',
+                  shape: 'arrowUp',
+                  text: `Close ${trade.symbol}`,
+                });
               });
-          });
+              createSeriesMarkers(candlestickSeries, markers);
+            }
+          })
+          .catch((error: unknown) => console.error('Failed to load NDX chart data:', error));
       }
     }
 
