@@ -7,7 +7,7 @@
 
 *This plan is ready for team review. Hockney, McManus, and Fenster can begin Phase 1 tasks in parallel immediately.*
 ### 1. Cookie pattern: `getAll`/`setAll` only
-Used the non-deprecated `getAll`/`setAll` API from `@supabase/ssr` v0.10.  
+Used the non-deprecated `getAll`/`setAll` API from `@supabase/ssr` v0.10.
 The older `get`/`set`/`remove` methods are deprecated in this version and will be removed in the next major.
 
 ### 1. Insurance (`#108`) — ✅ TRACTABLE
@@ -59,7 +59,7 @@ create table if not exists public.{table_name} (
 );
 
 -- Index for household queries
-create index if not exists {table}_household_id_idx 
+create index if not exists {table}_household_id_idx
   on public.{table_name} (household_id);
 
 -- Trigger for updated_at
@@ -73,23 +73,23 @@ alter table public.{table_name} enable row level security;
 
 -- RLS policies: household-scoped pattern
 drop policy if exists {table}_select on public.{table_name};
-create policy {table}_select on public.{table_name} 
+create policy {table}_select on public.{table_name}
   for select to authenticated
   using (household_id is not null and public.is_household_member(household_id));
 
 drop policy if exists {table}_insert on public.{table_name};
-create policy {table}_insert on public.{table_name} 
+create policy {table}_insert on public.{table_name}
   for insert to authenticated
   with check (household_id is not null and public.is_household_writer(household_id));
 
 drop policy if exists {table}_update on public.{table_name};
-create policy {table}_update on public.{table_name} 
+create policy {table}_update on public.{table_name}
   for update to authenticated
   using (household_id is not null and public.is_household_writer(household_id))
   with check (household_id is not null and public.is_household_writer(household_id));
 
 drop policy if exists {table}_delete on public.{table_name};
-create policy {table}_delete on public.{table_name} 
+create policy {table}_delete on public.{table_name}
   for delete to authenticated
   using (household_id is not null and public.is_household_writer(household_id));
 ```
@@ -217,9 +217,9 @@ from sqlmodel import Field, SQLModel
 
 class {Feature}(SQLModel, table=True):
     """Description of the feature."""
-    
+
     __tablename__ = "{table_name}"
-    
+
     id: {type} = Field(primary_key=True)
     household_id: UUID = Field(foreign_key="households.id", nullable=False)
     # feature-specific fields
@@ -237,7 +237,7 @@ class {Feature}Update(SQLModel):
 ```
 
 ### 2. Session refresh: `getClaims()` not `getUser()`
-Middleware calls `supabase.auth.getClaims()` (local JWT validation) rather than `getUser()` (remote call).  
+Middleware calls `supabase.auth.getClaims()` (local JWT validation) rather than `getUser()` (remote call).
 This is the Supabase-recommended pattern for middleware to avoid latency on every request.
 
 ### 2. `SUPABASE_SERVICE_ROLE_KEY` — Production-only scope
@@ -553,7 +553,7 @@ def list_{feature}s(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     statement = (
         select({Feature})
         .where({Feature}.household_id == household_id)
@@ -572,7 +572,7 @@ def create_{feature}(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     db_item = {Feature}(**item.model_dump(), household_id=household_id)
     db.add(db_item)
     db.commit()
@@ -590,18 +590,18 @@ def update_{feature}(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     db_item = db.get({Feature}, id)
     if not db_item or db_item.deleted_at is not None:
         raise HTTPException(status_code=404, detail="{Feature} not found")
-    
+
     if db_item.household_id != household_id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    
+
     update_data = updates.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(db_item, key, value)
-    
+
     db.add(db_item)
     db.commit()
     db.refresh(db_item)
@@ -617,19 +617,19 @@ def delete_{feature}(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     db_item = db.get({Feature}, id)
     if not db_item or db_item.deleted_at is not None:
         raise HTTPException(status_code=404, detail="{Feature} not found")
-    
+
     if db_item.household_id != household_id:
         raise HTTPException(status_code=403, detail="Not authorized")
-    
+
     from datetime import datetime
     db_item.deleted_at = datetime.now().date()
     db.add(db_item)
     db.commit()
-    
+
     return {"status": "deleted", "id": id}
 ```
 
@@ -695,7 +695,7 @@ def delete_{feature}(
 ---
 
 ### 3. `NEXT_PUBLIC_SUPABASE_ANON_KEY` (not `PUBLISHABLE_KEY`)
-Supabase's newest docs renamed the key to `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.  
+Supabase's newest docs renamed the key to `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 We use `ANON_KEY` per the issue spec. Teams should align on one name when setting up `.env.local`.
 
 ### 3. `SUPABASE_URL` as backend env var alias
@@ -781,7 +781,7 @@ Three options (A: table split, B: dual FK + column-level grants, C: Supabase Vau
 
 **McManus's data taxonomy (per .squad/decisions.md):**
 - `dividend_*` tables = household-scoped
-- `trading_positions` = household-scoped  
+- `trading_positions` = household-scoped
 - `insurance_policies` = owner-private
 - `finance_snapshots` (pension) = owner-private
 
@@ -817,19 +817,19 @@ PR #85 merged to main before this work was completed, so the migrations are avai
 
 # Decision: RLS Test Contract for TJ-013
 
-**Author:** Redfoot (Tester)  
-**Date:** 2026-04-30  
-**Issue:** TJ-013 / GH #66  
+**Author:** Redfoot (Tester)
+**Date:** 2026-04-30
+**Issue:** TJ-013 / GH #66
 **Status:** Recorded — merge into decisions.md
 
 ---
 
 ## Decision: Aspirational test pattern for tables without RLS yet
 
-**Context:**  
+**Context:**
 PR #85 adds `household_id` to 12 household-scoped tables and `owner_user_id` to 2 owner-private tables, but does NOT add `ENABLE ROW LEVEL SECURITY` or policies on those tables. The `households`, `household_members`, and `cooked.*` tables DO have live RLS policies.
 
-**Decision:**  
+**Decision:**
 Tests for tables without live RLS are written as "aspirational" TDD acceptance tests. They use `ok(true, '@aspirational ...')` placeholder assertions with detailed comments describing the exact SQL needed to make them concrete. These tests:
 1. Do NOT fail CI (all return ok=true)
 2. Serve as contract documentation for the follow-up migration owner
@@ -910,9 +910,9 @@ When writing E2E auth fixtures for Next.js apps using `@supabase/ssr`:
 
 # 🔧 Fenster Household RLS Audit Report
 
-**Date**: 2025-05-XX  
-**Auditor**: Fenster (Read-only)  
-**Scope**: All endpoints under `apps/backend/app/api/`  
+**Date**: 2025-05-XX
+**Auditor**: Fenster (Read-only)
+**Scope**: All endpoints under `apps/backend/app/api/`
 **Bug Pattern**: RLS-enforced household tables receive writes/reads WITHOUT household_id injection from JWT
 
 ---
@@ -1010,7 +1010,7 @@ Migration `130400` is authored but marked DESTRUCTIVE. It must not run until:
 This gate is documented in the migration header and the GH #58 comment.
 
 ### 5. Admin client throws at construction in browser
-`createAdminClient()` throws synchronously if `typeof window !== 'undefined'`,  
+`createAdminClient()` throws synchronously if `typeof window !== 'undefined'`,
 preventing accidental service-role key exposure in client bundles.
 
 
@@ -1022,11 +1022,11 @@ Successfully applied all 18 Supabase migrations to prod project (`jaesiklybkbmzp
 
 ## Execution Summary
 
-**Start:** 2026-05-01 01:10 UTC  
-**Duration:** ~15 minutes (including idempotency fixes)  
+**Start:** 2026-05-01 01:10 UTC
+**Duration:** ~15 minutes (including idempotency fixes)
 **Method:** Supabase CLI `db push --linked`
 
-**Migrations applied:** All 18 (baseline through 160200)  
+**Migrations applied:** All 18 (baseline through 160200)
 **Key migrations from PR #98:**
 - `120100_rls_helpers.sql` (MODIFIED): parameter rename `hid` → `p_household_id`
 - `160100_drop_account_secrets_table.sql` (NEW): DROP TABLE IF EXISTS trading_account_secrets
@@ -1045,9 +1045,9 @@ Prod had partial schema (tables existed but no RLS). Three migrations lacked `DR
 
 ## Verification Results
 
-✅ **Migration list:** All 18 show Remote timestamp  
-✅ **Advisor check:** 0 `rls_disabled_in_public` errors (grep confirmed)  
-✅ **Spot-check:** 5 tables (trade, execution, plans, manualtrade, dailysummary) all have `relrowsecurity=true`  
+✅ **Migration list:** All 18 show Remote timestamp
+✅ **Advisor check:** 0 `rls_disabled_in_public` errors (grep confirmed)
+✅ **Spot-check:** 5 tables (trade, execution, plans, manualtrade, dailysummary) all have `relrowsecurity=true`
 ✅ **Issue #97:** Commented and verified closed
 
 ## Lessons Learned
@@ -1065,7 +1065,7 @@ Prod had partial schema (tables existed but no RLS). Three migrations lacked `DR
 
 ---
 
-**Agent:** Hockney (Backend Dev)  
+**Agent:** Hockney (Backend Dev)
 **Coordinator approval:** Jony (autopilot delegation)
 
 
@@ -1170,9 +1170,9 @@ If prod breaks after apply:
 
 # Decision: TJ-005 Migration Strategy (Hockney)
 
-**Author:** Hockney (Backend Dev)  
-**Date:** 2026-04-30  
-**Issue:** TJ-005 / GH #58  
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-04-30
+**Issue:** TJ-005 / GH #58
 **Status:** Partial — 3 of 5 migrations ready; 2 await user decisions
 
 ---
@@ -1202,9 +1202,9 @@ If prod breaks after apply:
 
 # Decision: Vercel Setup Runbook & Deployment Patterns
 
-**Date:** 2026-05-01  
-**Author:** Hockney (Backend Dev)  
-**Status:** Approved  
+**Date:** 2026-05-01
+**Author:** Hockney (Backend Dev)
+**Status:** Approved
 **Scope:** Vercel CLI workflow, environment variables, preview deploys, DNS, CI/CD integration
 
 ---
@@ -1245,7 +1245,7 @@ from app.schema.household_models import HouseholdMember
 
 def get_user_household_id(db: Session, user_id: UUID) -> Optional[UUID]:
     """Get the household_id for the given user.
-    
+
     Returns the household_id of the first active membership found.
     """
     statement = (
@@ -1275,9 +1275,9 @@ def get_user_household_id(db: Session, user_id: UUID) -> Optional[UUID]:
 
 # Decision: TJ-019 Vercel Project Config
 
-**Author:** Hockney  
-**Date:** 2026-07  
-**Issue:** TJ-019 / GH #72  
+**Author:** Hockney
+**Date:** 2026-07
+**Issue:** TJ-019 / GH #72
 **Status:** Decided
 
 ---
@@ -1300,8 +1300,8 @@ Added from the runbook. `left_at` enables audit trails without losing membership
 
 ## Impact
 
-- McManus (Data/Finance): trade tables in TJ-006 should FK to `public.households(id)` using the same `ON DELETE CASCADE` / `ON DELETE RESTRICT` pattern.  
-- Keaton (Infra): `supabase db reset` must succeed locally before the branch is merged; add to CI checklist.  
+- McManus (Data/Finance): trade tables in TJ-006 should FK to `public.households(id)` using the same `ON DELETE CASCADE` / `ON DELETE RESTRICT` pattern.
+- Keaton (Infra): `supabase db reset` must succeed locally before the branch is merged; add to CI checklist.
 - All: `SUPABASE_SERVICE_ROLE_KEY` must never appear in `NEXT_PUBLIC_*` env vars — the trigger and helper functions are the only server-side bypass of RLS.
 
 
@@ -1351,9 +1351,9 @@ While validating with `supabase start`, migration `20260430150000_sharing_rls_po
 
 # Decision: E2E Test Architecture — Tiered Structure, Throwaway Users, BASE_URL Targeting
 
-**Author:** Redfoot (Tester)  
-**Date:** 2025-07-25  
-**Status:** Accepted — implemented in apps/frontend/e2e/  
+**Author:** Redfoot (Tester)
+**Date:** 2025-07-25
+**Status:** Accepted — implemented in apps/frontend/e2e/
 **Related:** PR for Playwright smoke scaffolding (this round)
 
 ---
@@ -1392,7 +1392,7 @@ BASE_URL=http://localhost:3000          (default — local)
 BASE_URL=https://<vercel-preview>.app   (CI / dev deployment)
 ```
 
-Legacy `PLAYWRIGHT_BASE_URL` preserved for backwards compat (existing CI configs may use it).  
+Legacy `PLAYWRIGHT_BASE_URL` preserved for backwards compat (existing CI configs may use it).
 `DEV_BASE_URL` can be set in `.env.local` so `npm run test:e2e:dev` works without typing the URL each time.
 
 **Why:** Consistent with how the team targets environments (Kujan's runbook uses `BASE_URL`). The `PLAYWRIGHT_BASE_URL` variable was already in the config but had no legacy users — safe to keep as alias.
@@ -1414,7 +1414,7 @@ All e2e users follow: `e2e_<unix-ms>_<4char-rand>@example.com`
 
 ## Decision 5: Service-Role Client Location
 
-`e2e/fixtures/admin.ts` is the **only** place the service-role key is used.  
+`e2e/fixtures/admin.ts` is the **only** place the service-role key is used.
 It exports helper functions; it is never imported by app source code.
 
 **Prod guard:** The client constructor checks the Supabase URL's ref slug for dev/staging hints (`dev`, `stag`, `test`, `local`, `preview`, `sandbox`). If none match, it throws unless `SUPABASE_E2E_ALLOW_PROD=true` is explicitly set.
@@ -1442,8 +1442,8 @@ It exports helper functions; it is never imported by app source code.
 
 # Decision: TJ-013 — Extend PR #88 with PR #85 policy tests (redfoot-tj013-extend)
 
-**Date:** 2026-05-01  
-**Author:** Redfoot (Tester / QA)  
+**Date:** 2026-05-01
+**Author:** Redfoot (Tester / QA)
 **Status:** Recorded — for Scribe to merge into `.squad/decisions.md`
 
 ---
@@ -1472,9 +1472,9 @@ PostgreSQL does not support `CREATE OR REPLACE TRIGGER`. Migrations use `DROP TR
 
 # Decision: TJ-017 — Supabase JWT Validation Approach
 
-**Author:** Hockney (Backend Dev)  
-**Date:** 2026-07  
-**PR:** #70  
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-07
+**PR:** #70
 **Status:** Accepted
 
 ---
@@ -1678,13 +1678,13 @@ npm install && npm run dev
 
 # Decision: CI/CD Scaffolding Strategy (TJ-008)
 
-**Author:** Kujan (DevOps/Platform)  
-**Date:** 2026-05-01  
-**Issue:** TJ-008 / GH #61  
+**Author:** Kujan (DevOps/Platform)
+**Date:** 2026-05-01
+**Issue:** TJ-008 / GH #61
 
 ## Decision
 
-Implemented Strategy A per `docs/design-hosting/runbooks/vercel-03-policy-ci.md`:  
+Implemented Strategy A per `docs/design-hosting/runbooks/vercel-03-policy-ci.md`:
 **Vercel git integration owns all deployments; GitHub Actions owns PR validation only.**
 
 ## Rationale
@@ -1769,15 +1769,15 @@ Implement nightly `pg_dump` from a GitHub Actions runner, encrypted with `age` p
 
 # McManus — Phase 1 Schema Consolidation Decisions
 
-**Date:** 2026-04-30  
-**Author:** McManus (Data Architecture)  
+**Date:** 2026-04-30
+**Author:** McManus (Data Architecture)
 **Context:** Resolving 4 user-pending decisions from coordinator inbox on PR #85
 
 ---
 
 ## Decision #1 — Hard-delete allowed for household owners
 
-**Implements:** User decision "Hard-delete OK"  
+**Implements:** User decision "Hard-delete OK"
 **Migration:** `20260430130500_relax_delete_policies.sql`
 
 Dropped `USING (false)` DELETE policies (`households_no_hard_delete`, `household_members_no_hard_delete`) and replaced with owner-only hard-delete using `is_household_owner()`. The `household_role` enum has no 'admin' value — 'owner' is the administrative equivalent. `deleted_at`/`left_at` columns retained for soft-delete UX but not enforced as a DB constraint.
@@ -1786,15 +1786,15 @@ Dropped `USING (false)` DELETE policies (`households_no_hard_delete`, `household
 
 ## Decision #2 — Enum stays `household_role`
 
-**Implements:** User decision "Enum stays household_role"  
-**No migration needed** — implementation was already correct.  
+**Implements:** User decision "Enum stays household_role"
+**No migration needed** — implementation was already correct.
 **Doc fix:** `docs/design-hosting/sections/06-data-architecture.md` corrected from `household_member_role` to `household_role`.
 
 ---
 
 ## Decision #3 — Drop trading_account_secrets; config is household-only
 
-**Implements:** User decision "DROP public.trading_account_secrets"  
+**Implements:** User decision "DROP public.trading_account_secrets"
 **Migration:** `20260430130300_drop_trading_account_secrets.sql` (replaces sketch)
 
 - `trading_account_secrets` never created (sketch was commented out) — `DROP IF EXISTS` is idempotent
@@ -1806,7 +1806,7 @@ Dropped `USING (false)` DELETE policies (`households_no_hard_delete`, `household
 
 ## Decision #4 — public.user → public.user_profile
 
-**Implements:** User decision "public.user → public.user_profile"  
+**Implements:** User decision "public.user → public.user_profile"
 **Migrations:** `20260430130400_user_to_user_profile.sql` + `20260430130600_repoint_user_fks.sql`
 
 - `DROP TABLE public."user" CASCADE` (no FK constraint casualties found in migration chain)
@@ -1831,9 +1831,9 @@ _Do NOT run Scribe — coordinator will batch consolidate later._
 
 # Decision: Schema Layering for raw / compute / cooked
 
-**Author:** McManus (Data/Finance Dev)  
-**Issue:** TJ-006 / GH #59  
-**Date:** 2026-04-30  
+**Author:** McManus (Data/Finance Dev)
+**Issue:** TJ-006 / GH #59
+**Date:** 2026-04-30
 **Status:** Implemented
 
 ## Decision
@@ -1907,9 +1907,9 @@ Established three schema namespaces in Supabase Postgres alongside the existing 
 
 # Hockney Wave 2 Narrow Scope - Insurance + Pension User Scoping
 
-**Date:** 2026-05-01  
-**Author:** Hockney (Backend Dev)  
-**PR:** #123  
+**Date:** 2026-05-01
+**Author:** Hockney (Backend Dev)
+**PR:** #123
 **Issues:** #108 (Insurance), #109 (Pension)
 
 ## Summary
@@ -2013,9 +2013,9 @@ Headers are defined as a constant dict in `security_headers.py` so tests and fut
 - HSTS assumes HTTPS in production; harmless over plain HTTP in dev.
 # Decision: Migrate monetary float fields to Decimal
 
-**Author:** McManus (Data/Finance)  
-**Date:** 2025-07-25  
-**Status:** Accepted  
+**Author:** McManus (Data/Finance)
+**Date:** 2025-07-25
+**Status:** Accepted
 **Issue:** #9
 
 ## Context
@@ -2152,10 +2152,10 @@ Application CI should be explicit, path-scoped, and tied to the trading-journal 
 
 # Decision: Authenticated Smoke Harness V2 — Working
 
-**Date**: 2026-05-01  
-**Decider**: Redfoot  
-**Status**: ✅ Complete  
-**PR**: #118 (`squad/test-harness-smoke-v2`)  
+**Date**: 2026-05-01
+**Decider**: Redfoot
+**Status**: ✅ Complete
+**PR**: #118 (`squad/test-harness-smoke-v2`)
 **Report**: `.squad/log/2026-05-01T01-52-smoke-v2-authenticated.md`
 
 ## Context
@@ -2213,9 +2213,9 @@ npx playwright test e2e/smoke/all-pages.spec.ts
 
 # Decision: Page Smoke Test Blocked on Auth Cookie Format
 
-**Date**: 2026-04-30  
-**Decider**: Redfoot  
-**Status**: Blocker  
+**Date**: 2026-04-30
+**Decider**: Redfoot
+**Status**: Blocker
 **Report**: `.squad/log/2026-05-01T01-42-41-page-smoke-authenticated.md`
 
 ## Context
@@ -2281,9 +2281,9 @@ But `@supabase/ssr` expects a **different format** (unknown which). This causes 
 
 # Redfoot: Re-Smoke Post-JWT Fix Results — All 22 Pages Green
 
-**Date**: 2026-04-30T23:25:00Z  
-**Author**: Redfoot  
-**Context**: Issue #100 comprehensive functional sweep, PR #122 JWT fix merged  
+**Date**: 2026-04-30T23:25:00Z
+**Author**: Redfoot
+**Context**: Issue #100 comprehensive functional sweep, PR #122 JWT fix merged
 **Stakeholders**: All squad members, Coordinator
 
 ## Decision
@@ -2359,8 +2359,8 @@ Unauthenticated smoke testing validates:
 
 # Tester Walkthrough V2 — BLOCKED
 
-**Date:** 2025-01-07  
-**Reporter:** Playwright Tester  
+**Date:** 2025-01-07
+**Reporter:** Playwright Tester
 **Issue:** Authentication fixture failing — cannot proceed with authenticated walkthrough
 
 ## Summary
@@ -2408,9 +2408,9 @@ Attempted to run authenticated walkthrough of 21 application pages using the exi
 
 # Decision: apiFetch is the canonical FastAPI client
 
-**Date:** 2026-07-29  
-**By:** Fenster (Frontend Dev) — PR #96  
-**Category:** Architecture, Security  
+**Date:** 2026-07-29
+**By:** Fenster (Frontend Dev) — PR #96
+**Category:** Architecture, Security
 **Status:** Implemented
 
 ## What
@@ -2443,8 +2443,8 @@ import { apiFetch, ApiAuthError } from '@/lib/api-client';
 
 # Page Audit — Top 3 Architectural Takeaways
 
-**By:** Fenster (Frontend Dev)  
-**Date:** 2026-07-29  
+**By:** Fenster (Frontend Dev)
+**Date:** 2026-07-29
 **Source:** `docs/design-hosting/page-audit.md` — 21-page gap analysis against Supabase migration
 
 ---
@@ -2492,8 +2492,8 @@ User preferences (`targetIncome`, `mainCurrency`, DOB, projection params) are st
 
 # Decision: Supabase SSR Client Architecture (TJ-015)
 
-**Date:** 2026-07-18  
-**Author:** Fenster (Frontend/Next.js)  
+**Date:** 2026-07-18
+**Author:** Fenster (Frontend/Next.js)
 **Issue:** TJ-015 / GH #68
 
 ## Decisions Made
@@ -2564,9 +2564,9 @@ Per coordinator directive, the following are blocked behind architectural rework
 
 # Wave 2b Architecture — Mock/File Storage to DB Migration Recipe
 
-**Date:** 2026-05-01  
-**Author:** Hockney (Backend Dev)  
-**PR:** #129  
+**Date:** 2026-05-01
+**Author:** Hockney (Backend Dev)
+**PR:** #129
 **Issues:** #119 (holdings), #120 (dividends)
 
 ## Summary
@@ -2590,9 +2590,9 @@ When migrating a feature from in-memory mock or file storage (CSV/XLSX) to a rea
 
 ## 2026-04-30: YOLO Round 2 — Supabase Branching vs 2-Project Model
 
-**By:** Keaton (Lead)  
-**Date:** 2026-04-30  
-**Requested by:** Jony Vesterman Cohen  
+**By:** Keaton (Lead)
+**Date:** 2026-04-30
+**Requested by:** Jony Vesterman Cohen
 **Status:** Recommendation — Keep 2-project model
 
 ### Implementation Details
@@ -2606,8 +2606,8 @@ When migrating a feature from in-memory mock or file storage (CSV/XLSX) to a rea
 
 ## 2026-04-30: Sharing RLS Policy Tradeoffs (TJ-022)
 
-**By:** Rabin (Database/RLS Dev)  
-**Related:** PR #92  
+**By:** Rabin (Database/RLS Dev)
+**Related:** PR #92
 
 ### Insurance API (#108)
 - **Time:** ~30 minutes (as classified in prior findings)
@@ -2650,8 +2650,8 @@ When migrating a feature from in-memory mock or file storage (CSV/XLSX) to a rea
 - Dev default secret key must never reach production — document in deployment guide
 # Decision: Backend Financial Test Coverage (Issue #5)
 
-**Author:** Redfoot (Tester)  
-**Date:** 2025-07-25  
+**Author:** Redfoot (Tester)
+**Date:** 2025-07-25
 **Status:** Proposed
 
 ## Context
@@ -2695,8 +2695,8 @@ Added 94 focused pytest tests across 6 new test files:
 
 ## 2026-04-30: Baseline Legacy Schema Migration Strategy
 
-**By:** McManus (Data/Finance Dev)  
-**Related:** TJ-005, PR #90  
+**By:** McManus (Data/Finance Dev)
+**Related:** TJ-005, PR #90
 
 ### Key design choices
 
@@ -2727,9 +2727,9 @@ Added 94 focused pytest tests across 6 new test files:
 - Test assertions updated to use `float()` wrapper for `pytest.approx` compatibility
 # Decision: JWT Authentication for API Endpoints
 
-**Author:** Rabin (Security Specialist)  
-**Date:** 2025-07-26  
-**Status:** Implemented  
+**Author:** Rabin (Security Specialist)
+**Date:** 2025-07-26
+**Status:** Implemented
 **Issue:** #1 — Add authentication to API endpoints
 
 ## Context
@@ -2750,8 +2750,8 @@ Implement JWT-based authentication using `python-jose` + `passlib[bcrypt]`.
 
 ## 2026-04-30: TJ-005 — Supabase Migrations as Schema Source of Truth
 
-**By:** Keaton (Lead)  
-**Related:** #58, Design.md §4  
+**By:** Keaton (Lead)
+**Related:** #58, Design.md §4
 
 ### Pension API (#109)
 - **Time:** ~1.5 hours (within 1-2 hr estimate)
@@ -2833,20 +2833,20 @@ The `dev` project was correctly conceived as the free-tier equivalent of a persi
 
 ## 2026-04-30: PR Board Cleanup — Dependabot + TJ-014 Draft
 
-**By:** Kujan (DevOps/Platform)  
-**Date:** 2026-04-30  
-**Status:** Executed  
+**By:** Kujan (DevOps/Platform)
+**Date:** 2026-04-30
+**Status:** Executed
 **Category:** Dependency Management, Technical Debt
 
 ### Risk Call Rationale
 
-**PR #46 — bcrypt (MERGE despite Supabase JWT migration):**  
+**PR #46 — bcrypt (MERGE despite Supabase JWT migration):**
 Supabase JWT (PR #89) replaced how we **validate tokens**, not how we **hash passwords for local accounts**. Both coexist. Expanding `<4.1` to `<5.1` is safe — bcrypt 5.x maintains the public API.
 
-**PR #44 — setup-python v4→v6 (MERGE despite major version jump):**  
+**PR #44 — setup-python v4→v6 (MERGE despite major version jump):**
 Only breaking change is Node 24 runtime for the action. GitHub-hosted runners already on v2.327.1+. Additionally, all other workflows already use `setup-python@v5`, so v6 brings full alignment.
 
-**PR #45 — upload-artifact v4→v7 (DEFER despite appearing additive):**  
+**PR #45 — upload-artifact v4→v7 (DEFER despite appearing additive):**
 3-major-version jump with intermediate v5/v6 changelogs not fully reviewed. upload-artifact v3→v4 had real breaking changes. Given blast radius (used 5× in CI), deferring pending changelog review.
 
 ### Schema access model
@@ -2874,10 +2874,10 @@ Only breaking change is Node 24 runtime for the action. GitHub-hosted runners al
 
 # Decision: Table Ownership Classification for Supabase RLS
 
-**Author:** McManus (Data/Finance Dev)  
-**Date:** 2026-04-30  
-**Status:** Draft — pending Jony answers on 3 open questions  
-**Issue:** TJ-003 / GH #56  
+**Author:** McManus (Data/Finance Dev)
+**Date:** 2026-04-30
+**Status:** Draft — pending Jony answers on 3 open questions
+**Issue:** TJ-003 / GH #56
 **Related doc:** `docs/design-hosting/data/table-ownership.md`
 
 ## Context
@@ -2929,9 +2929,9 @@ migration that will add `household_id` / `owner_user_id` FKs and apply RLS polic
 
 # Decision: First Household Migration Schema Choices
 
-**Author:** Rabin (Security Engineer)  
-**Date:** 2026-04-30  
-**Scope:** `supabase/migrations/` — TJ-005 batch  
+**Author:** Rabin (Security Engineer)
+**Date:** 2026-04-30
+**Scope:** `supabase/migrations/` — TJ-005 batch
 **Status:** Proposed — pending `supabase db reset` validation
 
 ---
@@ -3043,7 +3043,7 @@ npx playwright test e2e/walkthrough/all-pages.spec.ts --project=chromium --worke
 - 🔴 **Supabase API key is invalid** — cannot proceed
 
 ---
-**Status:** BLOCKED on credential update  
+**Status:** BLOCKED on credential update
 **ETA:** Unblocked once owner updates `.env.local` with valid Supabase keys
 
 ### Summary
@@ -3130,8 +3130,8 @@ PG 15+ views are `SECURITY INVOKER` by default, so RLS on the base table applies
 ## ❌ Endpoints MISSING household_id Injection (LIKELY BUGGY)
 
 ### ✅ Auth Fix
-**Before**: Manually injected base64-encoded session cookies  
-**After**: Use Supabase `signInWithPassword()` via `page.evaluate()` 
+**Before**: Manually injected base64-encoded session cookies
+**After**: Use Supabase `signInWithPassword()` via `page.evaluate()`
 
 This lets `@supabase/ssr` write cookies in the proper format, avoiding the middleware parse errors.
 
@@ -3197,20 +3197,20 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
   - `GET /api/dividends/accounts` (get_accounts)
     - Reads all `DividendAccount` without household filter
     - **Severity**: **MEDIUM** — leaks account names across households
-  
+
   - `GET /api/dividends/accounts/importable` (get_importable_accounts)
     - Reads all `DividendAccount` and `FinanceSnapshot` without household filter
     - **Severity**: **MEDIUM** — exposes snapshots and accounts across households
-  
+
   - `POST /api/dividends/accounts/import` (import_account)
     - **Writes** to `DividendAccount` without household_id
     - **Writes** to `DividendPosition` auto-populated from snapshot
     - **Severity**: **HIGH** — RLS will block or allow cross-household writes
-  
+
   - `POST /api/dividends/accounts` (create_account)
     - **Writes** to `DividendAccount` without household_id
     - **Severity**: **HIGH**
-  
+
   - `DELETE /api/dividends/accounts/{name}` (delete_account)
     - **Deletes** from `DividendPosition` and `DividendAccount` without household_id check
     - Updates `FinanceSnapshot` without household_id
@@ -3231,7 +3231,7 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
     - No household_id injection
     - **Severity**: **HIGH** — RLS will block writes silently, OR data will be visible to all households
     - **Tables**: `finance_snapshots` (write), `dividend_positions`, `dividend_accounts`, `dividend_ticker_data` (read ref data)
-  
+
   - `DELETE /api/finances/{date_str}` (delete_snapshot)
     - Deletes from `FinanceSnapshot` without household_id filter
     - **Severity**: **HIGH** — could delete other households' snapshots
@@ -3251,7 +3251,7 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
 
   @router.post("/", response_model=FinanceSnapshot)
   def create_snapshot(
-      data: SnapshotData, 
+      data: SnapshotData,
       user_id: UUID = Depends(get_current_user_id),
       db: Session = Depends(get_session)
   ):
@@ -3272,7 +3272,7 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
     - **HOWEVER**: Does NOT extract household_id from user_id
     - **Writes** to `FinanceSnapshot` without household_id injection
     - **Severity**: **HIGH** — pension data written to shared snapshots
-  
+
   - `DELETE /api/pension/{pension_id}` (delete_pension_record)
     - Has `get_current_user_id` ✅
     - Deletes from `FinanceSnapshot` without household verification
@@ -3291,27 +3291,27 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
   - `GET /api/plans/` (get_plans)
     - Returns all plans without household filter
     - **Severity**: **MEDIUM** — leaks plans
-  
+
   - `GET /api/plans/latest` (get_latest_plan)
     - Returns latest plan across all households
     - **Severity**: **MEDIUM**
-  
+
   - `GET /api/plans/{plan_id}` (get_plan)
     - No household check
     - **Severity**: **MEDIUM**
-  
+
   - `POST /api/plans/` (create_plan)
     - **Writes** to `Plan` without household_id
     - **Severity**: **HIGH**
-  
+
   - `PUT /api/plans/{plan_id}` (update_plan)
     - Updates plan without household verification
     - **Severity**: **HIGH** — could modify other households' plans
-  
+
   - `DELETE /api/plans/{plan_id}` (delete_plan)
     - Deletes without household verification
     - **Severity**: **HIGH**
-  
+
   - `POST /api/plans/simulate` (simulate_plan)
     - Reads `FinanceSnapshot` without household filter
     - **Severity**: **HIGH** — simulation uses wrong household's data
@@ -3344,27 +3344,27 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
   - `GET /api/trading/configs` (get_configs)
     - Returns all `TradingAccountConfig` without household filter
     - **Severity**: **MEDIUM** — leaks account configs
-  
+
   - `GET /api/trading/config` (get_config)
     - No household filter
     - **Severity**: **MEDIUM**
-  
+
   - `POST /api/trading/config` (update_config)
     - **Writes** to `TradingAccountConfig` without household_id
     - **Severity**: **HIGH** — could modify or create configs for wrong household
-  
+
   - `GET /api/trading/summary` (get_latest_summary)
     - Reads `TradingAccountSummary` without household filter
     - **Severity**: **MEDIUM**
-  
+
   - `GET /api/trading/positions` (get_latest_positions)
     - Reads `TradingPosition` without household filter
     - **Severity**: **MEDIUM**
-  
+
   - `POST /api/trading/sync` (sync_account)
     - **Writes** to `TradingAccountSummary` and `TradingPosition` via `trading_service.sync_account()`
     - **Severity**: **HIGH** — sync operation will corrupt data across households
-  
+
   - `POST /api/trading/sync-to-dividends` (sync_to_dividends)
     - Propagates data without household filter
     - **Severity**: **HIGH**
@@ -3429,11 +3429,11 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
     - Reads from mock `get_current_bonds()` (in-memory)
     - Queries `BondHolding` from DB (mock-based, may not reflect actual DB)
     - **Severity**: **LOW-MEDIUM** — currently uses in-memory mock, but DB integration pending
-  
+
   - `PUT /ladder/rungs/{rung_id}` (update_ladder_rung_target)
     - Updates in-memory `_RUNG_TARGETS`
     - **Severity**: **LOW** — in-memory, process-scoped
-  
+
   - `POST /ladder/bonds` (create_ladder_bond)
     - **Writes** to in-memory `add_bond()` (mock)
     - When DB integration happens, this WILL need household_id
@@ -3455,7 +3455,7 @@ Added `apps/frontend/e2e/smoke/run-smoke.sh`:
     - Queries `DailySummary` without household filter
     - Returns year/month of most recent entry (any household)
     - **Severity**: **MEDIUM** — leaks month info
-  
+
   - `GET /summary/{year}/{month}` (get_summary_for_month)
     - Returns all daily summaries for a month, all households
     - **Severity**: **MEDIUM** — direct data leak
@@ -3531,7 +3531,7 @@ def write_operation(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     # Always filter/inject household_id in queries and inserts
     db_obj = MyModel(
         **data.model_dump(),
@@ -3556,14 +3556,14 @@ def write_operation(
 
 ---
 
-**Report Generated**: Fenster (🔧) read-only audit  
+**Report Generated**: Fenster (🔧) read-only audit
 **No code modifications made** ✅
 
 # Decision: Backend JWT Validator Switch (Supabase)
 
-**Date**: 2026-05-01  
-**Author**: Fenster (Frontend Dev)  
-**Status**: Implemented (PR #122)  
+**Date**: 2026-05-01
+**Author**: Fenster (Frontend Dev)
+**Status**: Implemented (PR #122)
 **Issue**: #121
 
 ## Context
@@ -3625,7 +3625,7 @@ The `SupabaseAuthSettings` class reads from environment using `SUPABASE_URL` or 
 1. **Keep local JWT system and have frontend use it**
    - ❌ Rejected: Would require backend to issue JWTs after Supabase auth, adding complexity
    - ❌ Loses Supabase's built-in session management, refresh tokens, and security features
-   
+
 2. **Add middleware to translate Supabase JWT → local JWT**
    - ❌ Rejected: Unnecessary complexity and latency
    - ❌ Duplicates authentication logic
@@ -3637,7 +3637,7 @@ The `SupabaseAuthSettings` class reads from environment using `SUPABASE_URL` or 
 
 ## Impact
 
-**Before fix**: All 5 Wave 1 endpoints + all protected endpoints returned 403  
+**Before fix**: All 5 Wave 1 endpoints + all protected endpoints returned 403
 **After fix**: 53/60 smoke tests passed (7 webkit failures due to Supabase rate limiting, NOT auth)
 
 Unblocks:
@@ -3668,8 +3668,8 @@ Track in: issue #TBD (create after Wave 1 stabilizes)
 
 # Wave 1 Page E2E Test Recipe
 
-**Author:** Fenster (Frontend Dev)  
-**Date:** 2026-05-01  
+**Author:** Fenster (Frontend Dev)
+**Date:** 2026-05-01
 **Context:** First 5 Wave 1 pages delivered with E2E tests. This recipe documents the pattern for the remaining 12 page issues.
 
 ## Test File Location
@@ -3689,29 +3689,29 @@ test.describe('{Page Name} Page', () => {
   test('renders without errors and {primary CRUD operation}', async ({ authenticatedUser }) => {
     const { page } = authenticatedUser;
     const consoleErrors: string[] = [];
-    
+
     // Track console errors
     page.on('console', msg => {
       if (msg.type() === 'error') {
         consoleErrors.push(msg.text());
       }
     });
-    
+
     // Navigate to page
     const resp = await page.goto('/{route}', { waitUntil: 'networkidle', timeout: 15000 });
     expect(resp?.status()).toBe(200);
-    
+
     // Verify page loaded
     await expect(page).toHaveTitle(/Trading Journal/i);
     await expect(page.locator('h1')).toContainText('{Expected Heading}');
-    
+
     // Verify key UI elements
     await expect(page.getByText('{Key Element 1}')).toBeVisible();
     await expect(page.getByText('{Key Element 2}')).toBeVisible();
-    
+
     // Test primary CRUD operation (if applicable)
     // Example: click button, fill form, verify result
-    
+
     // Verify no console errors (excluding telemetry 401)
     const realErrors = consoleErrors.filter(err => !err.includes('/api/metrics/page-load'));
     expect(realErrors).toHaveLength(0);
@@ -3772,9 +3772,9 @@ This pattern keeps tests simple, fast, and maintainable.
 
 # Wave 2 Backend CRUD — Scope Analysis & Findings
 
-**Date:** 2026-05-01  
-**Author:** Hockney (Backend Dev)  
-**Issues:** #106 (dividends), #107 (holdings), #108 (insurance), #109 (pension)  
+**Date:** 2026-05-01
+**Author:** Hockney (Backend Dev)
+**Issues:** #106 (dividends), #107 (holdings), #108 (insurance), #109 (pension)
 **Session:** autopilot via Jony request
 
 ## Executive Summary
@@ -3818,19 +3818,19 @@ PR #85 merged to main before this work was completed, so the migrations are avai
 
 # Decision: RLS Test Contract for TJ-013
 
-**Author:** Redfoot (Tester)  
-**Date:** 2026-04-30  
-**Issue:** TJ-013 / GH #66  
+**Author:** Redfoot (Tester)
+**Date:** 2026-04-30
+**Issue:** TJ-013 / GH #66
 **Status:** Recorded — merge into decisions.md
 
 ---
 
 ## Decision: Aspirational test pattern for tables without RLS yet
 
-**Context:**  
+**Context:**
 PR #85 adds `household_id` to 12 household-scoped tables and `owner_user_id` to 2 owner-private tables, but does NOT add `ENABLE ROW LEVEL SECURITY` or policies on those tables. The `households`, `household_members`, and `cooked.*` tables DO have live RLS policies.
 
-**Decision:**  
+**Decision:**
 Tests for tables without live RLS are written as "aspirational" TDD acceptance tests. They use `ok(true, '@aspirational ...')` placeholder assertions with detailed comments describing the exact SQL needed to make them concrete. These tests:
 1. Do NOT fail CI (all return ok=true)
 2. Serve as contract documentation for the follow-up migration owner
@@ -3878,9 +3878,9 @@ This pattern is preferred over either (a) skipping those tables entirely or (b) 
 
 ## Decision: Auth Fixture Recipe — @supabase/ssr Cookie Format
 
-**Date:** 2026-05-01  
-**Author:** Coordinator + manual debug  
-**Status:** Implemented (PR #124)  
+**Date:** 2026-05-01
+**Author:** Coordinator + manual debug
+**Status:** Implemented (PR #124)
 **Issues:** #95, #125, #126, #127
 
 ### Context
@@ -3915,9 +3915,9 @@ sb-{ref}-auth-token = "base64-" + base64url(JSON.stringify(session))
 
 ## Decision: Backend JWT Validator Switch (Supabase)
 
-**Date:** 2026-05-01  
-**Author:** Fenster (Frontend Dev)  
-**Status:** Implemented (PR #122)  
+**Date:** 2026-05-01
+**Author:** Fenster (Frontend Dev)
+**Status:** Implemented (PR #122)
 **Issue:** #121
 
 ### Context
@@ -3960,7 +3960,7 @@ SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co
 
 ### Impact
 
-**Before:** All 5 Wave 1 endpoints + all protected endpoints returned 403  
+**Before:** All 5 Wave 1 endpoints + all protected endpoints returned 403
 **After:** 53/60 smoke tests passed
 
 Unblocks: Wave 1 pages, Wave 2 backend CRUD, Wave 3 household sharing (RLS relies on `auth.uid()` matching Supabase JWT `sub` claim).
@@ -3969,9 +3969,9 @@ Unblocks: Wave 1 pages, Wave 2 backend CRUD, Wave 3 household sharing (RLS relie
 
 ## Decision: Wave 1 Page E2E Test Pattern
 
-**Date:** 2026-05-01  
-**Author:** Fenster (Frontend Dev)  
-**Status:** Documented  
+**Date:** 2026-05-01
+**Author:** Fenster (Frontend Dev)
+**Status:** Documented
 **Issues:** #101-#105
 
 ### Pattern
@@ -3985,23 +3985,23 @@ test.describe('{Page Name} Page', () => {
   test('renders without errors and {primary CRUD operation}', async ({ authenticatedUser }) => {
     const { page } = authenticatedUser;
     const consoleErrors: string[] = [];
-    
+
     page.on('console', msg => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
     });
-    
+
     const resp = await page.goto('/{route}', { waitUntil: 'networkidle', timeout: 15000 });
     expect(resp?.status()).toBe(200);
-    
+
     await expect(page).toHaveTitle(/Trading Journal/i);
     await expect(page.locator('h1')).toContainText('{Expected Heading}');
-    
+
     // Verify key UI elements
     await expect(page.getByText('{Key Element}')).toBeVisible();
-    
+
     // Test primary CRUD (if applicable)
     // ...
-    
+
     // Verify no console errors (exclude telemetry 401)
     const realErrors = consoleErrors.filter(err => !err.includes('/api/metrics/page-load'));
     expect(realErrors).toHaveLength(0);
@@ -4040,9 +4040,9 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 
 ## Decision: Authenticated Smoke Harness V2 — Working
 
-**Date:** 2026-05-01  
-**Decider:** Redfoot  
-**Status:** Complete (PR #118)  
+**Date:** 2026-05-01
+**Decider:** Redfoot
+**Status:** Complete (PR #118)
 **Report:** `.squad/log/2026-05-01T01-52-smoke-v2-authenticated.md`
 
 ### Problem (Blocked on Two Issues)
@@ -4070,7 +4070,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 
 **60 tests passed** (20 pages × 3 browsers: Chrome, Firefox, Safari)
 
-✅ Auth working: All pages render successfully, no timeouts or redirect loops  
+✅ Auth working: All pages render successfully, no timeouts or redirect loops
 ⚠️ Backend API issues: 403 Forbidden (JWT not forwarded from frontend cookies to Authorization header — JWT propagation bug, not harness issue)
 
 ### Usage
@@ -4084,16 +4084,16 @@ npx playwright test e2e/smoke/all-pages.spec.ts
 
 ### Impact
 
-✅ Smoke harness now working — no longer blocked on auth format or backend availability  
-✅ Test reports are actionable — clear list of broken pages and failed API endpoints  
+✅ Smoke harness now working — no longer blocked on auth format or backend availability
+✅ Test reports are actionable — clear list of broken pages and failed API endpoints
 ⚠️ Backend 403s are separate issue (JWT forwarding bug, fixed in PR #122)
 
 ---
 
 ## Decision: 22-Page Smoke Baseline (Post-JWT Fix)
 
-**Date:** 2026-04-30T23:25:00Z  
-**Author:** Redfoot  
+**Date:** 2026-04-30T23:25:00Z
+**Author:** Redfoot
 **Context:** Issue #100 comprehensive functional sweep, PR #122 JWT fix merged
 
 ### Result
@@ -4125,8 +4125,8 @@ All frontend pages render successfully without 5xx errors, console errors, or au
 
 ## Decision: Wave 2 Backend CRUD — Scope Analysis & Findings
 
-**Date:** 2026-05-01  
-**Author:** Hockney (Backend Dev)  
+**Date:** 2026-05-01
+**Author:** Hockney (Backend Dev)
 **Issues:** #106 (dividends), #107 (holdings), #108 (insurance), #109 (pension)
 
 ### Executive Summary
@@ -4147,23 +4147,23 @@ Initial request: "get backend CRUD working for 4 pages" with auth + RLS. After c
 
 ### Detailed Findings
 
-**Insurance (#108):** Full CRUD exists, just needs user_id column + RLS. **Estimate:** 30 min  
-**Pension (#109):** Full CRUD exists, needs user_id + PK change to (user_id, date). **Estimate:** 1-2 hours  
-**Holdings (#107):** IN-MEMORY MOCK DATA, needs new `bond_holdings` table + migration. **Estimate:** 3-4 hours  
+**Insurance (#108):** Full CRUD exists, just needs user_id column + RLS. **Estimate:** 30 min
+**Pension (#109):** Full CRUD exists, needs user_id + PK change to (user_id, date). **Estimate:** 1-2 hours
+**Holdings (#107):** IN-MEMORY MOCK DATA, needs new `bond_holdings` table + migration. **Estimate:** 3-4 hours
 **Dividends (#106):** LEGACY FILE STORAGE endpoints, needs DB migration or refactor. **Estimate:** 4-6 hours
 
 ### Recommendations
 
-**Immediate:** Fix Insurance (30 min) + Pension partial (defer PK change)  
+**Immediate:** Fix Insurance (30 min) + Pension partial (defer PK change)
 **Follow-up Issues:** TJ-025 (Holdings DB), TJ-026 (Dividends DB), TJ-027 (Pension PK), TJ-028 (Household Sharing)
 
 ---
 
 ## Decision: Wave 2 Narrow Scope — Insurance + Pension User Scoping
 
-**Date:** 2026-05-01  
-**Author:** Hockney (Backend Dev)  
-**PR:** #123  
+**Date:** 2026-05-01
+**Author:** Hockney (Backend Dev)
+**PR:** #123
 **Issues:** #108 (Insurance), #109 (Pension)
 
 ### Delivered
@@ -4199,9 +4199,9 @@ Successfully shipped user-scoped insurance + pension data with RLS enforcement. 
 
 ## Decision: Mock/File Storage to DB Migration Recipe
 
-**Date:** 2026-05-01  
-**Author:** Hockney (Backend Dev)  
-**PR:** #129  
+**Date:** 2026-05-01
+**Author:** Hockney (Backend Dev)
+**PR:** #129
 **Issues:** #119 (holdings), #120 (dividends)
 
 ### Canonical Pattern for Future Migrations
@@ -4323,8 +4323,8 @@ Expected: Same baseline as main (no new failures).
 
 ## Decision: Authenticated Walkthrough Blocker (Resolved)
 
-**Date:** 2026-05-01  
-**Reporter:** Playwright Tester  
+**Date:** 2026-05-01
+**Reporter:** Playwright Tester
 **Issue:** Authentication fixture failing with invalid Supabase API key
 
 ### Summary
@@ -4333,7 +4333,7 @@ Attempted authenticated walkthrough of 21 pages using `apps/frontend/e2e/fixture
 
 ### Root Cause
 
-**Error:** `Sign-in failed: Invalid API key`  
+**Error:** `Sign-in failed: Invalid API key`
 **Cause:** Anon key in `.env.local` was stale/rotated in Supabase dashboard
 
 ### Fix
@@ -4375,7 +4375,7 @@ Attempted authenticated walkthrough of 21 pages using `apps/frontend/e2e/fixture
    ```python
    from app.dependencies import get_current_user_id
    from app.services.household_service import get_user_household_id
-   
+
    @router.get("/resource")
    def list_resources(
        db: Session = Depends(get_session),
@@ -4454,8 +4454,8 @@ supabase db push --linked  # Against dev first; verify; then prod
 
 # Decision: Main Sync & Workflow Cleanup (2026-05-01)
 
-**Date:** 2026-05-01T19:24:00+03:00  
-**Author:** Kujan (DevOps/Platform)  
+**Date:** 2026-05-01T19:24:00+03:00
+**Author:** Kujan (DevOps/Platform)
 **Status:** Completed
 
 ## Summary
@@ -4729,9 +4729,9 @@ Until that decision is made and implemented, production write paths that depend 
 
 # Decision: Pattern for Direct-to-Supabase Server Actions (finances)
 
-**Author:** Fenster (Frontend Dev)  
-**Date:** 2026-07-31  
-**Branch:** squad/finances-server-action  
+**Author:** Fenster (Frontend Dev)
+**Date:** 2026-07-31
+**Branch:** squad/finances-server-action
 **Status:** Implemented
 
 ---
@@ -4838,7 +4838,7 @@ if (!result.success) setSaveError(result.error);
 
 Mock `@/lib/supabase/server` with `vi.mock(...)` and test:
 - Unauthenticated → error, no DB write
-- No household → error, no DB write  
+- No household → error, no DB write
 - Happy path → household_id from session passed to upsert
 - DB error → error returned to caller
 
@@ -4860,8 +4860,8 @@ become Server Actions — they stay Docker-local and are called via
 
 # Decision: Auto-provision household on signup via DB trigger
 
-**Author:** Hockney (Backend Dev)  
-**Date:** 2026-05-02  
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-05-02
 **Status:** Implemented — migration `20260502120000_auto_provision_household_on_signup.sql`
 
 ## Context
@@ -4892,9 +4892,9 @@ Also included: an idempotent backfill for all existing `auth.users` rows without
 
 # Soften /api Rewrite Guard — Skip Instead of Throw
 
-**Author:** Kujan (DevOps)  
-**Date:** 2026-04-30  
-**Status:** MERGED  
+**Author:** Kujan (DevOps)
+**Date:** 2026-04-30
+**Status:** MERGED
 **PR:** #139
 
 ## Decision
@@ -4932,9 +4932,9 @@ The architecture directive is the source of truth for what's intended.
 
 ## Testing
 
-✓ Production build succeeds without `NEXT_PUBLIC_API_URL`  
-✓ Warning message correctly logged  
-✓ Dev environment fallback verified  
+✓ Production build succeeds without `NEXT_PUBLIC_API_URL`
+✓ Warning message correctly logged
+✓ Dev environment fallback verified
 
 ## Impact
 
@@ -5058,3 +5058,34 @@ Dev Supabase catches prod-only issues (migration drift, trigger behavior) that l
 
 **By:** Keaton (Lead)
 
+---
+
+### Single-Supabase E2E opt-in: `SUPABASE_E2E_ALLOW_PROD=true`
+
+**Context:** Jony's personal project uses one consolidated Supabase instance (not dev/prod split). E2E admin fixture rejected single URL as safety block. Kujan + Redfoot unblocked with environment-variable opt-in.
+
+**What:** Set `SUPABASE_E2E_ALLOW_PROD: 'true'` in `.github/workflows/playwright-e2e.yml` all three test runner steps. CI recognizes this as intentional.
+
+**Why:** Solo personal project doesn't require dev/prod isolation. Opt-in preserves safety for multi-environment teams.
+
+**How:** Added to workflow (commit 540bf89); documented as intentional.
+
+**Status:** 🟢 Landed (PR #165, commit d6493ea)
+
+**By:** Kujan, Redfoot
+
+---
+
+### Telemetry endpoint exempt from auth middleware
+
+**Context:** `/api/metrics/page-load` POSTs after unauthenticated redirect. Redirect preserves HTTP verb → route hit as POST to `/login` (GET-only page) → 405 error in console.
+
+**What:**
+1. Add `/api/metrics/` to `PUBLIC_PREFIXES` in `apps/frontend/src/middleware.ts`
+2. Stub `apps/frontend/src/app/api/metrics/page-load/route.ts` to return 204 No Content
+
+**Why:** Telemetry is user-level passive monitoring, not auth-gated. Exempting from middleware prevents POST-to-GET mismatch.
+
+**Status:** 🟢 Landed (PR #165 + #167, commit e2e5ba4; cherry-picked)
+
+**By:** Redfoot

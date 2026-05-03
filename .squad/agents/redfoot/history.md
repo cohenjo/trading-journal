@@ -305,3 +305,13 @@ throwaway users (service-role key present in env).
 server is on port 3000 or `BASE_URL` points to a deployed Vercel URL.
 
 **Merge order:** #163 (Fenster) → #164 (Hockney) → this PR.
+
+## 2026-05-03: E2E Telemetry Fix + Comprehensive Coverage — PR #166
+
+**Bug:** `/settings` and `/holdings` smoke tests failed with 405 console errors. Root cause: `PageLoadMetrics` component POSTs to `/api/metrics/page-load` after unauthenticated redirect, but redirect preserved POST verb → request hit `/login` GET-only endpoint → 405.
+
+**Fix:** (1) Added `/api/metrics/` to `PUBLIC_PREFIXES` in `apps/frontend/src/middleware.ts` to exempt telemetry from auth middleware; (2) Stubbed `apps/frontend/src/app/api/metrics/page-load/route.ts` to return 204 No Content. Originally PR #167; cherry-picked into #165 (commit e2e5ba4).
+
+**Comprehensive E2E Coverage (PR #166):** Extended household bootstrap tests from 172 lines (PR #163) to 191 lines with deeper assertions and data validation. Merged after rebase conflict resolution (took #166's longer spec).
+
+**Result:** CI green on #166. Merged (commit 5eeb34d).

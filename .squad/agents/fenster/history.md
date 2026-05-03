@@ -274,3 +274,11 @@ This is the **template for all 32 MOVE endpoints**. See decision note at:
 
 - `npm run lint`: 0 errors in changed files. Pre-existing errors unchanged.
 - `npx tsc --noEmit`: 0 errors in changed files. Pre-existing errors unchanged.
+
+## 2026-05-03: HouseholdProvider + Sign-out Menu Landed — PR #163
+
+**Features:** Implemented `HouseholdProvider` component for household context management and added sign-out menu option in the UI. Enables user to manage active household and logout workflows.
+
+**Merge:** PR #163 rebased on top of #164 (Hockney's RPC), CI green, merged (commit 168171d). Conflict resolution during rebase preserved #163's household context logic.
+
+**Downstream:** PR #166 (Redfoot's comprehensive E2E coverage) depended on #163's household UI, merged successfully after rebase.
