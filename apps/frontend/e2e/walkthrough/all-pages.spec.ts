@@ -14,7 +14,6 @@ const PAGES = [
  * TJ-020 Phase B migrations in #208-#217 land.
  */
 const TEMPORARILY_ALLOWED_COMPUTE_API_PATHS: string[] = [
-  '/api/plans/simulate',
   '/api/tax-condor',
   '/api/backtest',
   '/api/analyze',
@@ -57,7 +56,6 @@ function isKnownAcceptableConsoleError(text: string): boolean {
     return true;
   }
 
-  if (text.includes('Simulation failed') || text.includes('Simulation error')) return true;
   if (text.includes('Failed to fetch history')) return true;
   if (text.includes('Failed to fetch summary data')) return true;
   if (text.includes('Failed to fetch years')) return true;
