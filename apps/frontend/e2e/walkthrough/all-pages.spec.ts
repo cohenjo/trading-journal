@@ -16,14 +16,11 @@ const PAGES = [
  *
  * - /api/plans/simulate    → #173
  * - /api/finances/history  → #177
- * - /api/ladder/income     → #177
  * - /api/options/projection → #189 / TJ-019
  */
 const UNMIGRATED_FASTAPI_PATHS = [
   '/api/plans/simulate',
   '/api/finances/history',
-  '/api/ladder/income',
-  '/api/ladder/overview',
   '/api/options/projection',
   '/api/backtest',
   '/api/dividends',
@@ -57,7 +54,6 @@ function isKnownAcceptableConsoleError(text: string): boolean {
   if (text.includes('Simulation failed') || text.includes('Simulation error')) return true;
   if (text.includes('Failed to fetch history')) return true;
   if (text.includes('Failed to fetch summary data')) return true;
-  if (text.includes('Failed to load ladder data')) return true;
   if (text.includes('Failed to fetch years')) return true;
   if (text.includes('Failed to fetch dividends')) return true;
 

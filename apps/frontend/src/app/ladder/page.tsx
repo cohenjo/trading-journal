@@ -1,11 +1,11 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Ladder } from "@/components/Ladder/Ladder";
 import { ExpectedIncomeChart } from "@/components/Ladder/ExpectedIncomeChart";
 import type { RungData, IncomePoint, DistributionRow, Bond } from "@/components/Ladder/types";
+import { addLadderBond, getLadderIncome, getLadderOverview, updateLadderRung } from "./actions";
 
 export default function LadderPageWrapper() {
   return (
@@ -29,30 +29,33 @@ function LadderPage() {
   const candidateId = searchParams.get("candidateId");
   const candidateYear = searchParams.get("candidateYear");
 
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const overviewRes = await apiFetch("/api/ladder/overview");
-        const overviewJson = await overviewRes.json();
-        setRungs(overviewJson.rungs ?? []);
-        setBonds(overviewJson.bonds ?? []);
+  const loadLadderData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [overviewResult, incomeResult] = await Promise.all([
+        getLadderOverview(),
+        getLadderIncome(),
+      ]);
 
-        const incomeRes = await apiFetch("/api/ladder/income");
-        const incomeJson = await incomeRes.json();
-        setIncomeSeries(incomeJson.income_series ?? []);
-        setDistributions(incomeJson.distributions ?? []);
-      } catch (err) {
-        console.error("Failed to load ladder data", err);
-        setError("Failed to load ladder data. Please try again.");
-      } finally {
-        setLoading(false);
-      }
-    };
+      if (!overviewResult.ok) throw new Error(overviewResult.error);
+      if (!incomeResult.ok) throw new Error(incomeResult.error);
 
-    fetchData();
+      setRungs(overviewResult.data.rungs);
+      setBonds(overviewResult.data.bonds);
+      setIncomeSeries(incomeResult.data.income_series);
+      setDistributions(incomeResult.data.distributions);
+    } catch (err) {
+      console.error("Failed to load ladder data", err);
+      setError("Failed to load ladder data. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadLadderData();
+  }, [loadLadderData]);
 
   // When coming back from the scanner with a candidateYear, auto-open that rung.
   useEffect(() => {
@@ -68,19 +71,19 @@ function LadderPage() {
   return (
     <main className="h-[90vh] flex flex-col py-4 px-6 overflow-hidden">
       <h1 className="text-3xl font-bold text-center mb-4">Bond Ladder</h1>
-      
+
       {error && (
         <div className="bg-red-900/50 border border-red-800 text-red-200 p-4 rounded mb-4 max-w-4xl mx-auto">
           {error}
         </div>
       )}
-      
+
       {loading && (
         <div className="flex items-center justify-center flex-1">
           <div className="text-slate-400 animate-pulse">Loading ladder data...</div>
         </div>
       )}
-      
+
       {!loading && (
         <div className="flex-1 flex gap-4 w-full max-w-[1800px] mx-auto min-h-0 px-2">
         {/* Left: Ladder */}
@@ -93,49 +96,39 @@ function LadderPage() {
             bonds={bonds}
             onUpdateRungTarget={async (rungId, targetAmount) => {
               try {
-                await apiFetch(`/api/ladder/rungs/${rungId}`, {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ target_amount: targetAmount }),
-                });
+                const result = await updateLadderRung(rungId, { target_amount: targetAmount });
+                if (!result.ok) throw new Error(result.error);
 
-                setRungs((prev) =>
-                  prev.map((r) =>
-                    r.id === rungId ? { ...r, target_amount: targetAmount } : r
-                  )
-                );
+                setRungs((prev) => {
+                  const aggregateMatch = /^(3Y|5Y)-(\d{4})$/.exec(rungId);
+                  if (!aggregateMatch) {
+                    return prev.map((r) =>
+                      r.id === rungId ? { ...r, target_amount: targetAmount } : r
+                    );
+                  }
+
+                  const span = aggregateMatch[1] === "3Y" ? 3 : 5;
+                  const startYear = Number(aggregateMatch[2]);
+                  const endYear = startYear + span - 1;
+                  const perRungTarget = targetAmount / span;
+                  return prev.map((r) =>
+                    r.year >= startYear && r.year <= endYear
+                      ? { ...r, target_amount: perRungTarget }
+                      : r
+                  );
+                });
               } catch (err) {
                 console.error("Failed to update rung target", err);
               }
             }}
             onAddBond={async (payload) => {
               try {
-                const res = await apiFetch("/api/ladder/bonds", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    id: "", // let backend synthesize if empty
-                    ...payload,
-                  }),
-                });
-
-                if (!res.ok) {
-                  const text = await res.text();
-                  console.error("Failed to add bond", text);
-                  return;
-                }
+                const result = await addLadderBond({ id: "", ...payload });
+                if (!result.ok) throw new Error(result.error);
 
                 // After adding a bond, reload ladder and income data so
                 // all views stay in sync.
-                const overviewRes = await apiFetch("/api/ladder/overview");
-                const overviewJson = await overviewRes.json();
-                setRungs(overviewJson.rungs ?? []);
-                setBonds(overviewJson.bonds ?? []);
-
-                const incomeRes = await apiFetch("/api/ladder/income");
-                const incomeJson = await incomeRes.json();
-                setIncomeSeries(incomeJson.income_series ?? []);
-                setDistributions(incomeJson.distributions ?? []);
+                await loadLadderData();
               } catch (err) {
                 console.error("Failed to add bond", err);
               }
