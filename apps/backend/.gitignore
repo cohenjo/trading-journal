@@ -1,0 +1,52 @@
+# Secrets and Environment Variables
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Cryptographic key material
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Service account credentials
+service-account*.json
+
+# Secrets directories/files
+secrets/
+secrets.json
+secrets.yaml
+secrets.yml
+
+# Python runtime
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
