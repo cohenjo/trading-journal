@@ -27,7 +27,6 @@ const UNMIGRATED_FASTAPI_PATHS = [
   '/api/options/projection',
   '/api/backtest',
   '/api/dividends',
-  '/api/holdings',
 ];
 
 /**

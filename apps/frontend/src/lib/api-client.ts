@@ -6,7 +6,7 @@
  *
  * Usage (Client Component or hook):
  *   import { apiFetch } from '@/lib/api-client';
- *   const res = await apiFetch('/api/holdings');
+ *   const res = await apiFetch('/api/example');
  *   const data = await res.json();
  */
 
