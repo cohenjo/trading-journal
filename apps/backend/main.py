@@ -1,4 +1,6 @@
 import json
+import os
+import re
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
@@ -6,7 +8,7 @@ import uvicorn
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
-from app.dal.database import create_db_and_tables
+from app.dal.database import check_database_connection, create_db_and_tables
 from app.utils.decimal_encoder import decimal_default
 from app.dependencies import get_current_user
 from app.api import (
@@ -31,7 +33,6 @@ from app.api import (
     insurance,
     metrics as telemetry_metrics,
 )
-import os
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -44,24 +45,18 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk.resources import Resource
 
 # Setup OTel
-resource = Resource.create(attributes={
-    "service.name": os.getenv("OTEL_SERVICE_NAME", "trading-journal-backend")
-})
+resource = Resource.create(attributes={"service.name": os.getenv("OTEL_SERVICE_NAME", "trading-journal-backend")})
 
 trace.set_tracer_provider(TracerProvider(resource=resource))
 tracer_provider = trace.get_tracer_provider()
 otlp_exporter = OTLPSpanExporter(
-    endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
-    insecure=True
+    endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"), insecure=True
 )
 span_processor = BatchSpanProcessor(otlp_exporter)
 tracer_provider.add_span_processor(span_processor)
 
 metric_reader = PeriodicExportingMetricReader(
-    OTLPMetricExporter(
-        endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
-        insecure=True
-    )
+    OTLPMetricExporter(endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"), insecure=True)
 )
 meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
 metrics.set_meter_provider(meter_provider)
@@ -71,6 +66,7 @@ LoggingInstrumentor().instrument(set_logging_format=True)
 
 class DecimalSafeJSONResponse(JSONResponse):
     """JSONResponse that serializes Decimal values as numbers (float)."""
+
     def render(self, content) -> bytes:
         return json.dumps(
             content,
@@ -123,6 +119,7 @@ async def _warmup_jwks_cache() -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"Supabase auth settings not configured (non-fatal): {type(exc).__name__}: {exc}")
 
+
 app = FastAPI(
     title="Trading Journal API",
     description="API for managing trades, portfolios, pensions, insurance, and financial analysis",
@@ -136,16 +133,37 @@ app = FastAPI(
 # Instrument FastAPI
 FastAPIInstrumentor.instrument_app(app)
 
-# CORS: restrict origins. Set CORS_ORIGINS env var (comma-separated) for production.
-cors_origins = [
-    o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-    if o.strip()
-]
+
+def _cors_settings() -> tuple[list[str], str | None]:
+    """Build CORS exact-origin and wildcard-regex settings from env."""
+    raw_origins = os.getenv(
+        "BACKEND_CORS_ORIGINS",
+        os.getenv("CORS_ORIGINS", "http://localhost:3000"),
+    )
+    exact_origins: list[str] = []
+    wildcard_patterns: list[str] = []
+
+    for origin in (item.strip() for item in raw_origins.split(",")):
+        if not origin:
+            continue
+        if "*" in origin:
+            wildcard_patterns.append(re.escape(origin).replace(r"\*", r"[^/]*"))
+        else:
+            exact_origins.append(origin)
+
+    allow_origin_regex = None
+    if wildcard_patterns:
+        allow_origin_regex = rf"^({'|'.join(wildcard_patterns)})$"
+
+    return exact_origins, allow_origin_regex
+
+
+cors_origins, cors_origin_regex = _cors_settings()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -154,13 +172,33 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 
 # Public paths that skip JWT authentication
-PUBLIC_PATHS = {"/", "/docs", "/redoc", "/openapi.json", "/api/auth/register", "/api/auth/login"}
+PUBLIC_PATHS = {
+    "/",
+    "/health",
+    "/health/auth",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+    "/api/auth/register",
+    "/api/auth/login",
+}
 
 
 @app.get("/")
 def read_root():
     """Health-check root endpoint."""
     return {"Hello": "World"}
+
+
+@app.get("/health", tags=["health"])
+def health():
+    """Return healthy only when the database connection succeeds."""
+    if check_database_connection():
+        return {"status": "ok", "database": "ok"}
+    return JSONResponse(
+        status_code=503,
+        content={"status": "error", "database": "unavailable"},
+    )
 
 
 @app.get("/health/auth", tags=["health"])
@@ -180,6 +218,7 @@ def health_auth():
         "key_count": cache.key_count,
         "populated": cache.is_populated,
     }
+
 
 # Auth router (public endpoints — registered first, no auth dependency)
 app.include_router(auth_router_module.router)

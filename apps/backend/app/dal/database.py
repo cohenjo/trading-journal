@@ -1,6 +1,8 @@
 import os
 from urllib.parse import quote_plus
-from sqlmodel import create_engine, Session
+
+from sqlalchemy import text
+from sqlmodel import Session, create_engine
 
 
 def _normalize_database_url(raw_url: str) -> str:
@@ -26,12 +28,26 @@ DATABASE_URL = _normalize_database_url(
     os.getenv("DATABASE_URL", "postgresql://user:password@localhost/trading-journal")
 )
 
-engine = create_engine(DATABASE_URL, echo=True)
+engine = create_engine(
+    DATABASE_URL,
+    echo=os.getenv("DATABASE_ECHO", "false").lower() == "true",
+    pool_pre_ping=True,
+)
 
 
 def create_db_and_tables():
     # SQLModel.metadata.create_all(engine)
     pass
+
+
+def check_database_connection() -> bool:
+    """Return whether the configured database can execute a trivial query."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception:  # noqa: BLE001 - health endpoint must not leak DB errors
+        return False
 
 
 def get_session():
