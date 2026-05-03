@@ -27,9 +27,9 @@ DROP INDEX IF EXISTS public.finance_snapshots_user_date_key;
 DO $$
 BEGIN
   IF EXISTS (
-    SELECT 1 FROM information_schema.columns 
-    WHERE table_schema = 'public' 
-    AND table_name = 'finance_snapshots' 
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+    AND table_name = 'finance_snapshots'
     AND column_name = 'user_id'
   ) THEN
     UPDATE public.finance_snapshots fs
@@ -60,8 +60,8 @@ ALTER TABLE public.finance_snapshots
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint 
-    WHERE conname = 'finance_snapshots_pkey' 
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'finance_snapshots_pkey'
     AND conrelid = 'public.finance_snapshots'::regclass
   ) THEN
     ALTER TABLE public.finance_snapshots
