@@ -7,6 +7,28 @@
 - **Created:** 2026-02-23T22:46:19Z
 
 
+## 2026-05-03: Household bootstrap RPC + view + backfill — PR TBD
+
+Diagnosed persistent "No active household found" error on /current-finances after migration 20260502120000. All data was correct (0 users missing households, trigger valid, RLS sound). Root cause: stale Vercel anon key post-rotation making PostgREST JWT invalid → auth.uid() NULL → RLS hides household_members rows. Applied migration `20260503090000_household_bootstrap_rpc`.
+
+**Deliverables:**
+- `supabase/migrations/20260503090000_household_bootstrap_rpc.sql` — applied to prod
+  - `households.account_type` column (NOT NULL, default 'individual', check constraint)
+  - `public.ensure_household(p_account_type)` RPC — SECURITY DEFINER, idempotent, creates household+member if missing, GRANT to authenticated only
+  - `public.v_my_active_household` view — SECURITY INVOKER, security_barrier=true, GRANT SELECT to authenticated
+  - Backfill (0 rows affected at time of run — all users already had households)
+- `.squad/decisions/inbox/hockney-household-fix.md` — diagnostic findings + RPC contract
+
+**Key diagnostic findings:**
+- Trigger `trg_auth_users_create_household` ✅ exists, SECURITY DEFINER, correct
+- 0 auth.users rows without active household_members row (data is correct)
+- RLS helpers (is_household_member, is_household_owner) owned by postgres (rolbypassrls=true) — no self-join deadlock
+- `account_type` column was missing — added
+- `ensure_household` RPC was missing — added
+- `v_my_active_household` view was missing — added (security_invoker=on, PG17 safe)
+
+**Operational blocker (not a code fix):** Stale Vercel env vars — Jony must update NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel Dashboard after key rotation. See `docs/security/rotation-checklist-2026-05-03.md`.
+
 ## 2026-05-03: Security incident — Supabase key rotation checklist — PR #158
 
 Prepared rotation runbook in response to GitHub secret-scanning alert #1 (service-role key leaked in `.squad/decisions.md`).
