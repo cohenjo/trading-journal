@@ -1,74 +1,86 @@
-# Trading Journal Backend
+# Trading Journal Backend Worker
 
-FastAPI compute backend for Trading Journal. CRUD data paths are moving to Supabase; the remaining FastAPI routes provide compute workflows such as simulations, options projection, backtests, pension uploads, analysis, tax-condor tooling, scanners, pricing, and sync jobs.
+The backend is a private Python worker for Trading Journal computations. It is not a public web service and the Vercel frontend must not call it over HTTP. The frontend reads and writes Supabase tables, Auth, Storage, and Realtime only.
 
-## Quick start: backend talking to Supabase locally + tunnel for Vercel
+The worker runs in Docker on Jony's laptop, reads inputs from Supabase, executes the existing Python modules under `apps/backend/app/`, and writes computed outputs back to Supabase result tables. FastAPI may stay running for local `/health` liveness checks, but business routes are legacy/admin-only until Phase B removes or replaces them.
 
-This mode runs only the backend in Docker on Jony's laptop. It does **not** start the legacy local Postgres service from `docker-compose.yml`; the backend connects directly to Supabase Postgres.
+## What this backend does
 
-### Required environment variables
+- **Scheduled batch compute:** refresh pre-computable datasets on a timer and write result tables such as ticker analysis, bond scanner results, price cache rows, NDX data, and broker/trading snapshots.
+- **Job queue compute:** poll Supabase job-request rows for user-triggered heavy work, run the Python computation, write results, and update job status.
+- **Storage processing:** poll or react to Supabase Storage uploads, parse files such as pension PDFs, and write parsed rows/status to Supabase tables.
+- **Local health:** expose `/health` inside the container, and optionally on `127.0.0.1:8000`, so the laptop operator can verify the worker is alive.
 
-Copy the root `.env.example` to `.env` and fill these server-only values:
+## Required environment
 
-| Variable | Purpose | Where to get it |
+Copy the root `.env.example` or `apps/backend/.env.example` to a local `.env` and fill server-only values. Never commit real credentials.
+
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `DIRECT_DATABASE_URL` | Supabase Postgres or pooler connection string. `docker-compose.backend.yml` passes it through as `DATABASE_URL`. Include `sslmode=require` for direct Supabase Postgres. | Supabase dashboard → project `zvbwgxdgxwgduhhzdwjj` → Database → Connection string |
-| `SUPABASE_URL` | Supabase Auth/JWKS base URL. | `https://zvbwgxdgxwgduhhzdwjj.supabase.co` |
-| `SUPABASE_JWT_SECRET` | Optional HS256 fallback for local/Supabase JWT verification. | Supabase dashboard → Auth → JWT settings |
-| `BACKEND_CORS_ORIGINS` | Comma-separated browser origins allowed to call FastAPI. | Local dev and Vercel deployment URLs |
+| `DATABASE_URL` | Yes | Supabase Postgres direct or pooler connection string used by the worker for reads and writes. Use an elevated role only on the server-side worker and include `sslmode=require` for Supabase-hosted Postgres. |
+| `DIRECT_DATABASE_URL` | Compose convenience | `docker-compose.backend.yml` maps this value into `DATABASE_URL`; set it to the Supabase direct or pooler URL. |
+| `SUPABASE_URL` | Yes | Supabase project URL for Auth/JWKS checks and Storage client access. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Optional, server-only | Required only when worker code needs Supabase Storage access or privileged writes that cannot be performed with the database connection. This key bypasses RLS; never expose it to the browser and never prefix it with `NEXT_PUBLIC_`. |
+| `SUPABASE_JWT_SECRET` | Optional | Fallback for local/manual JWT verification while legacy admin FastAPI routes still exist. Prefer JWKS via `SUPABASE_URL`. |
+| `OTEL_SERVICE_NAME` / `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | Local observability settings. |
 
-Recommended local value:
+The frontend does not need `NEXT_PUBLIC_API_URL`, and the backend does not need browser CORS configuration.
 
-```dotenv
-BACKEND_CORS_ORIGINS=http://localhost:3000,https://trading-journal-cohenjos-projects.vercel.app,https://*.vercel.app
-```
+## Run the worker
 
-Use exact preview URLs instead of `https://*.vercel.app` if you want a tighter allow-list.
-
-### Run backend-only Docker compose
+From the repository root:
 
 ```bash
 docker compose -f docker-compose.backend.yml up -d --build
 docker compose -f docker-compose.backend.yml ps
-curl http://localhost:8000/health
+curl http://127.0.0.1:8000/health
 ```
 
-The compose file uses the production-style image (no source bind mount and no `--reload`) and publishes `8000:8000`. The `/health` endpoint returns 200 only after a database `SELECT 1` succeeds.
-
-To stop it:
+Stop it with:
 
 ```bash
 docker compose -f docker-compose.backend.yml down
 ```
 
-### Cloudflare Tunnel for Vercel
+`docker-compose.backend.yml` binds the optional health endpoint to `127.0.0.1:8000` only. Do not expose this container through a public tunnel, router port, or Vercel rewrite.
 
-Cloudflare Tunnel is the recommended way to expose the laptop backend without opening router ports.
+## Scheduling model
 
-```bash
-cloudflared tunnel login
-cloudflared tunnel create tj-backend
-cloudflared tunnel route dns tj-backend api.your-domain.example
-cloudflared tunnel run tj-backend --url http://localhost:8000
-```
+Phase B should add an in-process scheduler, preferably APScheduler, during backend startup. Each scheduled job should be a small registration entry that declares:
 
-Alternatives: Tailscale Funnel or ngrok can expose the same local `http://localhost:8000` service. Keep the public URL HTTPS and stable enough for Vercel environment variables.
+1. A stable job id, for example `analysis_tickers_daily`.
+2. Its cadence, for example daily after market close or hourly for `price_cache`.
+3. The Python function under `apps/backend/app/` that performs the work.
+4. The Supabase result table(s) it writes.
+5. Freshness/error fields written with every run, such as `refreshed_at`, `status`, and `error_message`.
 
-### Point Vercel at the tunnel
+A new scheduled compute path should not add a frontend HTTP call. Add the job to the scheduler registry, create the result table with RLS in a migration, and update the frontend to read Supabase rows.
 
-1. Open the Vercel dashboard for `https://trading-journal-cohenjos-projects.vercel.app`.
-2. Set `NEXT_PUBLIC_API_URL` to the tunnel URL, for example `https://api.your-domain.example`.
-3. Apply it to Production and Preview environments.
-4. Redeploy the frontend.
+## Job queue table pattern
 
-`apps/frontend/next.config.ts` already proxies `/api/*` to `NEXT_PUBLIC_API_URL` when the variable is set to a public URL. If it is unset in production, `/api/*` remains disabled and unmigrated compute calls fail fast with 404.
+For user-triggered heavy work, Phase B should use a Supabase table such as `compute_jobs`:
 
-### Offline behavior
+1. A Next.js Server Action validates the user input and inserts a job row with `status = 'pending'`, `job_type`, `input_payload`, `requested_by`, and timestamps.
+2. The backend polling worker wakes every 10 seconds, transactionally claims pending rows, and dispatches by `job_type`.
+3. The worker runs the Python compute module, writes a result row such as `backtest_runs`, and marks the job `done` with the result id. Failures set `status = 'failed'` and an error summary.
+4. The frontend subscribes to the job/result row with Supabase Realtime and renders pending, done, failed, or stale states.
 
-If Jony's laptop is offline, asleep, Docker is stopped, or the tunnel is down, Vercel `/api/*` compute calls fail with 5xx/connection errors. This is an accepted TJ-019 tradeoff: the walkthrough allow-list already tolerates the remaining compute endpoints being unavailable while CRUD paths continue through Supabase.
+To register a new job type in Phase B, add it to the worker's dispatch registry, document its payload schema near the worker code, create a result table with RLS, and remove any frontend `/api/*` dependency for that workflow.
 
-## Auth and CORS
+## Offline behavior
 
-All compute routers in `main.py` are registered with `Depends(get_current_user)`, which verifies Supabase JWTs using JWKS from `SUPABASE_URL` or the `SUPABASE_JWT_SECRET` fallback. CORS is a tight allow-list read from `BACKEND_CORS_ORIGINS`; do not use `*` for this financial application.
+When Jony's laptop is offline, asleep, or Docker is stopped:
 
-See also [`README-supabase-auth.md`](./README-supabase-auth.md) for JWT verification details.
+- Scheduled result tables remain readable but become stale.
+- Pending job rows remain queued until the worker is online again.
+- Storage uploads remain in Supabase until the worker parses them.
+- The frontend still loads because it talks only to Supabase; users see stale timestamps or pending statuses instead of backend connection failures.
+
+This offline behavior is intentional and acceptable for the current operating model.
+
+## Security notes
+
+- Keep `SUPABASE_SERVICE_ROLE_KEY` server-only. It bypasses RLS and must never appear in frontend code, logs, screenshots, or committed files.
+- Prefer scoped database roles or tightly scoped worker functions when practical.
+- Enable RLS on every new exposed result table and grant only the roles required by the frontend read model.
+- Business FastAPI endpoints are not a product integration surface. If retained temporarily, treat them as local/admin maintenance endpoints.
