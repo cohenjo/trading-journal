@@ -127,6 +127,32 @@ describe('saveFinanceSnapshot', () => {
     expect((row.data as { items: unknown }).items).toEqual(VALID_ITEMS);
   });
 
+  /**
+   * Regression: onConflict must use the composite PK (household_id, date).
+   *
+   * The table `finance_snapshots` has no unique constraint on `date` alone —
+   * only a composite PK on (household_id, date).  Using `onConflict: 'date'`
+   * caused PostgREST to return a 42P10 error ("no unique or exclusion constraint
+   * matching the ON CONFLICT specification"), surfaced to Jony as
+   * "Failed to save snapshot. Please try again."
+   *
+   * @see apps/frontend/src/app/current-finances/actions.ts
+   */
+  it('regression: upsert uses onConflict household_id,date — not date alone', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: MOCK_USER_ID } }, error: null });
+    mockMaybeSingleHousehold.mockResolvedValue({
+      data: { household_id: MOCK_HOUSEHOLD_ID },
+      error: null,
+    });
+    mockUpsert.mockResolvedValue({ error: null });
+
+    await saveFinanceSnapshot(VALID_ITEMS, VALID_METRICS);
+
+    expect(mockUpsert).toHaveBeenCalledOnce();
+    const [, options] = mockUpsert.mock.calls[0] as [unknown, { onConflict?: string }];
+    expect(options?.onConflict).toBe('household_id,date');
+  });
+
   it('returns an error when the DB upsert fails', async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: MOCK_USER_ID } }, error: null });
     mockMaybeSingleHousehold.mockResolvedValue({

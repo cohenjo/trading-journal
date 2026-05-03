@@ -106,7 +106,7 @@ export async function saveFinanceSnapshot(
       total_assets: metrics.total_assets,
       total_liabilities: metrics.total_liabilities,
     },
-    { onConflict: 'date' },
+    { onConflict: 'household_id,date' },
   );
 
   if (upsertError) {

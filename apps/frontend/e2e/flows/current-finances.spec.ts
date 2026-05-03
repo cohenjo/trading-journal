@@ -102,20 +102,21 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
 
 // ── Regression: fund-save with active household (Jony's bug) ─────────────────
 //
-// Regression guard for the bug where saving a fund on /current-finances failed
-// silently when the user had an active household (finance_snapshots write was
-// rejected by RLS because the JWT wasn't forwarded to FastAPI).
+// Regression guard for the bug where saving on /current-finances failed with
+// "Failed to save snapshot. Please try again." when the user had an active
+// household.  Root cause: `onConflict: 'date'` did not match the composite PK
+// (household_id, date) on finance_snapshots, causing a PostgREST 42P10 error.
 //
-// Status: skip until Fenster's auth-guard PR + Hockney's ensure_household RPC
-//         are deployed and the FastAPI backend accepts household-scoped JWTs.
-// Tracking: https://github.com/cohenjo/trading-journal/issues/155
+// The save path goes through the Next.js server action (saveFinanceSnapshot in
+// actions.ts), which calls Supabase directly — no FastAPI dependency.
+//
+// Unit-level regression is covered by actions.test.ts
+// ("regression: upsert uses onConflict household_id,date — not date alone").
+//
+// The E2E below covers the full browser → server action → Supabase path once
+// a deployed Supabase env is available.
 
 testWithUser.describe('regression: fund save with household @auth', () => {
-  // test.skip: depends on FastAPI backend accepting JWT + household scope.
-  // Unblock when:
-  //   1. Fenster's auth-guard PR is merged (JWT forwarded to FastAPI)
-  //   2. Hockney's ensure_household RPC ships (household row guaranteed present)
-  //   3. FastAPI /api/finances/save accepts and persists household-scoped writes
   testWithUser.skip(
     'adding a fund saves successfully when a household is present @auth',
     async ({ testUser: { page, householdId } }) => {
@@ -129,8 +130,8 @@ testWithUser.describe('regression: fund save with household @auth', () => {
       await page.goto('/current-finances');
       await page.waitForLoadState('domcontentloaded');
 
-      // Locate the "Add fund" / "Add item" button (exact selector TBD once Fenster's
-      // auth-guard PR ships and the component renders in an authenticated context)
+      // Locate the "Add fund" / "Add item" button (exact selector TBD once
+      // the component renders in a fully authenticated context)
       const addFundBtn = page
         .getByRole('button', { name: /add fund|add item|new fund/i })
         .first();
