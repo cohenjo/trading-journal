@@ -45,7 +45,7 @@
 
 **Problem**: All frontend `/api/*` calls to FastAPI returned 403 `{"detail":"Not authenticated"}` after Supabase signin.
 
-**Root cause**: 
+**Root cause**:
 - Frontend's `apiFetch` (from PR #96) correctly forwards Supabase JWTs via `Authorization: Bearer` header
 - Backend's `main.py` imported the WRONG `get_current_user` dependency:
   - Used: `app.auth.dependencies.get_current_user` (local JWT system, expects HS256 tokens signed with backend's `JWT_SECRET_KEY`)
@@ -70,7 +70,7 @@ SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co
 # Optional: SUPABASE_JWT_SECRET for HS256 fallback
 ```
 
-**Testing**: 
+**Testing**:
 - **Before**: All protected endpoints returned 403
 - **After**: 53/60 smoke tests passed (7 webkit failures due to Supabase rate limiting, NOT auth errors)
 - Manual curl tests confirm proper validation:
@@ -208,7 +208,7 @@ SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co
 
 ## finances Server Action — Stop-the-Bleed Fix (2026-07-31)
 
-**Branch:** squad/finances-server-action → PR opened  
+**Branch:** squad/finances-server-action → PR opened
 **Context:** POST `/api/finances` → 404 on Vercel (rewrites to undeployed FastAPI)
 
 ### What was done
@@ -244,3 +244,33 @@ This is the **template for all 32 MOVE endpoints**. See decision note at:
 - `npm run test`: 8/8 new tests pass. 3 pre-existing Pension test failures (unrelated).
 - `npm run lint`: 0 errors in changed files. All other lint errors are pre-existing.
 - `npm run build`: ✅ succeeds with env vars set.
+
+## Household Bootstrap + Sign-out (2026-05-03)
+
+**Issue:** Jony hit "⚠️ No active household found for your account" on `/current-finances` when saving funds/assets. New OAuth users have no `household_members` row.
+
+**Solution:** Implemented TASK A–D in branch `squad/login-household-bootstrap-2026-05-03`.
+
+### Files created/modified
+
+| File | Change |
+|------|--------|
+| `apps/frontend/package.json` | +`lucide-react ^1.14.0` |
+| `src/lib/household/HouseholdContext.tsx` | NEW — HouseholdProvider + useHousehold hook |
+| `src/components/Household/AccountTypePickerDialog.tsx` | NEW — modal for first-login household setup |
+| `src/components/Household/HouseholdBanner.tsx` | NEW — inline banner with "Set up household" CTA |
+| `src/components/Layout/MainLayout.tsx` | HouseholdProvider wrap + sign-out section + user email |
+| `src/app/current-finances/page.tsx` | HouseholdBanner replaces raw error message |
+| `e2e/flows/household-bootstrap.spec.ts` | Already existed; all data-testid attrs now implemented |
+| `.squad/decisions/inbox/fenster-login-bootstrap.md` | Design notes |
+
+### Architecture highlights
+
+- **HouseholdContext:** React Context (no Zustand dep needed). Bootstrap on first authenticated render. Reads `v_my_active_household`. Exponential back-off (800ms × 2^attempt, max 3 retries). `runningRef` prevents concurrent runs.
+- **Sign-out:** `supabaseBrowser.auth.signOut()` → `router.replace('/login')`. `LogOut` icon from lucide-react.
+- **data-testid contract:** `household-banner`, `household-banner-setup`, `account-type-individual`, `account-type-joint`, `account-type-confirm`, `sidebar-signout`, `signed-in-email` — all implemented and stable for Redfoot E2E.
+
+### Lint/typecheck
+
+- `npm run lint`: 0 errors in changed files. Pre-existing errors unchanged.
+- `npx tsc --noEmit`: 0 errors in changed files. Pre-existing errors unchanged.
