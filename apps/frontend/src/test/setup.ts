@@ -1,43 +1,69 @@
 import "@testing-library/jest-dom";
 
 // Mock lightweight-charts — all chart components use createChart + series methods
-vi.mock("lightweight-charts", () => ({
-  createChart: vi.fn(() => ({
-    addLineSeries: vi.fn(() => ({
-      setData: vi.fn(),
-      setMarkers: vi.fn(),
-      applyOptions: vi.fn(),
-    })),
-    addCandlestickSeries: vi.fn(() => ({
-      setData: vi.fn(),
-      setMarkers: vi.fn(),
-      applyOptions: vi.fn(),
-    })),
-    addHistogramSeries: vi.fn(() => ({
-      setData: vi.fn(),
-      applyOptions: vi.fn(),
-    })),
-    addAreaSeries: vi.fn(() => ({
-      setData: vi.fn(),
-      applyOptions: vi.fn(),
-    })),
+vi.mock("lightweight-charts", () => {
+  const chartInstances: Array<{ __series: Array<{ setData: ReturnType<typeof vi.fn> }> }> = [];
+  const makeSeries = () => ({
+    setData: vi.fn(),
+    setMarkers: vi.fn(),
     applyOptions: vi.fn(),
-    timeScale: vi.fn(() => ({
-      fitContent: vi.fn(),
-      applyOptions: vi.fn(),
-      subscribeVisibleTimeRangeChange: vi.fn(),
-    })),
-    priceScale: vi.fn(() => ({
-      applyOptions: vi.fn(),
-    })),
-    resize: vi.fn(),
-    remove: vi.fn(),
-    subscribeCrosshairMove: vi.fn(),
-  })),
-  ColorType: { Solid: "solid" },
-  LineStyle: { Solid: 0, Dashed: 1, Dotted: 2 },
-  CrosshairMode: { Normal: 0, Magnet: 1 },
-}));
+  });
+
+  return {
+    __chartInstances: chartInstances,
+    AreaSeries: "AreaSeries",
+    CandlestickSeries: "CandlestickSeries",
+    ColorType: { Solid: "solid" },
+    LineStyle: { Solid: 0, Dashed: 1, Dotted: 2 },
+    CrosshairMode: { Normal: 0, Magnet: 1 },
+    createSeriesMarkers: vi.fn(() => ({ setMarkers: vi.fn() })),
+    createChart: vi.fn(() => {
+      const instance = {
+        __series: [] as Array<{ setData: ReturnType<typeof vi.fn> }>,
+        addSeries: vi.fn(() => {
+          const series = makeSeries();
+          instance.__series.push(series);
+          return series;
+        }),
+        addLineSeries: vi.fn(() => {
+          const series = makeSeries();
+          instance.__series.push(series);
+          return series;
+        }),
+        addCandlestickSeries: vi.fn(() => {
+          const series = makeSeries();
+          instance.__series.push(series);
+          return series;
+        }),
+        addHistogramSeries: vi.fn(() => {
+          const series = makeSeries();
+          instance.__series.push(series);
+          return series;
+        }),
+        addAreaSeries: vi.fn(() => {
+          const series = makeSeries();
+          instance.__series.push(series);
+          return series;
+        }),
+        removeSeries: vi.fn(),
+        applyOptions: vi.fn(),
+        timeScale: vi.fn(() => ({
+          fitContent: vi.fn(),
+          applyOptions: vi.fn(),
+          subscribeVisibleTimeRangeChange: vi.fn(),
+        })),
+        priceScale: vi.fn(() => ({
+          applyOptions: vi.fn(),
+        })),
+        resize: vi.fn(),
+        remove: vi.fn(),
+        subscribeCrosshairMove: vi.fn(),
+      };
+      chartInstances.push(instance);
+      return instance;
+    }),
+  };
+});
 
 // Mock next/navigation — used by layout and page components
 vi.mock("next/navigation", () => ({

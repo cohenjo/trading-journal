@@ -1,7 +1,7 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState } from "react";
+import { getDayDetails } from "@/app/day/actions";
 
 // A simple Trade type. In a real app, this would be in a shared types package.
 type Trade = {
@@ -19,11 +19,17 @@ export default function TradesList() {
   const [trades, setTrades] = useState<Trade[]>([]);
 
   useEffect(() => {
-    // Fetch trades from the backend.
-    // For now, we'll use a dummy date.
-    apiFetch("/api/day/2025-07-02")
-      .then((res) => res.json())
-      .then((data) => setTrades(data));
+    getDayDetails("2025-07-02")
+      .then((data) => setTrades(data?.matched_trades.map((trade) => ({
+        id: trade.id,
+        timestamp: trade.open_date,
+        symbol: trade.symbol,
+        side: trade.pnl >= 0 ? "buy" : "sell",
+        size: 0,
+        entry_price: trade.open_price,
+        exit_price: trade.close_price,
+        pnl: trade.pnl,
+      })) ?? []));
   }, []);
 
   return (
