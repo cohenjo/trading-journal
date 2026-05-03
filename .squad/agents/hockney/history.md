@@ -7,6 +7,25 @@
 - **Created:** 2026-02-23T22:46:19Z
 
 
+## 2026-05-03: Security incident — Supabase key rotation checklist — PR #158
+
+Prepared rotation runbook in response to GitHub secret-scanning alert #1 (service-role key leaked in `.squad/decisions.md`).
+
+**Deliverables:**
+- `docs/security/rotation-checklist-2026-05-03.md` — full runbook: project identification, rotation steps for Jony, Vercel/GH Actions/local env update checklist, smoke-test commands
+- `.gitignore` — added `!docs/security/` exception to track security runbooks alongside `docs/design-hosting/`
+
+**Key findings:**
+- **One** Supabase project visible via MCP: `zvbwgxdgxwgduhhzdwjj` (prod only — no dev/staging)
+- **Leaked credentials confirmed in `.squad/decisions.md`** (git-tracked): `SUPABASE_SERVICE_ROLE_KEY` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` — flagged for Rabin
+- All `.env.example` files clean (placeholder values only)
+- `apps/frontend/.env.local` correctly gitignored by both root `.gitignore` (`.env.*`) and `apps/frontend/.gitignore` (`.env*`)
+- Vercel CLI not authenticated in this environment — Jony must update env vars via Dashboard
+
+**Parallel tracks:** Rabin (audit/git-history decision) · Kujan (`.gitignore` + pre-commit hardening)
+
+**Smoke test status:** NOT_RUN — awaiting Jony's manual rotation in Supabase Dashboard
+
 ## 2026-05-02: E2E test-user provisioning helper (GH #145) — PR #154
 
 Implemented the full E2E provisioning stack on branch `squad/145-test-user-helper`.
