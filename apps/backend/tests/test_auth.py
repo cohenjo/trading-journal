@@ -7,6 +7,7 @@ from app.auth.security import hash_password, verify_password, create_access_toke
 # Unit tests for security helpers
 # ---------------------------------------------------------------------------
 
+
 class TestPasswordHashing:
     def test_hash_and_verify(self):
         hashed = hash_password("secret123")
@@ -31,6 +32,7 @@ class TestJWT:
 # ---------------------------------------------------------------------------
 # Integration tests for auth endpoints
 # ---------------------------------------------------------------------------
+
 
 class TestRegister:
     def test_register_success(self, unauth_client):
@@ -107,7 +109,7 @@ class TestProtectedRoutes:
     def test_protected_route_rejects_no_auth(self, unauth_client):
         """Any data endpoint should reject unauthenticated requests."""
         resp = unauth_client.get("/api/holdings")
-        assert resp.status_code == 403
+        assert resp.status_code == 401
 
     def test_health_check_public(self, unauth_client):
         """Root health-check must remain public."""

@@ -1,4 +1,5 @@
 from datetime import date
+from uuid import UUID
 
 from sqlmodel import SQLModel, Session, create_engine, select
 
@@ -16,12 +17,17 @@ from app.api.pension import (
     upsert_snapshot_pension,
 )
 from app.schema.finance_models import FinanceSnapshot
+from app.schema.household_models import Household, HouseholdMember
 from app.schema.plan_models import Plan
+
+TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+TEST_HOUSEHOLD_ID = UUID("00000000-0000-0000-0000-000000000101")
 
 
 def make_snapshot(snapshot_date: date, items: list[dict]) -> FinanceSnapshot:
     total_investments = sum(item.get("value", 0) for item in items)
     return FinanceSnapshot(
+        household_id=TEST_HOUSEHOLD_ID,
         date=snapshot_date,
         data={
             "items": items,
@@ -37,13 +43,28 @@ def make_snapshot(snapshot_date: date, items: list[dict]) -> FinanceSnapshot:
 
 
 def make_plan() -> Plan:
-    return Plan(name="Retirement Plan", data={"items": [], "milestones": [], "settings": {}})
+    return Plan(
+        household_id=TEST_HOUSEHOLD_ID,
+        name="Retirement Plan",
+        data={"items": [], "milestones": [], "settings": {}},
+    )
 
 
 def make_session() -> Session:
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     SQLModel.metadata.create_all(engine)
-    return Session(engine)
+    session = Session(engine)
+    session.add(Household(id=TEST_HOUSEHOLD_ID, name="Test Household", created_by=TEST_USER_ID))
+    session.add(
+        HouseholdMember(
+            household_id=TEST_HOUSEHOLD_ID,
+            user_id=TEST_USER_ID,
+            role="owner",
+            invited_by=TEST_USER_ID,
+        )
+    )
+    session.commit()
+    return session
 
 
 def test_extract_pension_payload_separates_owner_product_and_account() -> None:
@@ -256,10 +277,8 @@ def test_delete_pension_removes_history_and_plan_entries() -> None:
     session.add(plan)
     session.commit()
 
-    response = delete_pension(gemel["id"], db=session)
-    persisted_snapshots = session.exec(
-        select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())
-    ).all()
+    response = delete_pension(gemel["id"], db=session, user_id=TEST_USER_ID)
+    persisted_snapshots = session.exec(select(FinanceSnapshot).order_by(FinanceSnapshot.date.asc())).all()
     persisted_plan = session.exec(select(Plan)).first()
     dashboard = build_pension_dashboard_payload(persisted_snapshots, persisted_plan)
 
@@ -331,9 +350,7 @@ def test_upload_propagates_to_latest_snapshot() -> None:
     assert latest_items[0]["id"] == payload["id"]
 
     # Dashboard (reads from latest snapshot) must surface the pension
-    dashboard = build_pension_dashboard_payload(
-        [report_snapshot, latest_snapshot], plan
-    )
+    dashboard = build_pension_dashboard_payload([report_snapshot, latest_snapshot], plan)
     account_ids = [a["id"] for a in dashboard["accounts"]]
     assert payload["id"] in account_ids
 
@@ -363,9 +380,11 @@ def test_upload_creates_new_snapshot_when_none_exist() -> None:
     assert session.exec(select(FinanceSnapshot)).first() is None
 
     snapshot = FinanceSnapshot(
+        household_id=TEST_HOUSEHOLD_ID,
         date=target_date,
-        data=copy.deepcopy({"items": [], "total_savings": 0.0, "total_investments": 0.0,
-                            "total_assets": 0.0, "total_liabilities": 0.0}),
+        data=copy.deepcopy(
+            {"items": [], "total_savings": 0.0, "total_investments": 0.0, "total_assets": 0.0, "total_liabilities": 0.0}
+        ),
         net_worth=0.0,
         total_assets=0.0,
         total_liabilities=0.0,
