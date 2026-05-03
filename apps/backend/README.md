@@ -16,6 +16,7 @@ Copy the root `.env.example` or `apps/backend/.env.example` to a local `.env` an
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional, server-only | Required only when worker code needs Supabase Storage access or privileged writes that cannot be performed with the database connection. This key bypasses RLS; never expose it to the browser and never prefix it with `NEXT_PUBLIC_`. |
 | `WORKER_TIMEZONE` | Optional | APScheduler timezone. Defaults to `Asia/Jerusalem`. |
 | `WORKER_POLL_INTERVAL_SECONDS` | Optional | `compute_jobs` polling interval. Defaults to `5`. |
+| `IB_GATEWAY_HOST` / `IB_GATEWAY_PORT` | Optional | IB Gateway TCP endpoint used by the scheduled trading sync health check and IBKR connection. Defaults to `127.0.0.1:4002`. Legacy `IB_HOST` / `IB_PORT` are also honored. |
 | `OTEL_SERVICE_NAME` / `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | Local observability settings. |
 
 ## Adding a scheduled batch job
