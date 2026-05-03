@@ -4,6 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
+from app.worker.bonds_scanner import refresh_bond_scanner_results
+
 JobPayload = dict[str, object]
 JobResult = dict[str, object]
 JobHandler = Callable[[JobPayload], JobResult]
@@ -22,4 +24,11 @@ class JobSchedule:
 
 
 JOB_HANDLERS: dict[str, JobHandler] = {}
-JOB_SCHEDULES: list[JobSchedule] = []
+JOB_SCHEDULES: list[JobSchedule] = [
+    JobSchedule(
+        job_id="bonds_scanner_refresh",
+        kind="cron",
+        handler=refresh_bond_scanner_results,
+        cron_expr="0 4 * * *",
+    ),
+]
