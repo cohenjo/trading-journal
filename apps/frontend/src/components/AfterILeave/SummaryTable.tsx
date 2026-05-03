@@ -9,9 +9,9 @@ interface InsurancePolicyRow {
   id?: string;
   type: string;
   provider: string;
-  sum_insured?: string;
+  sum_insured?: string | null;
   owner: string;
-  notes?: string;
+  notes?: string | null;
 }
 
 interface DemoInsuranceItem {

@@ -19,7 +19,6 @@ const PAGES = [
  * - /api/trading/configs   → #177
  * - /api/ladder/income     → #177
  * - /api/options           → #177
- * - /api/insurance         → #177
  */
 const UNMIGRATED_FASTAPI_PATHS = [
   '/api/plans/simulate',
@@ -28,7 +27,6 @@ const UNMIGRATED_FASTAPI_PATHS = [
   '/api/ladder/income',
   '/api/ladder/overview',
   '/api/options',
-  '/api/insurance',
   '/api/backtest',
   '/api/dividends',
   '/api/pension',
