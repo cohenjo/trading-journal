@@ -1,14 +1,22 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import {
+    getTradingConfigs,
+    getTradingPositions,
+    getTradingSummary,
+    type TradingAccountConfig,
+    type TradingAccountSummary,
+    type TradingPosition,
+} from '@/app/trading/actions';
 import TradingStatsRow from "./TradingStatsRow";
 import TradingPositionsTable from "./TradingPositionsTable";
 
 export default function TradingAccountDashboard() {
-    const [configs, setConfigs] = useState<any[]>([]);
+    const [configs, setConfigs] = useState<TradingAccountConfig[]>([]);
     const [activeAccountId, setActiveAccountId] = useState<number | null>(null);
-    const [stats, setStats] = useState<any>({ net_liquidation: 0, total_cash: 0, currency: "USD", timestamp: "" });
-    const [positions, setPositions] = useState([]);
+    const [stats, setStats] = useState<TradingAccountSummary | { net_liquidation: number; total_cash: number; currency: string; timestamp: string }>({ net_liquidation: 0, total_cash: 0, currency: "USD", timestamp: "" });
+    const [positions, setPositions] = useState<TradingPosition[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [error, setError] = useState("");
@@ -21,16 +29,11 @@ export default function TradingAccountDashboard() {
     const init = async () => {
         setLoading(true);
         try {
-            const res = await fetch("/api/trading/configs");
-            if (res.ok) {
-                const data = await res.json();
-                setConfigs(data || []);
-                if (data && data.length > 0) {
-                    setActiveAccountId(data[0].id);
-                    await fetchData(data[0].id);
-                } else {
-                    setLoading(false);
-                }
+            const data = await getTradingConfigs();
+            setConfigs(data);
+            if (data.length > 0) {
+                setActiveAccountId(data[0].id);
+                await fetchData(data[0].id);
             } else {
                 setLoading(false);
             }
@@ -43,20 +46,13 @@ export default function TradingAccountDashboard() {
     const fetchData = async (accountId: number | null) => {
         setError("");
         try {
-            const idParam = accountId ? `?account_id=${accountId}` : "";
-            const [summaryRes, positionsRes] = await Promise.all([
-                fetch(`/api/trading/summary${idParam}`),
-                fetch(`/api/trading/positions${idParam}`)
+            const [summaryData, positionsData] = await Promise.all([
+                getTradingSummary(accountId),
+                getTradingPositions(accountId)
             ]);
 
-            if (summaryRes.ok && positionsRes.ok) {
-                const summaryData = await summaryRes.json();
-                const positionsData = await positionsRes.json();
-                setStats(summaryData || { net_liquidation: 0, total_cash: 0, currency: "USD", timestamp: "" });
-                setPositions(positionsData || []);
-            } else {
-                setError("Failed to fetch data from database.");
-            }
+            setStats(summaryData || { net_liquidation: 0, total_cash: 0, currency: "USD", timestamp: "" });
+            setPositions(positionsData);
         } catch (err) {
             console.error("Error fetching trading data:", err);
             setError("Connection error. Is the backend running?");
@@ -219,4 +215,3 @@ export default function TradingAccountDashboard() {
         </div>
     );
 }
-
