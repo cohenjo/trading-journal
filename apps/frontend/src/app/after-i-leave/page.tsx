@@ -1,5 +1,4 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
@@ -7,27 +6,11 @@ import CollapsibleSection from '@/components/AfterILeave/CollapsibleSection';
 import SummaryTable from '@/components/AfterILeave/SummaryTable';
 import { Lang, translations } from '@/components/AfterILeave/translations';
 import { getLatestFinanceSnapshot } from '../finances/actions';
-
-interface InsurancePolicy {
-  id?: string;
-  type: string;
-  provider: string;
-  policy_number?: string;
-  sum_insured?: string;
-  monthly_premium?: number | null;
-  beneficiaries?: string;
-  expiry_date?: string;
-  website?: string;
-  notes?: string;
-  owner: string;
-}
+import { listInsurancePolicies, type InsurancePolicy } from '../insurance/actions';
 
 async function fetchInsurancePolicies(): Promise<InsurancePolicy[]> {
   try {
-    const res = await apiFetch('/api/insurance');
-    if (!res.ok) return [];
-    const data = await res.json();
-    return data.data || [];
+    return await listInsurancePolicies();
   } catch {
     return [];
   }
@@ -344,7 +327,7 @@ export default function AfterILeavePage() {
 
           {/* 3c: Life Insurance */}
           {(() => {
-            const lifePolicies = insurancePolicies.filter((p) => p.type === 'Life');
+            const lifePolicies = insurancePolicies.filter((p) => p.type === 'life');
             const hasReal = lifePolicies.length > 0;
             return (
               <CollapsibleSection
@@ -407,7 +390,7 @@ export default function AfterILeavePage() {
 
           {/* 3d: Mortgage Insurance */}
           {(() => {
-            const mortgagePolicies = insurancePolicies.filter((p) => p.type === 'Mortgage');
+            const mortgagePolicies = insurancePolicies.filter((p) => p.type === 'mortgage');
             const hasReal = mortgagePolicies.length > 0;
             return (
               <CollapsibleSection
