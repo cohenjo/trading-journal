@@ -14,7 +14,10 @@
 service-account*.json
 
 # Secrets directories/files
+# Note: list .secrets/ (leading dot) separately — **/secrets/** does not match it.
+.secrets/
 **/secrets/**
+**/secrets/
 secrets.json
 secrets.yaml
 secrets.yml
@@ -143,7 +146,6 @@ yarn-error.log*
 .vibe/
 .windsurf/
 .zencoder/
-
 
 .squad/orchestration-log/
 .squad/log/

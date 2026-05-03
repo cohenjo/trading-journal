@@ -71,7 +71,7 @@
 
 ### 2026-04-30 — YOLO Direct-Apply Round: TJ-001 Local Supabase Dev Runbook Finalization
 
-**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
 **Work:** Completed TJ-001 local Supabase development runbook with full Docker Compose setup, CLI workflow, migration strategy, RLS pattern guide, OAuth setup, and 12-item free-tier watchlist (all for team verification). PR #91 merged (commit 9cf168e).
 
 **Key Insight:** Supabase CLI tooling is fast-evolving; key output labeling changed (anon key → publishable key); always verify against `supabase status` not docs.
@@ -148,3 +148,24 @@
 - `git switch -c <new-branch> origin/main` may silently stay on a different branch if run inside a multi-worktree setup — always verify with `git branch --show-current` before committing.
 - `actions/github-script@v7` needs `permissions: issues: write` on the job, not just the workflow level.
 - Chromium-only CI (`--project=chromium`) cuts install time significantly vs all-browsers.
+📌 **Secret Scanning Hardening — TJ-SEC-003 (2026-05-03):**
+**Requested by:** Jony — security incident response (parallel with Rabin: audit, Hockney: rotation)
+
+**What was delivered:**
+1. **Gitignore hardening (3 files):**
+   - Root `.gitignore`: added `!.env.*.example`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `service-account*.json`, `**/secrets/**`, `secrets.json/yaml/yml`, `.supabase/` (was missing; CLI cache may hold service keys)
+   - `apps/frontend/.gitignore`: added `*.key`, `*.p12`, `*.pfx`, `service-account*.json`, `secrets.*`
+   - `apps/backend/.gitignore`: created (did not exist); covers all secret patterns + Python runtime artifacts
+2. **Pre-commit gitleaks hook** added to `.pre-commit-config.yaml` (`gitleaks/gitleaks v8.27.2`). Also fixed pre-existing ruff-pre-commit version (`v0.10.4` → `v0.15.12` — that tag didn't exist).
+3. **CI gate** — `.github/workflows/secret-scan.yml`: runs `gitleaks/gitleaks-action@v2` on every PR and push to `main`, full history fetch (`fetch-depth: 0`).
+4. **CONTRIBUTING.md** created — documents `pre-commit install` steps, hook table, env-file rules, PR checklist, and incident response.
+5. **GitHub push protection** — API PATCH attempt returned 404 (token lacks `security_events` scope or requires admin). Manual step required: Jony must visit GitHub repo → Settings → Code security → Secret scanning → Enable push protection.
+
+**Gitleaks test result:** ✅ BLOCKED
+- Created `fake-secret-test.txt` with `SUPABASE_SERVICE_ROLE_KEY=eyJhbGci...fake`
+- `git commit` attempted → gitleaks hook fired, printed leak fingerprint, exited 1
+- Commit was REFUSED. File deleted. No secret committed.
+
+**env audit:** `git ls-files | grep -E '\.env(\.|$)'` returns only `.env.example`, `apps/backend/.env.example`, `apps/frontend/.env.local.example` — no real env files tracked.
+
+**Branch:** `squad/secret-scan-hardening` → PR opened against `main`.
