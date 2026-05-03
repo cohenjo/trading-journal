@@ -26,6 +26,16 @@ export interface FinanceSnapshotData {
   total_investments: number;
 }
 
+export type SaveFinanceSnapshotPayload = FinanceSnapshotData;
+
+export type SaveFinanceSnapshotResult =
+  | { success: true }
+  | { success: false; error: string };
+
+export type DeleteFinanceSnapshotResult =
+  | { success: true }
+  | { success: false; error: string };
+
 // Raw rows from dividend tables — typed narrowly to avoid over-fetching
 interface DividendAccountRow {
   name: string;
@@ -224,4 +234,139 @@ export async function getLatestFinanceSnapshot(): Promise<FinanceSnapshot | null
   }
 
   return snapshot;
+}
+
+/**
+ * Returns finance snapshots for the authenticated user's household, newest first.
+ * `household_id` is resolved from the session and RLS enforces read isolation.
+ */
+export async function getFinanceHistory(limit = 100): Promise<FinanceSnapshot[]> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return [];
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) return [];
+
+  const boundedLimit = Number.isFinite(limit)
+    ? Math.min(Math.max(Math.trunc(limit), 1), 500)
+    : 100;
+
+  const { data, error } = await supabase
+    .from('finance_snapshots')
+    .select('date, household_id, net_worth, total_assets, total_liabilities, data')
+    .eq('household_id', householdId)
+    .order('date', { ascending: false })
+    .limit(boundedLimit);
+
+  if (error) {
+    console.error('[getFinanceHistory] query error:', error.message);
+    return [];
+  }
+
+  return (data ?? []) as unknown as FinanceSnapshot[];
+}
+
+/**
+ * Upserts a finance snapshot for the authenticated user's household.
+ * The household scope is session-derived; callers can only choose date/payload.
+ */
+export async function saveFinanceSnapshot(
+  date: string,
+  payload: SaveFinanceSnapshotPayload,
+): Promise<SaveFinanceSnapshotResult> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return { success: false, error: 'Not authenticated' };
+  }
+
+  const snapshotDate = typeof date === 'string' ? date.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate)) {
+    return { success: false, error: 'Invalid date' };
+  }
+
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.items)) {
+    return { success: false, error: 'Invalid payload: items must be an array' };
+  }
+  if (
+    typeof payload.net_worth !== 'number' ||
+    typeof payload.total_assets !== 'number' ||
+    typeof payload.total_liabilities !== 'number' ||
+    typeof payload.total_savings !== 'number' ||
+    typeof payload.total_investments !== 'number'
+  ) {
+    return { success: false, error: 'Invalid payload: all metric fields must be numbers' };
+  }
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) {
+    return { success: false, error: 'No active household found for your account' };
+  }
+
+  const { error: upsertError } = await supabase.from('finance_snapshots').upsert(
+    {
+      date: snapshotDate,
+      household_id: householdId,
+      data: payload,
+      net_worth: payload.net_worth,
+      total_assets: payload.total_assets,
+      total_liabilities: payload.total_liabilities,
+    },
+    { onConflict: 'household_id,date' },
+  );
+
+  if (upsertError) {
+    console.error('[saveFinanceSnapshot] upsert error:', upsertError.message);
+    return { success: false, error: 'Failed to save snapshot. Please try again.' };
+  }
+
+  return { success: true };
+}
+
+/** Deletes one finance snapshot by date for the authenticated user's household. */
+export async function deleteFinanceSnapshot(dateStr: string): Promise<DeleteFinanceSnapshotResult> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return { success: false, error: 'Not authenticated' };
+  }
+
+  const snapshotDate = typeof dateStr === 'string' ? dateStr.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(snapshotDate)) {
+    return { success: false, error: 'Invalid date' };
+  }
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) {
+    return { success: false, error: 'No active household found for your account' };
+  }
+
+  const { error: deleteError } = await supabase
+    .from('finance_snapshots')
+    .delete()
+    .eq('household_id', householdId)
+    .eq('date', snapshotDate);
+
+  if (deleteError) {
+    console.error('[deleteFinanceSnapshot] delete error:', deleteError.message);
+    return { success: false, error: 'Failed to delete snapshot. Please try again.' };
+  }
+
+  return { success: true };
 }
