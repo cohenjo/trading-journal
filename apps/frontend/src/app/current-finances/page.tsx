@@ -6,6 +6,7 @@ import { FinanceTabs, FinanceItem } from '@/components/CurrentFinances/FinanceTa
 import { useSettings } from '../settings/SettingsContext';
 import { convertCurrency } from '@/lib/currency';
 import { saveFinanceSnapshot, getLatestFinanceSnapshot } from './actions';
+import { HouseholdBanner } from '@/components/Household/HouseholdBanner';
 
 
 export default function CurrentFinancesPage() {
@@ -37,7 +38,7 @@ export default function CurrentFinancesPage() {
   const totalEquity = totalSavings + totalInvestments;
 
   // Save logic tied to items update
-  // We wrap setItems to also trigger save, or use an effect. 
+  // We wrap setItems to also trigger save, or use an effect.
   // Using a handler is safer to control when save happens.
   const handleUpdateItems = useCallback((newItems: FinanceItem[]) => {
     setItems(newItems);
@@ -68,7 +69,7 @@ export default function CurrentFinancesPage() {
   }, [mainCurrency]);
 
 
-  // Chart Data Preparation 
+  // Chart Data Preparation
 
   // 1. Net Worth Allocation (Real Assets vs Equity)
   const netWorthData = [
@@ -126,7 +127,10 @@ export default function CurrentFinancesPage() {
           {/* Could add date selector here later */}
         </header>
 
-        {saveError && (
+        {/* Household setup banner — shown when no household is provisioned yet */}
+        <HouseholdBanner />
+
+        {saveError && !saveError.includes('household') && (
           <div
             role="alert"
             className="mb-4 flex items-start gap-3 rounded-lg border border-red-500/40 bg-red-950/50 px-4 py-3 text-sm text-red-300"

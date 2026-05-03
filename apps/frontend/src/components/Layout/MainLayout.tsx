@@ -2,9 +2,22 @@
 
 import React, { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { LogOut } from "lucide-react";
+import { HouseholdProvider, useHousehold } from "@/lib/household/HouseholdContext";
+import { AccountTypePickerDialog } from "@/components/Household/AccountTypePickerDialog";
 
-export default function MainLayout({ children }: { children: ReactNode }) {
+/** Inner layout — must be inside HouseholdProvider to call useHousehold. */
+function MainLayoutInner({ children }: { children: ReactNode }) {
     const [menuOpen, setMenuOpen] = useState(false);
+    const { userEmail, status } = useHousehold();
+    const router = useRouter();
+
+    async function handleSignOut() {
+        const { createClient } = await import("@/lib/supabase/browser");
+        await createClient().auth.signOut();
+        router.replace("/login");
+    }
 
     return (
         <div className="relative min-h-screen">
@@ -188,11 +201,46 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                                 📋 After I Leave
                             </Link>
                         </div>
+
+                        {/* ── Account / Sign-out ──────────────────────────────── */}
+                        <div className="mt-auto border-t border-slate-700 pt-3 pb-3 px-6">
+                            {userEmail && (
+                                <p
+                                    data-testid="signed-in-email"
+                                    className="text-xs text-slate-500 truncate mb-2"
+                                    title={userEmail}
+                                >
+                                    {userEmail}
+                                </p>
+                            )}
+                            {status !== "idle" && status !== "loading" && (
+                                <button
+                                    type="button"
+                                    data-testid="sidebar-signout"
+                                    onClick={handleSignOut}
+                                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                >
+                                    <LogOut size={16} aria-hidden="true" />
+                                    Sign out
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </nav>
             )}
 
+            {/* Account-type picker — shown on first login when no household exists */}
+            <AccountTypePickerDialog />
+
             <main className="pt-14">{children}</main>
         </div>
+    );
+}
+
+export default function MainLayout({ children }: { children: ReactNode }) {
+    return (
+        <HouseholdProvider>
+            <MainLayoutInner>{children}</MainLayoutInner>
+        </HouseholdProvider>
     );
 }

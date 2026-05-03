@@ -23,6 +23,8 @@
  *    the mutation path until the backend exposes a test seed endpoint.
  */
 import { test, expect } from '../../e2e/fixtures/auth';
+import { test as testWithUser } from '../fixtures/test-user';
+import { cleanupHouseholdData } from '../fixtures/seed-data';
 
 test.describe('P0 flow: /current-finances (authenticated)', () => {
   test('/current-finances loads without 5xx @flow', async ({ authenticatedUser: { page } }) => {
@@ -96,4 +98,61 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
     // 4. Verify the new item appears in the editor
     // NOTE: requires FastAPI to accept JWT from Supabase and scope the write correctly
   });
+});
+
+// ── Regression: fund-save with active household (Jony's bug) ─────────────────
+//
+// Regression guard for the bug where saving a fund on /current-finances failed
+// silently when the user had an active household (finance_snapshots write was
+// rejected by RLS because the JWT wasn't forwarded to FastAPI).
+//
+// Status: skip until Fenster's auth-guard PR + Hockney's ensure_household RPC
+//         are deployed and the FastAPI backend accepts household-scoped JWTs.
+// Tracking: https://github.com/cohenjo/trading-journal/issues/155
+
+testWithUser.describe('regression: fund save with household @auth', () => {
+  // test.skip: depends on FastAPI backend accepting JWT + household scope.
+  // Unblock when:
+  //   1. Fenster's auth-guard PR is merged (JWT forwarded to FastAPI)
+  //   2. Hockney's ensure_household RPC ships (household row guaranteed present)
+  //   3. FastAPI /api/finances/save accepts and persists household-scoped writes
+  testWithUser.skip(
+    'adding a fund saves successfully when a household is present @auth',
+    async ({ testUser: { page, householdId } }) => {
+      // Postcondition cleanup — remove seeded snapshot data after this test
+      testWithUser.afterAll(async () => {
+        await cleanupHouseholdData(householdId).catch((err: Error) =>
+          console.warn(`[current-finances] cleanup warning: ${err.message}`),
+        );
+      });
+
+      await page.goto('/current-finances');
+      await page.waitForLoadState('domcontentloaded');
+
+      // Locate the "Add fund" / "Add item" button (exact selector TBD once Fenster's
+      // auth-guard PR ships and the component renders in an authenticated context)
+      const addFundBtn = page
+        .getByRole('button', { name: /add fund|add item|new fund/i })
+        .first();
+      await expect(addFundBtn).toBeVisible({ timeout: 10_000 });
+      await addFundBtn.click();
+
+      // Fill in the minimal required fields
+      await page.getByLabel(/name|fund name/i).fill('E2E Regression Fund');
+      await page.getByLabel(/value|amount|balance/i).fill('50000');
+
+      // Submit the form
+      const saveBtn = page.getByRole('button', { name: /save|confirm|add/i }).last();
+      await expect(saveBtn).toBeVisible();
+      await saveBtn.click();
+
+      // The new fund must appear in the finance items list — no error toast
+      const fundEntry = page.getByText('E2E Regression Fund');
+      await expect(fundEntry).toBeVisible({ timeout: 10_000 });
+
+      // Assert no error toast / alert appeared
+      const errorToast = page.locator('[role="alert"]').filter({ hasText: /error|failed|could not/i });
+      await expect(errorToast).not.toBeVisible({ timeout: 3_000 });
+    },
+  );
 });
