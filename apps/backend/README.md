@@ -2,14 +2,7 @@
 
 The backend is a private Python worker for Trading Journal computations. It is not a public web service and the Vercel frontend must not call it over HTTP. The frontend reads and writes Supabase tables, Auth, Storage, and Realtime only.
 
-The worker runs in Docker on Jony's laptop, reads inputs from Supabase, executes the existing Python modules under `apps/backend/app/`, and writes computed outputs back to Supabase result tables. FastAPI may stay running for local `/health` liveness checks, but business routes are legacy/admin-only until Phase B removes or replaces them.
-
-## What this backend does
-
-- **Scheduled batch compute:** refresh pre-computable datasets on a timer and write result tables such as ticker analysis, bond scanner results, price cache rows, NDX data, and broker/trading snapshots.
-- **Job queue compute:** poll Supabase job-request rows for user-triggered heavy work, run the Python computation, write results, and update job status.
-- **Storage processing:** poll or react to Supabase Storage uploads, parse files such as pension PDFs, and write parsed rows/status to Supabase tables.
-- **Local health:** expose `/health` inside the container, and optionally on `127.0.0.1:8000`, so the laptop operator can verify the worker is alive.
+The worker runs in Docker on Jony's laptop, reads inputs from Supabase with a server-only privileged database connection, executes Python modules under `apps/backend/app/`, and writes computed outputs back to Supabase result tables.
 
 ## Required environment
 
@@ -21,19 +14,84 @@ Copy the root `.env.example` or `apps/backend/.env.example` to a local `.env` an
 | `DIRECT_DATABASE_URL` | Compose convenience | `docker-compose.backend.yml` maps this value into `DATABASE_URL`; set it to the Supabase direct or pooler URL. |
 | `SUPABASE_URL` | Yes | Supabase project URL for Auth/JWKS checks and Storage client access. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional, server-only | Required only when worker code needs Supabase Storage access or privileged writes that cannot be performed with the database connection. This key bypasses RLS; never expose it to the browser and never prefix it with `NEXT_PUBLIC_`. |
-| `SUPABASE_JWT_SECRET` | Optional | Fallback for local/manual JWT verification while legacy admin FastAPI routes still exist. Prefer JWKS via `SUPABASE_URL`. |
+| `WORKER_TIMEZONE` | Optional | APScheduler timezone. Defaults to `Asia/Jerusalem`. |
+| `WORKER_POLL_INTERVAL_SECONDS` | Optional | `compute_jobs` polling interval. Defaults to `5`. |
 | `OTEL_SERVICE_NAME` / `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | Local observability settings. |
 
-The frontend does not need `NEXT_PUBLIC_API_URL`, and the backend does not need browser CORS configuration.
+## Adding a scheduled batch job
 
-## Run the worker
+Scheduled jobs live beside the compute code. Register a `JobSchedule` in `app.worker.registry.JOB_SCHEDULES`, point it at a zero-argument handler, and have the handler read/write Supabase through the worker's privileged database connection. Result tables should include freshness fields such as `refreshed_at`, `source`, `status`, and `error`.
+
+```python
+from app.worker.registry import JOB_SCHEDULES, JobSchedule
+from app.services.analysis.refresh import refresh_growth_stories
+
+
+def refresh_growth_stories_job() -> None:
+    """Refresh known ticker stories and upsert result rows."""
+    refresh_growth_stories()
+
+
+JOB_SCHEDULES.append(
+    JobSchedule(
+        job_id="analysis_growth_stories_daily",
+        kind="cron",
+        cron_expr="30 18 * * 0-4",
+        handler=refresh_growth_stories_job,
+    )
+)
+```
+
+## Adding an on-demand job
+
+On-demand jobs use `public.compute_jobs`. Pick a stable `job_type`, register a handler in `registry.JOB_HANDLERS`, and return a JSON-serializable result. The frontend inserts a job and subscribes to Realtime changes; it never calls the Python worker over HTTP.
+
+```python
+from app.services.backtester.runner import run_backtest
+from app.worker.registry import JOB_HANDLERS, JobPayload, JobResult
+
+
+def handle_backtest(payload: JobPayload) -> JobResult:
+    """Run one user-requested backtest and return the result row id."""
+    strategy_id = str(payload["strategy_id"])
+    start_year = int(payload["start_year"])
+    end_year = int(payload["end_year"])
+    run_id = run_backtest(
+        strategy_id=strategy_id,
+        start_year=start_year,
+        end_year=end_year,
+    )
+    return {"backtest_run_id": str(run_id)}
+
+
+JOB_HANDLERS["backtest"] = handle_backtest
+```
+
+```ts
+const jobId = await enqueueComputeJob('backtest', {
+  strategy_id: strategyId,
+  start_year: 2024,
+  end_year: 2026,
+});
+
+const unsubscribe = subscribeToComputeJob(jobId, (job) => {
+  if (job.status === 'done') {
+    router.push(`/backtests/${job.result?.backtest_run_id}`);
+  }
+  if (job.status === 'failed') {
+    setError(job.error ?? 'Backtest failed');
+  }
+});
+```
+
+## Local development
 
 From the repository root:
 
 ```bash
 docker compose -f docker-compose.backend.yml up -d --build
 docker compose -f docker-compose.backend.yml ps
-curl http://127.0.0.1:8000/health
+docker compose -f docker-compose.backend.yml logs -f backend
 ```
 
 Stop it with:
@@ -42,30 +100,7 @@ Stop it with:
 docker compose -f docker-compose.backend.yml down
 ```
 
-`docker-compose.backend.yml` binds the optional health endpoint to `127.0.0.1:8000` only. Do not expose this container through a public tunnel, router port, or Vercel rewrite.
-
-## Scheduling model
-
-Phase B should add an in-process scheduler, preferably APScheduler, during backend startup. Each scheduled job should be a small registration entry that declares:
-
-1. A stable job id, for example `analysis_tickers_daily`.
-2. Its cadence, for example daily after market close or hourly for `price_cache`.
-3. The Python function under `apps/backend/app/` that performs the work.
-4. The Supabase result table(s) it writes.
-5. Freshness/error fields written with every run, such as `refreshed_at`, `status`, and `error_message`.
-
-A new scheduled compute path should not add a frontend HTTP call. Add the job to the scheduler registry, create the result table with RLS in a migration, and update the frontend to read Supabase rows.
-
-## Job queue table pattern
-
-For user-triggered heavy work, Phase B should use a Supabase table such as `compute_jobs`:
-
-1. A Next.js Server Action validates the user input and inserts a job row with `status = 'pending'`, `job_type`, `input_payload`, `requested_by`, and timestamps.
-2. The backend polling worker wakes every 10 seconds, transactionally claims pending rows, and dispatches by `job_type`.
-3. The worker runs the Python compute module, writes a result row such as `backtest_runs`, and marks the job `done` with the result id. Failures set `status = 'failed'` and an error summary.
-4. The frontend subscribes to the job/result row with Supabase Realtime and renders pending, done, failed, or stale states.
-
-To register a new job type in Phase B, add it to the worker's dispatch registry, document its payload schema near the worker code, create a result table with RLS, and remove any frontend `/api/*` dependency for that workflow.
+The compose worker publishes no ports. Do not expose this container through a public tunnel, router port, or Vercel rewrite.
 
 ## Offline behavior
 
@@ -75,8 +110,6 @@ When Jony's laptop is offline, asleep, or Docker is stopped:
 - Pending job rows remain queued until the worker is online again.
 - Storage uploads remain in Supabase until the worker parses them.
 - The frontend still loads because it talks only to Supabase; users see stale timestamps or pending statuses instead of backend connection failures.
-
-This offline behavior is intentional and acceptable for the current operating model.
 
 ## Security notes
 
