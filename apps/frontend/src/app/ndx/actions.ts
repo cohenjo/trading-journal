@@ -23,7 +23,7 @@ function nextDate(date: string): string {
 /**
  * Returns stored NDX 1-minute OHLC rows for the given day.
  *
- * NDX sync remains on FastAPI because it calls yfinance/external market data;
+ * NDX sync is performed by the private backend worker's scheduled batch;
  * this action is intentionally read-only over Supabase RLS-protected data.
  */
 export async function getNdxChartData(date: string): Promise<NdxChartData[]> {
