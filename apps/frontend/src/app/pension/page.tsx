@@ -6,7 +6,7 @@ import PensionTable from '@/components/Pension/PensionTable';
 import ReportHistory from '@/components/Pension/ReportHistory';
 import SnapshotDetail from '@/components/Pension/SnapshotDetail';
 import { deletePensionReport, getPensionDashboard, listPensionReports, uploadPensionPdf } from './actions';
-import { subscribeToComputeJob, type ComputeJob } from '@/lib/compute-jobs';
+import { subscribeToComputeJob, type ComputeJob } from '@/lib/compute-jobs-client';
 import type { PensionAccount, PensionDashboardResponse, PensionSeriesPoint, PensionSnapshotSummary } from '@/components/Pension/pensionTypes';
 
 interface PensionUploadJobResult {

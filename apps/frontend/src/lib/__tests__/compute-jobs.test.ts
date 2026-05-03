@@ -3,9 +3,12 @@ import {
   __setComputeJobsTestClient,
   enqueueComputeJob,
   getComputeJob,
-  subscribeToComputeJob,
   type ComputeJob,
 } from '../compute-jobs';
+import {
+  __setComputeJobsClientTestClient,
+  subscribeToComputeJob,
+} from '../compute-jobs-client';
 
 const getUser = vi.fn();
 
@@ -24,6 +27,7 @@ function chain(result: unknown) {
 beforeEach(() => {
   vi.resetAllMocks();
   __setComputeJobsTestClient(null);
+  __setComputeJobsClientTestClient(null);
   getUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null });
 });
 
@@ -97,7 +101,7 @@ describe('compute job helpers', () => {
       channel: vi.fn(() => channel),
       removeChannel,
     };
-    __setComputeJobsTestClient(supabase as never);
+    __setComputeJobsClientTestClient(supabase as never);
 
     const unsubscribe = subscribeToComputeJob('job-1', callback);
     expect(supabase.channel).toHaveBeenCalledWith('compute-job:job-1');
