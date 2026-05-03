@@ -2,6 +2,27 @@
 .env
 .env.*
 !.env.example
+!.env.*.example
+
+# Cryptographic key material
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Service account credentials (GCP, Firebase, etc.)
+service-account*.json
+
+# Secrets directories/files
+**/secrets/**
+secrets.json
+secrets.yaml
+secrets.yml
+
+# Supabase CLI local state (may cache service keys)
+.supabase/
+
+# Vercel CLI cache (may cache deploy tokens)
 .vercel
 
 # Dependencies
@@ -45,6 +66,8 @@ memory-bank/
 docs/
 !docs/design-hosting/
 !docs/design-hosting/**
+!docs/security/
+!docs/security/**
 sample images/
 sample/
 reports/
