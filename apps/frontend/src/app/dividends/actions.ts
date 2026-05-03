@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { convertCurrency } from '@/lib/currency';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -9,6 +10,64 @@ export interface ImportableAccount {
   name: string;
   type: string;
   details?: Record<string, unknown> | null;
+}
+
+export interface DividendPositionPayload {
+  account: string;
+  ticker: string;
+  shares: number;
+}
+
+export type DividendPositionPatch = Partial<DividendPositionPayload>;
+
+export interface DividendPosition extends DividendPositionPayload {
+  id: number;
+}
+
+export interface EnrichedDividendPosition extends DividendPosition {
+  price: number;
+  dividend_yield: number;
+  annual_income: number;
+  dgr_3y: number;
+  dgr_5y: number;
+  currency: string;
+}
+
+export interface DividendDashboardStats {
+  portfolio_yield: number;
+  annual_income: number;
+  dgr_5y: number;
+  currency: string;
+}
+
+export interface DividendDashboardData {
+  stats: DividendDashboardStats;
+  positions: EnrichedDividendPosition[];
+}
+
+export type DividendPositionResult =
+  | { ok: true; position: DividendPosition }
+  | { ok: false; error: string };
+
+export type DeleteDividendPositionResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+interface DividendPositionRow {
+  id: number;
+  account: string;
+  ticker: string;
+  shares: number | string;
+}
+
+interface DividendTickerDataRow {
+  ticker: string;
+  price: number | string | null;
+  currency: string | null;
+  dividend_yield: number | string | null;
+  dividend_rate: number | string | null;
+  dgr_3y: number | string | null;
+  dgr_5y: number | string | null;
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -31,7 +90,323 @@ async function resolveHouseholdId(userId: string): Promise<string | null> {
   return data.household_id as string;
 }
 
+function emptyDashboard(currency = 'USD'): DividendDashboardData {
+  return {
+    stats: { portfolio_yield: 0, annual_income: 0, dgr_5y: 0, currency },
+    positions: [],
+  };
+}
+
+function toNumber(value: number | string | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function normalizePositionPayload(
+  payload: DividendPositionPayload,
+): DividendPositionPayload | { error: string } {
+  const account = typeof payload.account === 'string' ? payload.account.trim() : '';
+  const ticker = typeof payload.ticker === 'string' ? payload.ticker.trim().toUpperCase() : '';
+  const shares = Number(payload.shares);
+
+  if (!account) return { error: 'Account must not be empty' };
+  if (!ticker) return { error: 'Ticker must not be empty' };
+  if (!Number.isFinite(shares) || shares < 0) {
+    return { error: 'Shares must be a non-negative number' };
+  }
+
+  return { account, ticker, shares };
+}
+
+function normalizePositionPatch(
+  patch: DividendPositionPatch,
+): DividendPositionPatch | { error: string } {
+  const updates: DividendPositionPatch = {};
+
+  if ('account' in patch) {
+    const account = typeof patch.account === 'string' ? patch.account.trim() : '';
+    if (!account) return { error: 'Account must not be empty' };
+    updates.account = account;
+  }
+
+  if ('ticker' in patch) {
+    const ticker = typeof patch.ticker === 'string' ? patch.ticker.trim().toUpperCase() : '';
+    if (!ticker) return { error: 'Ticker must not be empty' };
+    updates.ticker = ticker;
+  }
+
+  if ('shares' in patch) {
+    const shares = Number(patch.shares);
+    if (!Number.isFinite(shares) || shares < 0) {
+      return { error: 'Shares must be a non-negative number' };
+    }
+    updates.shares = shares;
+  }
+
+  if (Object.keys(updates).length === 0) return { error: 'No position fields to update' };
+  return updates;
+}
+
+function toDividendPosition(row: DividendPositionRow): DividendPosition {
+  return {
+    id: Number(row.id),
+    account: row.account,
+    ticker: row.ticker,
+    shares: toNumber(row.shares),
+  };
+}
+
+async function dividendAccountExists(account: string, householdId: string): Promise<boolean> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('dividend_accounts')
+    .select('name')
+    .eq('name', account)
+    .eq('household_id', householdId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[dividendAccountExists] query error:', error.message);
+    return false;
+  }
+
+  return Boolean(data);
+}
+
 // ── Server Actions ────────────────────────────────────────────────────────────
+
+/**
+ * Returns dashboard stats and enriched dividend positions for the authenticated
+ * user's household. Market data enrichment is read from dividend_ticker_data;
+ * missing ticker data degrades to zero values until the cache is refreshed.
+ */
+export async function getDividendDashboard(
+  currency = 'USD',
+  account?: string,
+): Promise<DividendDashboardData> {
+  const targetCurrency = typeof currency === 'string' && currency.trim()
+    ? currency.trim().toUpperCase()
+    : 'USD';
+  const accountFilter = typeof account === 'string' && account.trim() ? account.trim() : undefined;
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return emptyDashboard(targetCurrency);
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) return emptyDashboard(targetCurrency);
+
+  let positionsQuery = supabase
+    .from('dividend_positions')
+    .select('id, account, ticker, shares')
+    .eq('household_id', householdId);
+
+  if (accountFilter) positionsQuery = positionsQuery.eq('account', accountFilter);
+
+  const { data: positionRows, error: positionsError } = await positionsQuery
+    .order('ticker', { ascending: true });
+  if (positionsError) {
+    console.error('[getDividendDashboard] positions query error:', positionsError.message);
+    return emptyDashboard(targetCurrency);
+  }
+
+  const positions = ((positionRows ?? []) as DividendPositionRow[]).map(toDividendPosition);
+  if (!positions.length) return emptyDashboard(targetCurrency);
+
+  const tickers = [...new Set(positions.map((p) => p.ticker))];
+  const { data: tickerRows, error: tickerError } = await supabase
+    .from('dividend_ticker_data')
+    .select('ticker, price, currency, dividend_yield, dividend_rate, dgr_3y, dgr_5y')
+    .in('ticker', tickers);
+
+  if (tickerError) {
+    console.error('[getDividendDashboard] ticker query error:', tickerError.message);
+  }
+
+  const tickerDataBySymbol = new Map<string, DividendTickerDataRow>(
+    ((tickerRows ?? []) as DividendTickerDataRow[]).map((row) => [row.ticker, row]),
+  );
+
+  let totalValueTarget = 0;
+  let totalAnnualIncomeTarget = 0;
+  let dgr5yTotal = 0;
+  let dgr5yCount = 0;
+
+  const enrichedPositions = positions.map((position): EnrichedDividendPosition => {
+    const tickerData = tickerDataBySymbol.get(position.ticker);
+    const price = toNumber(tickerData?.price);
+    const tickerCurrency = tickerData?.currency?.trim().toUpperCase() || 'USD';
+    const dividendRate = toNumber(tickerData?.dividend_rate);
+    const dividendYield = toNumber(tickerData?.dividend_yield);
+    const dgr3y = toNumber(tickerData?.dgr_3y);
+    const dgr5y = toNumber(tickerData?.dgr_5y);
+    const annualIncome = position.shares * dividendRate;
+    const positionValue = position.shares * price;
+
+    totalValueTarget += convertCurrency(positionValue, tickerCurrency, targetCurrency);
+    totalAnnualIncomeTarget += convertCurrency(annualIncome, tickerCurrency, targetCurrency);
+
+    if (dgr5y !== 0) {
+      dgr5yTotal += dgr5y;
+      dgr5yCount += 1;
+    }
+
+    return {
+      ...position,
+      price: roundCurrency(price),
+      dividend_yield: dividendYield,
+      annual_income: roundCurrency(annualIncome),
+      dgr_3y: dgr3y,
+      dgr_5y: dgr5y,
+      currency: tickerCurrency,
+    };
+  });
+
+  return {
+    stats: {
+      portfolio_yield: totalValueTarget > 0 ? totalAnnualIncomeTarget / totalValueTarget : 0,
+      annual_income: roundCurrency(totalAnnualIncomeTarget),
+      dgr_5y: dgr5yCount > 0 ? dgr5yTotal / dgr5yCount : 0,
+      currency: targetCurrency,
+    },
+    positions: enrichedPositions,
+  };
+}
+
+/**
+ * Creates a dividend position for the authenticated user's household.
+ * Security: household_id is resolved from the session and enforced by RLS.
+ */
+export async function createDividendPosition(
+  payload: DividendPositionPayload,
+): Promise<DividendPositionResult> {
+  const normalized = normalizePositionPayload(payload);
+  if ('error' in normalized) return { ok: false, error: normalized.error };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return { ok: false, error: 'Not authenticated' };
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) {
+    return { ok: false, error: 'No active household found for your account' };
+  }
+
+  if (!(await dividendAccountExists(normalized.account, householdId))) {
+    return { ok: false, error: 'Dividend account not found' };
+  }
+
+  const { data, error } = await supabase
+    .from('dividend_positions')
+    .insert({ ...normalized, household_id: householdId })
+    .select('id, account, ticker, shares')
+    .single();
+
+  if (error || !data) {
+    console.error('[createDividendPosition] insert error:', error?.message);
+    return { ok: false, error: 'Failed to create position. Please try again.' };
+  }
+
+  return { ok: true, position: toDividendPosition(data as DividendPositionRow) };
+}
+
+/** Updates a dividend position in the authenticated user's household. */
+export async function updateDividendPosition(
+  id: number,
+  patch: DividendPositionPatch,
+): Promise<DividendPositionResult> {
+  const positionId = Number(id);
+  if (!Number.isInteger(positionId) || positionId <= 0) {
+    return { ok: false, error: 'Invalid position id' };
+  }
+
+  const normalized = normalizePositionPatch(patch);
+  if ('error' in normalized) return { ok: false, error: normalized.error };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return { ok: false, error: 'Not authenticated' };
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) {
+    return { ok: false, error: 'No active household found for your account' };
+  }
+
+  if (normalized.account && !(await dividendAccountExists(normalized.account, householdId))) {
+    return { ok: false, error: 'Dividend account not found' };
+  }
+
+  const { data, error } = await supabase
+    .from('dividend_positions')
+    .update(normalized)
+    .eq('id', positionId)
+    .eq('household_id', householdId)
+    .select('id, account, ticker, shares')
+    .maybeSingle();
+
+  if (error) {
+    console.error('[updateDividendPosition] update error:', error.message);
+    return { ok: false, error: 'Failed to update position. Please try again.' };
+  }
+  if (!data) return { ok: false, error: 'Position not found' };
+
+  return { ok: true, position: toDividendPosition(data as DividendPositionRow) };
+}
+
+/** Deletes a dividend position from the authenticated user's household. */
+export async function deleteDividendPosition(
+  id: number,
+): Promise<DeleteDividendPositionResult> {
+  const positionId = Number(id);
+  if (!Number.isInteger(positionId) || positionId <= 0) {
+    return { ok: false, error: 'Invalid position id' };
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return { ok: false, error: 'Not authenticated' };
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) {
+    return { ok: false, error: 'No active household found for your account' };
+  }
+
+  const { data, error } = await supabase
+    .from('dividend_positions')
+    .delete()
+    .eq('id', positionId)
+    .eq('household_id', householdId)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    console.error('[deleteDividendPosition] delete error:', error.message);
+    return { ok: false, error: 'Failed to delete position. Please try again.' };
+  }
+  if (!data) return { ok: false, error: 'Position not found' };
+
+  return { ok: true };
+}
 
 /**
  * Returns all dividend account names for the authenticated user's household.

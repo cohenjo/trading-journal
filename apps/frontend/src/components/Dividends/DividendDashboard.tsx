@@ -1,5 +1,4 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import StatsRow from "./StatsRow";
@@ -9,6 +8,13 @@ import AccountSettings from "./AccountSettings";
 import DeleteConfirmationModal from "./DeleteConfirmationModal";
 import { useSettings } from "../../app/settings/SettingsContext";
 import { convertCurrency } from "@/lib/currency";
+import {
+    createDividendPosition,
+    deleteDividendPosition,
+    getDividendAccounts,
+    getDividendDashboard,
+    updateDividendPosition,
+} from "@/app/dividends/actions";
 
 export default function DividendDashboard() {
     const { settings } = useSettings();
@@ -31,22 +37,17 @@ export default function DividendDashboard() {
     });
     const [isDeleting, setIsDeleting] = useState(false);
 
-    // Fetch data from dashboard endpoint (returns stats + positions)
+    // Fetch dashboard data and account names via Server Actions.
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await apiFetch(`/api/dividends/dashboard?currency=${settings.mainCurrency}`);
-            if (res.ok) {
-                const data = await res.json();
-                setStats(data.stats);
-                setPositions(data.positions);
-                
-                // Extract unique accounts from positions
-                const uniqueAccounts = Array.from(
-                    new Set(data.positions.map((p: Position) => p.account))
-                ).sort();
-                setAccounts(uniqueAccounts);
-            }
+            const [dashboard, accountNames] = await Promise.all([
+                getDividendDashboard(settings.mainCurrency),
+                getDividendAccounts(),
+            ]);
+            setStats(dashboard.stats);
+            setPositions(dashboard.positions);
+            setAccounts(accountNames);
         } catch (err) {
             console.error("Error fetching dividend dashboard:", err);
         } finally {
@@ -109,25 +110,24 @@ export default function DividendDashboard() {
 
     const handleSavePosition = async (posData: { account: string; ticker: string; shares: number; id?: number }) => {
         try {
-            const method = posData.id ? "PUT" : "POST";
-            const url = posData.id ? `/api/dividends/position/${posData.id}` : "/api/dividends/position";
-
-            const res = await apiFetch(url, {
-                method,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+            const result = posData.id
+                ? await updateDividendPosition(posData.id, {
                     account: posData.account,
                     ticker: posData.ticker,
-                    shares: posData.shares
+                    shares: posData.shares,
                 })
-            });
+                : await createDividendPosition({
+                    account: posData.account,
+                    ticker: posData.ticker,
+                    shares: posData.shares,
+                });
 
-            if (res.ok) {
+            if (result.ok) {
                 await fetchData();
                 setIsAddModalOpen(false);
                 setEditingPosition(null);
             } else {
-                console.error("Failed to save position");
+                console.error("Failed to save position:", result.error);
             }
         } catch (err) {
             console.error("Error saving position:", err);
@@ -142,10 +142,12 @@ export default function DividendDashboard() {
         if (!deleteModal.id) return;
         setIsDeleting(true);
         try {
-            const res = await apiFetch(`/api/dividends/position/${deleteModal.id}`, { method: "DELETE" });
-            if (res.ok) {
+            const result = await deleteDividendPosition(deleteModal.id);
+            if (result.ok) {
                 setPositions(prev => prev.filter(p => p.id !== deleteModal.id));
                 setDeleteModal({ isOpen: false, id: null });
+            } else {
+                console.error("Failed to delete position:", result.error);
             }
         } catch (err) {
             console.error("Error deleting position:", err);
@@ -211,7 +213,7 @@ export default function DividendDashboard() {
             {loading ? (
                 <div className="text-center py-12 text-slate-500 animate-pulse">Loading dashboard...</div>
             ) : activeTab === "Settings" ? (
-                <AccountSettings onAccountsChange={() => { fetchAccounts(); fetchData(); }} />
+                <AccountSettings onAccountsChange={() => { fetchData(); }} />
             ) : (
                 <>
                     <StatsRow stats={displayedStats} />

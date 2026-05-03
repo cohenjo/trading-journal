@@ -3,9 +3,15 @@ import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState, useMemo } from "react";
 import { useSettings } from "../settings/SettingsContext";
+import { getDividendDashboard } from "@/app/dividends/actions";
 import StackedIncomeChart, { StackedChartData } from "../../components/Summary/StackedIncomeChart";
 import { getLadderIncome } from "../ladder/actions";
 import type { IncomePoint } from "@/components/Ladder/types";
+
+interface YearAmountPoint {
+  year: number;
+  amount: number;
+}
 
 export default function SummaryPage() {
   const { settings } = useSettings();
@@ -44,14 +50,17 @@ export default function SummaryPage() {
         if (!ladderResult.ok) throw new Error(ladderResult.error);
         const ladderSeries: IncomePoint[] = ladderResult.data.income_series;
 
-        // 2. Fetch Dividend Projection
-        const divRes = await apiFetch("/api/dividends/projection", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(divParams),
-        });
-        const divJson = await divRes.json();
-        const divData = (divJson.data || []) as { year: number; amount: number }[];
+        // 2. Project dividends from the current dashboard annual income.
+        const dividendDashboard = await getDividendDashboard(settings.mainCurrency);
+        let projectedDividendAmount = dividendDashboard.stats.annual_income;
+        const divData: YearAmountPoint[] = [];
+        const currentYear = new Date().getFullYear();
+        for (let year = currentYear; year <= divParams.final_year; year += 1) {
+          if (year > currentYear) {
+            projectedDividendAmount *= 1 + divParams.growth_rate + (divParams.yield_rate * divParams.reinvest_rate);
+          }
+          divData.push({ year, amount: Math.round(projectedDividendAmount * 100) / 100 });
+        }
 
         // 3. Fetch Options Projection
         const optRes = await apiFetch("/api/options/projection", {
@@ -60,14 +69,14 @@ export default function SummaryPage() {
           body: JSON.stringify(optParams),
         });
         const optJson = await optRes.json();
-        const optData = (optJson.data || []) as { year: number; amount: number }[];
+        const optData = (optJson.data || []) as YearAmountPoint[];
 
         // Merge Data
         // Find range of years
         const years = new Set<number>();
         ladderSeries.forEach((d) => years.add(new Date(d.date).getFullYear()));
-        divData.forEach((d: { year: number }) => years.add(d.year));
-        optData.forEach((d: { year: number }) => years.add(d.year));
+        divData.forEach((d) => years.add(d.year));
+        optData.forEach((d) => years.add(d.year));
 
         const maxYear = Math.min(divParams.final_year, optParams.final_year);
         const sortedYears = Array.from(years)
@@ -76,8 +85,8 @@ export default function SummaryPage() {
 
         // Create map for quick lookup
         const ladderMap = new Map(ladderSeries.map((d) => [new Date(d.date).getFullYear(), d.value]));
-        const divMap = new Map(divData.map((d: { year: number; amount: number }) => [d.year, d.amount]));
-        const optMap = new Map(optData.map((d: { year: number; amount: number }) => [d.year, d.amount]));
+        const divMap = new Map(divData.map((d) => [d.year, d.amount]));
+        const optMap = new Map(optData.map((d) => [d.year, d.amount]));
 
         const merged: StackedChartData[] = sortedYears.map(year => ({
           time: `${year}-01-01`,
@@ -94,7 +103,7 @@ export default function SummaryPage() {
     };
 
     fetchData();
-  }, [divParams, optParams]);
+  }, [divParams, optParams, settings.mainCurrency]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">

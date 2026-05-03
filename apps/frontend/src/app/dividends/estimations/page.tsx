@@ -1,5 +1,4 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import { useState, useEffect, useMemo } from "react";
 import DividendChart, { DividendChartPoint } from "../../../components/Dividends/DividendChart";
@@ -36,51 +35,40 @@ export default function DividendEstimationsPage() {
         });
     };
 
-    // Fetch historical data on mount
+    // Projection is computed client-side now that the legacy FastAPI XLSX
+    // endpoints have been removed from the frontend path.
     useEffect(() => {
-        apiFetch("/api/dividends")
-            .then((res) => res.json())
-            .then((data) => {
-                setHistoricalData(data);
-            })
-            .catch((err) => console.error("Failed to fetch dividends:", err));
-    }, []);
+        const historicalPoints: DividendChartPoint[] = historicalData.map((record) => ({
+            time: `${record.year}-01-01`,
+            value: record.amount,
+            type: 'historical',
+        }));
 
-    // Fetch projection whenever params or historical data changes
-    useEffect(() => {
-        if (historicalData.length === 0) return;
+        if (historicalData.length === 0) {
+            setChartData([]);
+            return;
+        }
 
-        apiFetch("/api/dividends/projection", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(params),
-        })
-            .then((res) => res.json())
-            .then((response) => {
-                const points = response.data.map((p: any) => ({
-                    time: `${p.year}-01-01`, // Format for lightweight-charts
-                    value: p.amount,
-                    type: p.type,
-                }));
-                setChartData(points);
-            })
-            .catch((err) => console.error("Failed to fetch projection:", err));
+        const sortedHistory = [...historicalData].sort((a, b) => a.year - b.year);
+        const lastHistorical = sortedHistory[sortedHistory.length - 1];
+        const projectedPoints: DividendChartPoint[] = [];
+        let projectedAmount = lastHistorical.amount;
+
+        for (let year = lastHistorical.year + 1; year <= params.final_year; year += 1) {
+            const reinvestedGrowth = params.yield_rate * params.reinvest_rate;
+            projectedAmount *= 1 + params.growth_rate + reinvestedGrowth;
+            projectedPoints.push({
+                time: `${year}-01-01`,
+                value: Math.round(projectedAmount * 100) / 100,
+                type: 'projected',
+            });
+        }
+
+        setChartData([...historicalPoints, ...projectedPoints]);
     }, [historicalData, params]);
 
-    const handleSaveHistory = async (newData: DividendRecord[]) => {
-        try {
-            const res = await apiFetch("/api/dividends", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newData),
-            });
-            if (res.ok) {
-                const savedData = await res.json();
-                setHistoricalData(savedData);
-            }
-        } catch (err) {
-            console.error("Failed to save dividends:", err);
-        }
+    const handleSaveHistory = (newData: DividendRecord[]) => {
+        setHistoricalData(newData);
     };
 
     return (
