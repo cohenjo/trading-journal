@@ -19,11 +19,15 @@ vi.mock('@/lib/supabase/server', () => ({
 }));
 
 import {
+  getDividendDashboard,
   getDividendAccounts,
   getImportableAccounts,
   createDividendAccount,
   importDividendAccount,
   deleteDividendAccount,
+  createDividendPosition,
+  updateDividendPosition,
+  deleteDividendPosition,
 } from './actions';
 import { createClient } from '@/lib/supabase/server';
 
@@ -47,6 +51,78 @@ function authOk() {
 function authFail() {
   mockGetUser.mockResolvedValue({ data: { user: null }, error: new Error('no session') });
 }
+
+function mockHouseholdMembersTable() {
+  return {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockResolvedValue({ data: HOUSEHOLD_ROW, error: null }),
+  };
+}
+
+// ── getDividendDashboard ──────────────────────────────────────────────────────
+
+describe('getDividendDashboard', () => {
+  it('returns empty dashboard when not authenticated', async () => {
+    authFail();
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn(),
+    });
+
+    const result = await getDividendDashboard('ILS');
+    expect(result).toEqual({
+      stats: { portfolio_yield: 0, annual_income: 0, dgr_5y: 0, currency: 'ILS' },
+      positions: [],
+    });
+  });
+
+  it('enriches positions with ticker data and aggregates stats in target currency', async () => {
+    authOk();
+    const positionRows = [
+      { id: 1, account: 'Brokerage', ticker: 'AAPL', shares: '10' },
+      { id: 2, account: 'Brokerage', ticker: 'MSFT', shares: 5 },
+    ];
+    const tickerRows = [
+      { ticker: 'AAPL', price: '100', currency: 'USD', dividend_yield: '0.02', dividend_rate: '2', dgr_3y: '0.05', dgr_5y: '0.07' },
+      { ticker: 'MSFT', price: '200', currency: 'USD', dividend_yield: '0.03', dividend_rate: '4', dgr_3y: '0.04', dgr_5y: '0.09' },
+    ];
+
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_positions') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            order: vi.fn().mockResolvedValue({ data: positionRows, error: null }),
+          };
+        }
+        if (table === 'dividend_ticker_data') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            in: vi.fn().mockResolvedValue({ data: tickerRows, error: null }),
+          };
+        }
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    });
+
+    const result = await getDividendDashboard('USD');
+
+    expect(result.positions).toHaveLength(2);
+    expect(result.positions[0]).toMatchObject({
+      id: 1, account: 'Brokerage', ticker: 'AAPL', shares: 10, price: 100,
+      annual_income: 20, dividend_yield: 0.02, currency: 'USD',
+    });
+    expect(result.stats.annual_income).toBe(40);
+    expect(result.stats.portfolio_yield).toBeCloseTo(0.02);
+    expect(result.stats.dgr_5y).toBeCloseTo(0.08);
+  });
+});
 
 // ── getDividendAccounts ───────────────────────────────────────────────────────
 
@@ -514,6 +590,127 @@ describe('importDividendAccount', () => {
     const result = await importDividendAccount('88', 'Unvested RSU');
     expect(result.ok).toBe(true);
     expect(mockInsertPosition).not.toHaveBeenCalled();
+  });
+});
+
+// ── dividend position CRUD ────────────────────────────────────────────────────
+
+describe('dividend position CRUD actions', () => {
+  it('createDividendPosition writes household-scoped row and returns normalized position', async () => {
+    authOk();
+    const mockInsert = vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        single: vi.fn().mockResolvedValue({
+          data: { id: 10, account: 'Brokerage', ticker: 'AAPL', shares: '12.5' },
+          error: null,
+        }),
+      }),
+    });
+
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_accounts') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: { name: 'Brokerage' }, error: null }),
+          };
+        }
+        if (table === 'dividend_positions') return { insert: mockInsert };
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    });
+
+    const result = await createDividendPosition({ account: ' Brokerage ', ticker: 'aapl', shares: 12.5 });
+
+    expect(result.ok).toBe(true);
+    expect(mockInsert).toHaveBeenCalledWith({
+      account: 'Brokerage', ticker: 'AAPL', shares: 12.5, household_id: MOCK_HOUSEHOLD_ID,
+    });
+    if (result.ok) expect(result.position.shares).toBe(12.5);
+  });
+
+  it('createDividendPosition rejects unknown household account', async () => {
+    authOk();
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_accounts') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          };
+        }
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    });
+
+    const result = await createDividendPosition({ account: 'Ghost', ticker: 'MSFT', shares: 1 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/account not found/i);
+  });
+
+  it('updateDividendPosition updates only the household-scoped row', async () => {
+    authOk();
+    const mockUpdate = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            maybeSingle: vi.fn().mockResolvedValue({ data: { id: 7, account: 'Brokerage', ticker: 'MSFT', shares: 3 }, error: null }),
+          }),
+        }),
+      }),
+    });
+
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_accounts') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({ data: { name: 'Brokerage' }, error: null }),
+          };
+        }
+        if (table === 'dividend_positions') return { update: mockUpdate };
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    });
+
+    const result = await updateDividendPosition(7, { account: 'Brokerage', ticker: 'msft', shares: 3 });
+
+    expect(result.ok).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledWith({ account: 'Brokerage', ticker: 'MSFT', shares: 3 });
+    if (result.ok) expect(result.position.ticker).toBe('MSFT');
+  });
+
+  it('deleteDividendPosition deletes only the household-scoped row', async () => {
+    authOk();
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: 9 }, error: null });
+    const mockDelete = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({ select: vi.fn().mockReturnValue({ maybeSingle }) }),
+      }),
+    });
+
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_positions') return { delete: mockDelete };
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    });
+
+    const result = await deleteDividendPosition(9);
+    expect(result.ok).toBe(true);
+    expect(mockDelete).toHaveBeenCalledOnce();
+    expect(maybeSingle).toHaveBeenCalledOnce();
   });
 });
 

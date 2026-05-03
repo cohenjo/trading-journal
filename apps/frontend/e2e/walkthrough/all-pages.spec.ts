@@ -23,7 +23,8 @@ const UNMIGRATED_FASTAPI_PATHS = [
   '/api/finances/history',
   '/api/options/projection',
   '/api/backtest',
-  '/api/dividends',
+  '/api/pension',
+  '/api/holdings',
 ];
 
 /**
@@ -55,7 +56,6 @@ function isKnownAcceptableConsoleError(text: string): boolean {
   if (text.includes('Failed to fetch history')) return true;
   if (text.includes('Failed to fetch summary data')) return true;
   if (text.includes('Failed to fetch years')) return true;
-  if (text.includes('Failed to fetch dividends')) return true;
 
   // Generic browser console companion of the 404s we already allow-list above.
   // The browser logs "Failed to load resource: ... 404" without the URL, so we
