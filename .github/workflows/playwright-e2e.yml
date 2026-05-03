@@ -76,6 +76,15 @@ jobs:
       - name: Install Playwright browsers (Chromium only)
         run: npx playwright install --with-deps chromium
 
+      - name: Build Next.js
+        # next start (the playwright webServer fallback) requires a .next build
+        # artefact.  When BASE_URL points to a deployed target the build is
+        # unused but keeps the job hermetic and validates env vars early.
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+
       - name: Run smoke + auth tests
         run: npx playwright test --grep "@smoke|@auth" --project=chromium
         env:
@@ -84,6 +93,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_E2E_ALLOW_PROD: 'true'
           E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
           E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
 
@@ -130,6 +140,12 @@ jobs:
       - name: Install Playwright browsers (Chromium only)
         run: npx playwright install --with-deps chromium
 
+      - name: Build Next.js
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+
       - name: Run full suite
         run: npx playwright test --grep "@smoke|@auth|@flow" --project=chromium
         env:
@@ -138,6 +154,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_E2E_ALLOW_PROD: 'true'
           E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
           E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
 
@@ -210,6 +227,12 @@ jobs:
       - name: Install Playwright browsers (Chromium only)
         run: npx playwright install --with-deps chromium
 
+      - name: Build Next.js
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+
       - name: Resolve grep pattern
         id: grep
         shell: bash
@@ -229,6 +252,7 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_E2E_ALLOW_PROD: 'true'
           E2E_TEST_USER_EMAIL: ${{ secrets.E2E_TEST_USER_EMAIL }}
           E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
 
