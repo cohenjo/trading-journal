@@ -10,6 +10,7 @@ from app.data.options_xlsx import load_options, save_options
 
 router = APIRouter()
 
+
 @router.get("/options", response_model=List[OptionsRecord])
 def get_options_income():
     """Return all historical options income records."""
@@ -23,9 +24,9 @@ def update_options_income(records: List[OptionsRecord]):
     return records
 
 
-@router.post("/options/projection", response_model=OptionsProjectionResponse)
+@router.post("/options/projection", response_model=OptionsProjectionResponse, deprecated=True)
 def get_options_projection(params: OptionsProjectionParams):
-    """Project future options income based on growth rate and cutoff year."""
+    """Deprecated: use the Next.js getOptionsProjection Server Action."""
     historical = load_options()
 
     if not historical:
@@ -41,8 +42,7 @@ def get_options_projection(params: OptionsProjectionParams):
     if base_amount <= 0:
         # If average is zero or negative, just return historical
         points: List[OptionsProjectionPoint] = [
-            OptionsProjectionPoint(year=r.year, amount=r.amount, type="historical")
-            for r in historical
+            OptionsProjectionPoint(year=r.year, amount=r.amount, type="historical") for r in historical
         ]
         return OptionsProjectionResponse(data=points)
 

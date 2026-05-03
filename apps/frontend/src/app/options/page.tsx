@@ -1,7 +1,6 @@
 "use client";
 
-import { apiFetch } from '@/lib/api-client';
-import { createOptionsRecord, listOptionsRecords } from './actions';
+import { createOptionsRecord, getOptionsProjection, listOptionsRecords } from './actions';
 import { useEffect, useMemo, useState } from "react";
 import OptionsChart, { OptionsChartPoint } from "../../components/Options/OptionsChart";
 import OptionsHistory, { OptionsRecord } from "../../components/Options/OptionsHistory";
@@ -58,35 +57,35 @@ export default function OptionsPage() {
   }, []);
 
   useEffect(() => {
-    if (historicalData.length === 0) return;
+    let cancelled = false;
 
-    apiFetch("/api/options/projection", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
-    })
-      .then((res) => res.json())
-      .then((response) => {
-        if (Array.isArray(response.data) && response.data.length > 0) {
-          const hist = response.data.filter((p: { type: string }) => p.type === "historical");
-          if (hist.length > 0) {
-            const avg =
-              hist.reduce((sum: number, p: { amount: number }) => sum + p.amount, 0) / hist.length;
-            setAverage(avg);
-          } else {
-            setAverage(null);
-          }
-        } else {
-          setAverage(null);
-        }
-        const points: OptionsChartPoint[] = response.data.map((p: { year: number; amount: number; type: string }) => ({
-          time: `${p.year}-01-01`,
-          value: p.amount,
-          type: p.type,
+    async function loadProjection() {
+      try {
+        const response = await getOptionsProjection(params);
+        if (cancelled) return;
+
+        const hist = response.data.filter((point) => point.type === "historical");
+        setAverage(
+          hist.length > 0
+            ? hist.reduce((sum, point) => sum + point.amount, 0) / hist.length
+            : null,
+        );
+
+        const points: OptionsChartPoint[] = response.data.map((point) => ({
+          time: `${point.year}-01-01`,
+          value: point.amount,
+          type: point.type,
         }));
         setChartData(points);
-      })
-      .catch((err) => console.error("Failed to fetch options projection:", err));
+      } catch (err) {
+        console.error("Failed to fetch options projection:", err);
+      }
+    }
+
+    void loadProjection();
+    return () => {
+      cancelled = true;
+    };
   }, [historicalData, params]);
 
   const handleSaveHistory = async (newData: OptionsRecord[]) => {

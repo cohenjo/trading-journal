@@ -1,11 +1,11 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import { useEffect, useState, useMemo } from "react";
 import { useSettings } from "../settings/SettingsContext";
 import { getDividendDashboard } from "@/app/dividends/actions";
 import StackedIncomeChart, { StackedChartData } from "../../components/Summary/StackedIncomeChart";
 import { getLadderIncome } from "../ladder/actions";
+import { getOptionsProjection } from "../options/actions";
 import type { IncomePoint } from "@/components/Ladder/types";
 
 interface YearAmountPoint {
@@ -63,13 +63,8 @@ export default function SummaryPage() {
         }
 
         // 3. Fetch Options Projection
-        const optRes = await apiFetch("/api/options/projection", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(optParams),
-        });
-        const optJson = await optRes.json();
-        const optData = (optJson.data || []) as YearAmountPoint[];
+        const optionsProjection = await getOptionsProjection(optParams);
+        const optData: YearAmountPoint[] = optionsProjection.data;
 
         // Merge Data
         // Find range of years
