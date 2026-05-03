@@ -14,10 +14,7 @@ const PAGES = [
  * TJ-020 Phase B migrations in #208-#217 land.
  */
 const TEMPORARILY_ALLOWED_COMPUTE_API_PATHS: string[] = [
-  '/api/tax-condor',
   '/api/backtest',
-  '/api/bonds/scanner',
-  '/api/ndx/sync',
   '/api/pension',
 ];
 
