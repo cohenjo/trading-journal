@@ -1,0 +1,257 @@
+import { describe, expect, it } from 'vitest';
+
+import { runPlanSimulation } from '../actions';
+import type { PlanData, PlanItem } from '@/components/Plan/types';
+
+const CURRENT_YEAR = new Date().getFullYear();
+const SETTINGS = { primaryUser: { birthYear: 1990 }, mainCurrency: 'ILS' };
+const EMPTY_FINANCES = { data: { items: [] } };
+
+function baseItem(overrides: Partial<PlanItem>): PlanItem {
+  return {
+    id: 'item',
+    name: 'Item',
+    category: 'Income',
+    owner: 'You',
+    currency: 'ILS',
+    value: 0,
+    growth_rate: 0,
+    frequency: 'Yearly',
+    ...overrides,
+  };
+}
+
+function accountSettings(overrides: Partial<NonNullable<PlanItem['account_settings']>> = {}): NonNullable<PlanItem['account_settings']> {
+  return {
+    type: 'Broker',
+    bond_allocation: 0,
+    dividend_yield: 0,
+    fees: 0,
+    ...overrides,
+  };
+}
+
+async function simulate(plan: PlanData) {
+  return runPlanSimulation({ plan, finances: EMPTY_FINANCES, settings: SETTINGS });
+}
+
+describe('runPlanSimulation', () => {
+  it('ports backend granular withdrawal details from an RSU account', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'exp1',
+          name: 'Big Expense',
+          category: 'Expense',
+          value: 50_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+        baseItem({
+          id: 'acc1',
+          name: 'My RSU',
+          category: 'Account',
+          value: 100_000,
+          account_settings: accountSettings({ type: 'RSU', withdrawal_priority: 1 }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    expect(result[0]).toMatchObject({
+      year: CURRENT_YEAR,
+      net_worth: 50_000,
+      liquid_net_worth: 50_000,
+      expenses: 50_000,
+      withdrawals: 50_000,
+      withdrawal_details: [
+        { name: 'Withdrawal: My RSU', type: 'Portfolio Withdrawal', value: 50_000 },
+      ],
+    });
+    expect(result[0].accounts[0]).toMatchObject({ name: 'My RSU', type: 'RSU', value: 50_000 });
+  });
+
+  it('ports backend unallocated-cash withdrawal behavior', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'inc1',
+          name: 'Big Income',
+          category: 'Income',
+          value: 100_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+          end_condition: 'Date',
+          end_date: `${CURRENT_YEAR}-12-31`,
+        }),
+        baseItem({
+          id: 'exp1',
+          name: 'Big Expense',
+          category: 'Expense',
+          value: 50_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR + 1}-01-01`,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    expect(result[0]).toMatchObject({ net_worth: 100_000, income: 100_000, withdrawals: 0 });
+    expect(result[0].savings_details).toEqual([
+      { name: 'Unallocated Cash', type: 'Cash', value: 100_000 },
+    ]);
+    expect(result[1]).toMatchObject({
+      net_worth: 52_000,
+      expenses: 50_000,
+      withdrawals: 50_000,
+      withdrawal_details: [
+        { name: 'Withdrawal: Unallocated Cash', type: 'Portfolio Withdrawal', value: 50_000 },
+      ],
+    });
+  });
+
+  it('matches backend income, tax, dividend display, and savings allocation', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'inc',
+          name: 'Salary',
+          category: 'Income',
+          sub_category: 'Salary',
+          value: 10_000,
+          tax_rate: 10,
+          frequency: 'Monthly',
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+        baseItem({
+          id: 'exp',
+          name: 'Rent',
+          category: 'Expense',
+          value: 5_000,
+          frequency: 'Monthly',
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+        baseItem({
+          id: 'acc',
+          name: 'Brokerage',
+          category: 'Account',
+          value: 100_000,
+          growth_rate: 5,
+          account_settings: accountSettings({ type: 'Broker', dividend_yield: 2, dividend_policy: 'Accumulate', fees: 1 }),
+          inflow_priority: 1,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    expect(result[0]).toMatchObject({
+      net_worth: 150_000,
+      income: 122_000,
+      tax_paid: 12_000,
+      expenses: 60_000,
+      total_dividend_income: 2_000,
+    });
+    expect(result[0].income_details).toContainEqual({ name: 'Salary', type: 'Salary', value: 120_000 });
+    expect(result[0].income_details).toContainEqual({ name: 'Dividend: Brokerage', type: 'Dividend Income', gross: 2_000, value: 2_000 });
+    expect(result[1]).toMatchObject({ net_worth: 207_000, income: 120_000, tax_paid: 12_000 });
+  });
+
+  it('handles an empty plan through the full horizon', async () => {
+    const result = await simulate({ items: [], milestones: [], settings: {} });
+    expect(result).toHaveLength(1990 + 95 - CURRENT_YEAR + 1);
+    expect(result[0]).toMatchObject({
+      year: CURRENT_YEAR,
+      age: CURRENT_YEAR - 1990,
+      net_worth: 0,
+      income: 0,
+      expenses: 0,
+      withdrawals: 0,
+    });
+    expect(result.at(-1)).toMatchObject({ year: 2085, age: 95, net_worth: 0 });
+  });
+
+  it('handles zero contributions without changing pension principal', async () => {
+    const result = await simulate({
+      items: [
+        baseItem({
+          id: 'pension',
+          name: 'Pension',
+          category: 'Account',
+          value: 100_000,
+          account_settings: accountSettings({ type: 'Pension', monthly_contribution: 0, draw_income: false }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    });
+
+    expect(result[0]).toMatchObject({ net_worth: 100_000, liquid_net_worth: 0 });
+    expect(result[2].accounts[0]).toMatchObject({ name: 'Pension', value: 100_000 });
+  });
+
+  it('applies negative returns deterministically', async () => {
+    const result = await simulate({
+      items: [
+        baseItem({
+          id: 'bear',
+          name: 'Bear Fund',
+          category: 'Account',
+          value: 100_000,
+          growth_rate: -10,
+          account_settings: accountSettings({ type: 'Broker' }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    });
+
+    expect(result[0].net_worth).toBe(100_000);
+    expect(result[1].net_worth).toBe(90_000);
+    expect(result[2].net_worth).toBe(81_000);
+  });
+
+  it('supports very long horizons without overflow', async () => {
+    const birthYear = CURRENT_YEAR - 1;
+    const result = await runPlanSimulation({
+      plan: {
+        items: [baseItem({ id: 'cash', name: 'Cash', category: 'Account', value: 1_000, growth_rate: 1, account_settings: accountSettings({ type: 'Savings' }) })],
+        milestones: [],
+        settings: {},
+      },
+      finances: EMPTY_FINANCES,
+      settings: { primaryUser: { birthYear }, mainCurrency: 'ILS' },
+    });
+
+    expect(result.length).toBeGreaterThan(90);
+    expect(result.at(-1)?.age).toBe(95);
+    expect(Number.isFinite(result.at(-1)?.net_worth ?? Number.NaN)).toBe(true);
+  });
+
+  it('keeps decimal precision within one cent', async () => {
+    const result = await simulate({
+      items: [
+        baseItem({
+          id: 'micro-income',
+          name: 'Micro Income',
+          category: 'Income',
+          value: 0.1,
+          frequency: 'Monthly',
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    });
+
+    expect(result[0].net_worth).toBeCloseTo(1.2, 2);
+  });
+});

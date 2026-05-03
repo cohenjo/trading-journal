@@ -1,10 +1,9 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSettings } from '../settings/SettingsContext';
 import { CashFlowSankey } from '@/components/CashFlow/CashFlowSankey';
 import { PlanData } from '@/components/Plan/types';
-import { getLatestPlan } from '../plan/actions';
+import { getLatestPlan, runPlanSimulation } from '../plan/actions';
 import { getLatestFinanceSnapshot } from '../finances/actions';
 
 export default function CashFlowPage() {
@@ -30,25 +29,13 @@ export default function CashFlowPage() {
 
         // Debounce slightly
         const timer = setTimeout(() => {
-            apiFetch('/api/plans/simulate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    plan: plan.data,
-                    finances: finances,
-                    settings: settings
-                })
+            runPlanSimulation({
+                plan: plan.data,
+                finances,
+                settings: settings as unknown as Record<string, unknown>,
             })
-                .then(async res => {
-                    if (!res.ok) {
-                        const txt = await res.text();
-                        console.error("Simulation failed response:", txt);
-                        throw new Error("Simulation failed: " + txt);
-                    }
-                    return res.json();
-                })
                 .then(data => {
-                    const formatted = data.map((p: any) => ({
+                    const formatted = data.map(p => ({
                         time: `${p.year}-01-01`,
                         value: p.net_worth,
                         ...p
@@ -57,12 +44,12 @@ export default function CashFlowPage() {
                     if (formatted.length > 0) {
                         // If selected year is invalid, reset to start
                         setSelectedYear(prev => {
-                            const exists = formatted.find((p: any) => p.year === prev);
+                            const exists = formatted.find(p => p.year === prev);
                             return exists ? prev : formatted[0].year;
                         });
                     }
                 })
-                .catch(err => console.error("Simulation error:", err));
+                .catch(err => console.error("Cash-flow simulation Server Action error:", err));
         }, 300);
 
         return () => clearTimeout(timer);
