@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTickerAnalysis } from "@/app/analyze/actions";
 import { useState, useEffect, useCallback } from "react";
 
 export interface SynthesisData {
@@ -15,8 +15,6 @@ interface UseSynthesisReturn {
   refetch: () => void;
 }
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-
 export function useSynthesis(ticker: string): UseSynthesisReturn {
   const [data, setData] = useState<SynthesisData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -27,12 +25,11 @@ export function useSynthesis(ticker: string): UseSynthesisReturn {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(`${apiUrl}/api/analyze/synthesis/${ticker}`);
-      if (!res.ok) {
-        throw new Error(`API error (${res.status})`);
-      }
-      const json = await res.json();
-      setData(json);
+      const result = await getTickerAnalysis(ticker);
+      if (!result.ok) throw new Error(result.error);
+      const synthesis = result.data?.data.sections?.synthesis as SynthesisData | undefined;
+      if (!synthesis) throw new Error(`No cached synthesis for "${ticker}" yet`);
+      setData(synthesis);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch synthesis");
       setData(null);

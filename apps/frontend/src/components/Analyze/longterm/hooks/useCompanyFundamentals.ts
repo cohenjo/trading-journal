@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTickerAnalysis } from "@/app/analyze/actions";
 import { useState, useEffect, useCallback } from "react";
 
 export interface DcfInputs {
@@ -38,30 +38,36 @@ interface UseFundamentalsReturn {
   data: FundamentalsData | null;
   loading: boolean;
   error: string | null;
+  refreshedAt: string | null;
+  isStale: boolean;
   refetch: () => void;
 }
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
 
 export function useCompanyFundamentals(ticker: string): UseFundamentalsReturn {
   const [data, setData] = useState<FundamentalsData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState(false);
 
   const fetchData = useCallback(async () => {
     if (!ticker) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(`${apiUrl}/api/analyze/fundamentals/${ticker}`);
-      if (!res.ok) {
-        throw new Error(res.status === 404 ? `Ticker "${ticker}" not found` : `API error (${res.status})`);
-      }
-      const json = await res.json();
-      setData(json);
+      const result = await getTickerAnalysis(ticker);
+      if (!result.ok) throw new Error(result.error);
+      const row = result.data;
+      const fundamentals = row?.data.sections?.fundamentals as FundamentalsData | undefined;
+      if (!row || !fundamentals) throw new Error(`No cached analysis for "${ticker}" yet`);
+      setData(fundamentals);
+      setRefreshedAt(row.refreshed_at);
+      setIsStale(row.isStale);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch fundamentals");
       setData(null);
+      setRefreshedAt(null);
+      setIsStale(false);
     } finally {
       setLoading(false);
     }
@@ -71,5 +77,5 @@ export function useCompanyFundamentals(ticker: string): UseFundamentalsReturn {
     fetchData();
   }, [fetchData]);
 
-  return { data, loading, error, refetch: fetchData };
+  return { data, loading, error, refreshedAt, isStale, refetch: fetchData };
 }

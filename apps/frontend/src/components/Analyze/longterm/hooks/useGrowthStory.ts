@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { listGrowthStories } from "@/app/analyze/actions";
 import { useState, useCallback, useRef, useEffect } from "react";
 
 export interface ScenarioData {
@@ -38,8 +38,6 @@ interface UseGrowthStoryReturn {
   generate: () => void;
 }
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-
 export function useGrowthStory(ticker: string): UseGrowthStoryReturn {
   const [data, setData] = useState<GrowthStoryData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -71,14 +69,11 @@ export function useGrowthStory(ticker: string): UseGrowthStoryReturn {
     }, 1000);
 
     try {
-      const res = await apiFetch(`${apiUrl}/api/analyze/growth-story/${ticker}`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        throw new Error(`API error (${res.status})`);
-      }
-      const json: GrowthStoryData = await res.json();
-      setData(json);
+      const result = await listGrowthStories({ ticker, limit: 1 });
+      if (!result.ok) throw new Error(result.error);
+      const story = result.data[0]?.story as unknown as GrowthStoryData | undefined;
+      if (!story) throw new Error(`No cached growth story for "${ticker}" yet`);
+      setData(story);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to generate growth story"

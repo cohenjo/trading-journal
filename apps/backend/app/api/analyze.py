@@ -36,12 +36,13 @@ from app.services.growth_story import generate_growth_story
 
 logger = logging.getLogger("trading_journal.analyze")
 
-router = APIRouter(prefix="/api/analyze", tags=["analyze"])
+router = APIRouter(prefix="/api/analyze", tags=["analyze"], deprecated=True)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _safe_get(d: dict, key: str, default=None):
     """Get a value from a dict, returning default if missing or None."""
@@ -94,6 +95,7 @@ def _latest_value(df, row_label: str, default: float = 0.0) -> float:
 # 1. GET /api/analyze/fundamentals/{ticker}
 # ---------------------------------------------------------------------------
 
+
 @router.get("/fundamentals/{ticker}")
 async def get_fundamentals(ticker: str):
     """Company fundamentals with calculated financial metrics."""
@@ -124,9 +126,7 @@ async def get_fundamentals(ticker: str):
 
     # --- Extract raw data from info ---
     market_cap = _safe_float(info.get("marketCap"))
-    current_price = _safe_float(
-        info.get("currentPrice", info.get("regularMarketPrice"))
-    )
+    current_price = _safe_float(info.get("currentPrice", info.get("regularMarketPrice")))
     forward_eps = _safe_float(info.get("forwardEps"))
     trailing_eps = _safe_float(info.get("trailingEps"))
     dividend_yield = _safe_float(info.get("dividendYield"))
@@ -163,13 +163,16 @@ async def get_fundamentals(ticker: str):
         cost_of_debt = (interest_expense / total_debt_val) if total_debt_val > 0 else 0.0
 
         if market_cap > 0:
-            wacc = calculate_wacc(
-                market_cap=market_cap,
-                total_debt=total_debt_val,
-                cost_of_equity=cost_of_equity,
-                cost_of_debt=cost_of_debt,
-                tax_rate=tax_rate if 'tax_rate' in dir() else 0.21,
-            ) / 100.0  # Convert pct to ratio
+            wacc = (
+                calculate_wacc(
+                    market_cap=market_cap,
+                    total_debt=total_debt_val,
+                    cost_of_equity=cost_of_equity,
+                    cost_of_debt=cost_of_debt,
+                    tax_rate=tax_rate if "tax_rate" in dir() else 0.21,
+                )
+                / 100.0
+            )  # Convert pct to ratio
     except Exception as e:
         logger.debug(f"WACC calculation failed for {ticker}: {e}")
 
@@ -228,6 +231,7 @@ async def get_fundamentals(ticker: str):
         "sector": info.get("sector"),
         "market_cap": market_cap,
         "currency": info.get("currency", "USD"),
+        "current_price": current_price,
         "financials": {
             "roic": roic,
             "wacc": wacc,
@@ -259,6 +263,7 @@ async def get_fundamentals(ticker: str):
 # 2. GET /api/analyze/price-history/{ticker}
 # ---------------------------------------------------------------------------
 
+
 @router.get("/price-history/{ticker}")
 async def get_price_history(
     ticker: str,
@@ -286,14 +291,16 @@ async def get_price_history(
     data = []
     for idx, row in hist.iterrows():
         time_str = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)
-        data.append({
-            "time": time_str,
-            "open": round(_safe_float(row.get("Open")), 2),
-            "high": round(_safe_float(row.get("High")), 2),
-            "low": round(_safe_float(row.get("Low")), 2),
-            "close": round(_safe_float(row.get("Close")), 2),
-            "volume": int(_safe_float(row.get("Volume"))),
-        })
+        data.append(
+            {
+                "time": time_str,
+                "open": round(_safe_float(row.get("Open")), 2),
+                "high": round(_safe_float(row.get("High")), 2),
+                "low": round(_safe_float(row.get("Low")), 2),
+                "close": round(_safe_float(row.get("Close")), 2),
+                "volume": int(_safe_float(row.get("Volume"))),
+            }
+        )
 
     result = {
         "ticker": ticker,
@@ -309,6 +316,7 @@ async def get_price_history(
 # ---------------------------------------------------------------------------
 # 3. GET /api/analyze/technicals/{ticker}
 # ---------------------------------------------------------------------------
+
 
 @router.get("/technicals/{ticker}")
 async def get_technicals(ticker: str):
@@ -414,6 +422,7 @@ def _last_valid(values: list[float]) -> Optional[float]:
 # 4. GET /api/analyze/options/{ticker}
 # ---------------------------------------------------------------------------
 
+
 @router.get("/options/{ticker}")
 async def get_option_chain(
     ticker: str,
@@ -447,9 +456,7 @@ async def get_option_chain(
         raise HTTPException(status_code=502, detail=f"Failed to fetch option chain for {ticker}")
 
     info = t.info or {}
-    current_price = _safe_float(
-        info.get("currentPrice", info.get("regularMarketPrice"))
-    )
+    current_price = _safe_float(info.get("currentPrice", info.get("regularMarketPrice")))
 
     # --- Format calls ---
     calls = []
@@ -526,6 +533,7 @@ def _get_atm_iv(calls_df, current_price: float) -> Optional[float]:
 # 5. GET /api/analyze/synthesis/{ticker}
 # ---------------------------------------------------------------------------
 
+
 @router.get("/synthesis/{ticker}")
 async def get_synthesis(ticker: str):
     """
@@ -559,18 +567,12 @@ async def get_synthesis(ticker: str):
     growth_engine: list[str] = []
 
     if revenue_growth > 0.10:
-        growth_engine.append(
-            f"Revenue growing {revenue_growth:.0%} YoY, indicating strong top-line momentum"
-        )
+        growth_engine.append(f"Revenue growing {revenue_growth:.0%} YoY, indicating strong top-line momentum")
     elif revenue_growth > 0:
-        growth_engine.append(
-            f"Moderate revenue growth at {revenue_growth:.0%} YoY"
-        )
+        growth_engine.append(f"Moderate revenue growth at {revenue_growth:.0%} YoY")
 
     if earnings_growth > 0.15:
-        growth_engine.append(
-            f"Earnings expanding {earnings_growth:.0%} YoY, outpacing revenue growth"
-        )
+        growth_engine.append(f"Earnings expanding {earnings_growth:.0%} YoY, outpacing revenue growth")
 
     if profit_margins > 0.20:
         growth_engine.append(
@@ -578,9 +580,7 @@ async def get_synthesis(ticker: str):
         )
 
     if dividend_yield > 0.02:
-        growth_engine.append(
-            f"Attractive dividend yield of {dividend_yield:.1%} provides income component"
-        )
+        growth_engine.append(f"Attractive dividend yield of {dividend_yield:.1%} provides income component")
 
     if sector:
         growth_engine.append(f"Positioned in {sector} sector")
@@ -592,28 +592,18 @@ async def get_synthesis(ticker: str):
     bear_case: list[str] = []
 
     if forward_pe > 30:
-        bear_case.append(
-            f"Premium valuation at {forward_pe:.1f}x forward P/E leaves limited margin of safety"
-        )
+        bear_case.append(f"Premium valuation at {forward_pe:.1f}x forward P/E leaves limited margin of safety")
     elif forward_pe > 0 and forward_pe < 8:
-        bear_case.append(
-            f"Low {forward_pe:.1f}x forward P/E may signal market concerns about future earnings"
-        )
+        bear_case.append(f"Low {forward_pe:.1f}x forward P/E may signal market concerns about future earnings")
 
     if revenue_growth < 0:
-        bear_case.append(
-            f"Revenue declining {revenue_growth:.0%} YoY — growth story may be deteriorating"
-        )
+        bear_case.append(f"Revenue declining {revenue_growth:.0%} YoY — growth story may be deteriorating")
 
     if beta > 1.5:
-        bear_case.append(
-            f"High beta of {beta:.2f} implies elevated volatility relative to the broader market"
-        )
+        bear_case.append(f"High beta of {beta:.2f} implies elevated volatility relative to the broader market")
 
     if profit_margins < 0.05 and profit_margins > 0:
-        bear_case.append(
-            f"Thin profit margins at {profit_margins:.0%} leave little room for execution errors"
-        )
+        bear_case.append(f"Thin profit margins at {profit_margins:.0%} leave little room for execution errors")
 
     if profit_margins < 0:
         bear_case.append(f"Currently unprofitable with {profit_margins:.0%} margins")
@@ -622,14 +612,16 @@ async def get_synthesis(ticker: str):
         bear_case.append("No significant red flags identified from available data")
 
     # --- Price action summary (simple template) ---
-    current_price = _safe_float(
-        info.get("currentPrice", info.get("regularMarketPrice"))
-    )
+    current_price = _safe_float(info.get("currentPrice", info.get("regularMarketPrice")))
     fifty_two_high = _safe_float(info.get("fiftyTwoWeekHigh"))
     fifty_two_low = _safe_float(info.get("fiftyTwoWeekLow"))
 
     if fifty_two_high > 0 and fifty_two_low > 0 and current_price > 0:
-        range_position = (current_price - fifty_two_low) / (fifty_two_high - fifty_two_low) if (fifty_two_high - fifty_two_low) > 0 else 0.5
+        range_position = (
+            (current_price - fifty_two_low) / (fifty_two_high - fifty_two_low)
+            if (fifty_two_high - fifty_two_low) > 0
+            else 0.5
+        )
         if range_position > 0.8:
             setup_quality = "Trading near 52-week highs — momentum is strong but entry risk is elevated"
         elif range_position < 0.3:
@@ -656,6 +648,7 @@ async def get_synthesis(ticker: str):
 # ---------------------------------------------------------------------------
 # Cache Stats
 # ---------------------------------------------------------------------------
+
 
 @router.get("/cache-stats")
 async def cache_stats():
@@ -722,6 +715,7 @@ async def post_growth_story(ticker: str, body: Optional[GrowthStoryRequest] = No
         # get_synthesis returns a dict or JSONResponse; normalize
         if hasattr(template_response, "body"):
             import json as _json
+
             fallback = _json.loads(template_response.body)
         elif isinstance(template_response, dict):
             fallback = template_response
@@ -729,9 +723,7 @@ async def post_growth_story(ticker: str, body: Optional[GrowthStoryRequest] = No
             fallback = template_response
 
         fallback["source"] = "template"
-        fallback["analysis_duration_seconds"] = round(
-            time.monotonic() - start_time, 1
-        )
+        fallback["analysis_duration_seconds"] = round(time.monotonic() - start_time, 1)
         return fallback
     except HTTPException:
         raise

@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTickerAnalysis } from "@/app/analyze/actions";
 import { useState, useEffect, useCallback } from "react";
 
 export interface PricePoint {
@@ -19,8 +19,6 @@ interface UsePriceHistoryReturn {
   refetch: () => void;
 }
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL || "";
-
 export function usePriceHistory(
   ticker: string,
   period: string = "1y",
@@ -35,14 +33,12 @@ export function usePriceHistory(
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(
-        `${apiUrl}/api/analyze/price-history/${ticker}?period=${period}&interval=${interval}`
-      );
-      if (!res.ok) {
-        throw new Error(res.status === 404 ? `No price data for "${ticker}"` : `API error (${res.status})`);
-      }
-      const json = await res.json();
-      setData(json.data ?? []);
+      const result = await getTickerAnalysis(ticker);
+      if (!result.ok) throw new Error(result.error);
+      const sectionKey = `price_history_${period}_${interval}`;
+      const priceHistory = result.data?.data.sections?.[sectionKey] as { data?: PricePoint[] } | undefined;
+      if (!priceHistory?.data) throw new Error(`No cached price history for "${ticker}" yet`);
+      setData(priceHistory.data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch price history");
       setData([]);

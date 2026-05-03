@@ -16,6 +16,14 @@ interface ShortTermViewProps {
     ticker: string;
 }
 
+function formatRefresh(refreshedAt: string | null): string {
+    if (!refreshedAt) return "Analysis not refreshed yet";
+    const diffMs = Date.now() - Date.parse(refreshedAt);
+    if (!Number.isFinite(diffMs)) return "Analysis not refreshed yet";
+    const hours = Math.max(0, Math.round(diffMs / (60 * 60 * 1000)));
+    return hours < 1 ? "Last refreshed less than 1 hour ago" : `Last refreshed ${hours}h ago`;
+}
+
 export default function ShortTermView({ ticker }: ShortTermViewProps) {
     const technicals = useTechnicals(ticker);
     const options = useOptionChain(ticker);
@@ -24,9 +32,14 @@ export default function ShortTermView({ ticker }: ShortTermViewProps) {
 
     return (
         <div className="space-y-6">
-            <h2 className="text-lg font-semibold text-slate-300">
-                Short-Term Analysis — <span className="text-white font-mono">{ticker}</span>
-            </h2>
+            <div className="flex flex-col gap-1">
+                <h2 className="text-lg font-semibold text-slate-300">
+                    Short-Term Analysis — <span className="text-white font-mono">{ticker}</span>
+                </h2>
+                <p className={technicals.isStale ? "text-sm text-amber-300" : "text-sm text-slate-500"}>
+                    {formatRefresh(technicals.refreshedAt)}{technicals.isStale ? " · Backend offline or stale" : ""}
+                </p>
+            </div>
 
             {/* Per-section errors with retry */}
             {technicals.error && <ErrorBanner message={technicals.error} onRetry={technicals.refetch} />}
