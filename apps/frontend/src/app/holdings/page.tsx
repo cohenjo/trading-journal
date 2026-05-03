@@ -1,40 +1,38 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useEffect, useState } from "react";
+import {
+  createBondHolding,
+  deleteBondHolding,
+  listBondHoldings,
+  updateBondHolding,
+  type BondHolding,
+  type BondHoldingPayload,
+} from './actions';
 
-type Holding = {
-  id: string;
-  ticker?: string | null;
-  issuer: string;
-  currency: string;
-  face_value: number;
-  coupon_rate: number;
-  coupon_frequency: string;
-  issue_date: string;
-  maturity_date: string;
-};
+type Holding = BondHolding;
+type HoldingDraft = BondHoldingPayload;
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
 
 export default function HoldingsPage() {
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [newRow, setNewRow] = useState<Holding | null>(null);
+  const [newRow, setNewRow] = useState<HoldingDraft | null>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
-        const res = await apiFetch("/api/holdings");
-        if (!res.ok) {
-          throw new Error(`Failed to load holdings: ${res.status}`);
-        }
-        const data: Holding[] = await res.json();
+        const data = await listBondHoldings();
         setHoldings(data);
-      } catch (e: any) {
-        setError(e.message ?? "Failed to load holdings");
+      } catch (e: unknown) {
+        setError(errorMessage(e, "Failed to load holdings"));
       } finally {
         setLoading(false);
       }
@@ -55,21 +53,13 @@ export default function HoldingsPage() {
 
     try {
       setSavingId(id);
-      const res = await apiFetch(`/api/holdings/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ face_value: holding.face_value }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Failed to update holding: ${res.status}`);
-      }
-      const updated: Holding = await res.json();
+      const result = await updateBondHolding(id, { face_value: holding.face_value });
+      if (!result.ok) throw new Error(result.error);
       setHoldings((prev) =>
-        prev.map((h) => (h.id === updated.id ? updated : h))
+        prev.map((h) => (h.id === result.data.id ? result.data : h))
       );
-    } catch (e: any) {
-      setError(e.message ?? "Failed to update holding");
+    } catch (e: unknown) {
+      setError(errorMessage(e, "Failed to update holding"));
     } finally {
       setSavingId(null);
     }
@@ -78,16 +68,11 @@ export default function HoldingsPage() {
   const handleRemoveHolding = async (id: string) => {
     try {
       setSavingId(id);
-      const res = await apiFetch(`/api/holdings/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Failed to remove holding: ${res.status}`);
-      }
-      setHoldings((prev) => prev.filter((h) => h.id !== id));
-    } catch (e: any) {
-      setError(e.message ?? "Failed to remove holding");
+      const result = await deleteBondHolding(id);
+      if (!result.ok) throw new Error(result.error);
+      setHoldings((prev) => prev.filter((h) => h.id !== result.data.id));
+    } catch (e: unknown) {
+      setError(errorMessage(e, "Failed to remove holding"));
     } finally {
       setSavingId(null);
     }
@@ -220,7 +205,7 @@ export default function HoldingsPage() {
                     onChange={(e) =>
                       setNewRow({
                         ...newRow,
-                        coupon_frequency: e.target.value,
+                        coupon_frequency: e.target.value as HoldingDraft['coupon_frequency'],
                       })
                     }
                     aria-label="Coupon frequency"
@@ -275,32 +260,22 @@ export default function HoldingsPage() {
                       }
                       try {
                         setSavingId("__new__");
-                        const res = await apiFetch(
-                          "/api/ladder/bonds",
-                          {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              id: newRow.id,
-                              issuer: newRow.issuer,
-                              currency: newRow.currency,
-                              face_value: newRow.face_value,
-                              coupon_rate: newRow.coupon_rate,
-                              coupon_frequency: newRow.coupon_frequency,
-                              issue_date: newRow.issue_date,
-                              maturity_date: newRow.maturity_date,
-                            }),
-                          }
-                        );
-                        if (!res.ok) {
-                          const text = await res.text();
-                          throw new Error(text || "Failed to add holding");
-                        }
-                        const created: Holding = await res.json();
-                        setHoldings((prev) => [...prev, created]);
+                        const result = await createBondHolding({
+                          id: newRow.id,
+                          ticker: newRow.ticker ?? null,
+                          issuer: newRow.issuer,
+                          currency: newRow.currency,
+                          face_value: newRow.face_value,
+                          coupon_rate: newRow.coupon_rate,
+                          coupon_frequency: newRow.coupon_frequency,
+                          issue_date: newRow.issue_date,
+                          maturity_date: newRow.maturity_date,
+                        });
+                        if (!result.ok) throw new Error(result.error);
+                        setHoldings((prev) => [...prev, result.data]);
                         setNewRow(null);
-                      } catch (e: any) {
-                        setError(e.message ?? "Failed to add holding");
+                      } catch (e: unknown) {
+                        setError(errorMessage(e, "Failed to add holding"));
                       } finally {
                         setSavingId(null);
                       }
@@ -378,7 +353,7 @@ export default function HoldingsPage() {
             {holdings.length === 0 && !loading && !newRow && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={10}
                   className="border border-slate-800 px-2 py-4 text-center text-slate-400"
                 >
                   No holdings yet.

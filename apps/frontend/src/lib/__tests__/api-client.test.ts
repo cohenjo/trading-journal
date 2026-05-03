@@ -34,7 +34,7 @@ describe('apiFetch', () => {
       const mockFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
       vi.stubGlobal('fetch', mockFetch);
 
-      await apiFetch('/api/holdings');
+      await apiFetch('/api/example');
 
       expect(mockFetch).toHaveBeenCalledOnce();
       const [, init] = mockFetch.mock.calls[0] as [unknown, RequestInit];
@@ -47,7 +47,7 @@ describe('apiFetch', () => {
       const mockFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
       vi.stubGlobal('fetch', mockFetch);
 
-      await apiFetch('/api/holdings', {
+      await apiFetch('/api/example', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ foo: 1 }),
@@ -70,21 +70,21 @@ describe('apiFetch', () => {
     it('throws ApiAuthError on 401', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })));
 
-      await expect(apiFetch('/api/holdings')).rejects.toThrow(ApiAuthError);
-      await expect(apiFetch('/api/holdings')).rejects.toMatchObject({ status: 401 });
+      await expect(apiFetch('/api/example')).rejects.toThrow(ApiAuthError);
+      await expect(apiFetch('/api/example')).rejects.toMatchObject({ status: 401 });
     });
 
     it('throws ApiAuthError on 403', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 403 })));
 
-      await expect(apiFetch('/api/holdings')).rejects.toThrow(ApiAuthError);
-      await expect(apiFetch('/api/holdings')).rejects.toMatchObject({ status: 403 });
+      await expect(apiFetch('/api/example')).rejects.toThrow(ApiAuthError);
+      await expect(apiFetch('/api/example')).rejects.toMatchObject({ status: 403 });
     });
 
     it('does NOT throw on other error status codes (e.g. 500)', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('error', { status: 500 })));
 
-      const result = await apiFetch('/api/holdings');
+      const result = await apiFetch('/api/example');
       expect(result.status).toBe(500);
     });
   });
@@ -101,7 +101,7 @@ describe('apiFetch', () => {
       const mockFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
       vi.stubGlobal('fetch', mockFetch);
 
-      await apiFetch('/api/holdings');
+      await apiFetch('/api/example');
 
       const [, init] = mockFetch.mock.calls[0] as [unknown, RequestInit];
       const headers = (init?.headers ?? {}) as Record<string, string>;
