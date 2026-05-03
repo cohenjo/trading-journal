@@ -101,7 +101,7 @@ jobs:
 
       # ── 6. Upload as GH Actions artifact (primary store, 90-day retention) ─
       - name: Upload encrypted backup artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.meta.outputs.filename }}
           path: ${{ steps.meta.outputs.filename }}
