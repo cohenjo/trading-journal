@@ -96,10 +96,21 @@ export default defineConfig({
     // },
   ],
 
-  /* Run your local dev server before starting the tests */
-  // webServer: {
-  //   command: 'npm run start',
-  //   url: 'http://localhost:3000',
-  //   reuseExistingServer: !process.env.CI,
-  // },
+  /**
+   * webServer: only activated when no BASE_URL is provided (i.e. no deployed
+   * Vercel/staging target).  CI sets BASE_URL via the E2E_BASE_URL secret; local
+   * runs without .env.local also benefit from this fallback.
+   *
+   * Requires a prior `next build` so `next start` has a .next artefact.
+   * The workflow's "Build Next.js" step handles this before the test run.
+   */
+  webServer: process.env.BASE_URL
+    ? undefined
+    : {
+        command: 'npm run start',
+        url: 'http://127.0.0.1:3000',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120_000,
+        stderr: 'pipe',
+      },
 });
