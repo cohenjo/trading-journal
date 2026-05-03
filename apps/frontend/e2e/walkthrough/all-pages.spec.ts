@@ -11,20 +11,20 @@ const PAGES = [
 /**
  * Path prefixes for FastAPI endpoints that have not yet been migrated to
  * Server Actions and therefore 404 in environments without the FastAPI
- * backend deployed (i.e. CI and Vercel). Tracked under TJ-018 (#71); each
- * sub-issue listed below should remove its entry as the migration lands.
+ * backend deployed (i.e. CI and Vercel). Tracked under TJ-018 (#71) /
+ * TJ-019 (#189); each remaining entry corresponds to a compute endpoint
+ * that will move to the Railway compute backend.
  *
- * - /api/plans/simulate    → #173
- * - /api/finances/history  → #177
- * - /api/options/projection → #189 / TJ-019
+ * - /api/plans/simulate     → #173 (compute)
+ * - /api/options/projection → #189 / TJ-019 (compute)
+ * - /api/backtest           → #188 (compute)
+ * - /api/pension/upload     → #189 / TJ-019 (PDF parse, compute)
  */
 const UNMIGRATED_FASTAPI_PATHS = [
   '/api/plans/simulate',
-  '/api/finances/history',
   '/api/options/projection',
   '/api/backtest',
-  '/api/pension',
-  '/api/holdings',
+  '/api/pension/upload',
 ];
 
 /**
