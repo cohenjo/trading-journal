@@ -45,6 +45,15 @@ function isKnownAcceptableConsoleError(text: string): boolean {
   if (text.includes('/api/trading/configs')) return true;
   if (text.includes('/api/ladder/income')) return true;
 
+  // Generic browser console companion of the 404s we already allow-list above.
+  // The browser logs "Failed to load resource: ... 404" without the URL, so we
+  // filter the bare message; specific URL noise is filtered by the network handler.
+  if (text.includes('Failed to load resource: the server responded with a status of 404')) return true;
+
+  // App-level downstream errors caused by the same un-migrated endpoints (#177)
+  if (text.includes('Failed to fetch history')) return true;
+  if (text.includes('Failed to fetch summary data')) return true;
+
   // React dev-mode warnings / hydration hints
   if (text.includes('Warning:') || text.includes('React does not recognize')) return true;
 
