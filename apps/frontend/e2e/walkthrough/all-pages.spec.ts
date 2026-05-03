@@ -30,6 +30,7 @@ const UNMIGRATED_FASTAPI_PATHS = [
   '/api/options',
   '/api/insurance',
   '/api/backtest',
+  '/api/dividends',
 ];
 
 /**
@@ -62,6 +63,7 @@ function isKnownAcceptableConsoleError(text: string): boolean {
   if (text.includes('Failed to fetch summary data')) return true;
   if (text.includes('Failed to fetch options income')) return true;
   if (text.includes('Failed to load ladder data')) return true;
+  if (text.includes('Failed to fetch years')) return true;
 
   // Generic browser console companion of the 404s we already allow-list above.
   // The browser logs "Failed to load resource: ... 404" without the URL, so we
