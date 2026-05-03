@@ -115,3 +115,23 @@
 **Risks Catalogued:** RLS gaps, household_id injection loss, Pydantic validation loss, Supabase rate limits, audit trail loss. Each has mitigation (Rabin RLS audit, Fenster injection helper, Zod schema ports, connection pooling, audit log preservation).
 
 **Decision file:** `.squad/decisions/inbox/keaton-phase-3-execution-plan.md`
+
+### 2026-05-02 — E2E Testing Strategy Design
+
+**Requested by:** Jony Vesterman Cohen  
+**Work:** Designed end-to-end automated testing strategy for the trading-journal app. Evaluated 3 test environment options; recommended hybrid (dev Supabase for CI + local for dev iteration). Production gets read-only smoke only.
+
+**Key Decisions:**
+- **Test environment:** Hybrid dev Supabase + local. No mutations against prod. Dev project `zvbwgxdgxwgduhhzdwjj` is the CI target.
+- **Test directory:** Stay in existing `apps/frontend/e2e/` — don't create a separate package. Playwright config, fixtures, npm scripts already wired.
+- **Test-user strategy:** Throwaway `e2e_*` users per test run, with household provisioning wait. Cleanup script as safety net.
+- **CI split:** Smoke + auth on PR (blocking), full flows nightly, prod smoke post-deploy.
+- **Provisioning helper:** TypeScript (not Python) — same runtime as test suite, avoids cross-process coordination.
+- **Tag-based suite selection:** `@smoke`, `@auth`, `@flow`, `@rls` annotations + `--grep` in CI.
+
+**Deliverables:**
+- Strategy document: `docs/testing/e2e-strategy.md` (PR #143)
+- 8 GitHub issues: #144–#151, assigned to Redfoot (tests), Hockney (provisioning/seed), Kujan (CI/deploy)
+- Dependency graph documented in strategy doc §11
+
+**Decision file:** `.squad/decisions/inbox/keaton-e2e-testing-strategy.md`
