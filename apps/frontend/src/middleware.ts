@@ -12,9 +12,10 @@ const PUBLIC_ROUTES: readonly string[] = [
 
 /** Prefixes whose entire subtree is public (no auth required). */
 const PUBLIC_PREFIXES: readonly string[] = [
-  '/auth/',     // auth callback, OAuth redirects
-  '/_next/',    // Next.js internals
-  '/api/auth/', // next-auth / Supabase auth API routes
+  '/auth/',         // auth callback, OAuth redirects
+  '/_next/',        // Next.js internals
+  '/api/auth/',     // next-auth / Supabase auth API routes
+  '/api/metrics/',  // telemetry — fire-and-forget, no session required
 ];
 
 function isPublicRoute(pathname: string): boolean {
