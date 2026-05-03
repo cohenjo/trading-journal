@@ -9,48 +9,33 @@ from app.dal.database import get_session
 from app.dependencies import get_current_user_id
 from app.schema.finance_models import FinanceSnapshot, SnapshotData
 from app.services.household_service import get_user_household_id
+from app.services.price_cache import fetch_external_price
 
 router = APIRouter(prefix="/api/finances", tags=["finances"])
 
 
-@router.get("/price/{symbol}")
+@router.get("/price/{symbol}", deprecated=True)
 def get_stock_price(symbol: str):
+    """Deprecated live lookup retained for local maintenance only.
+
+    TJ-020 moved frontend reads to ``public.price_cache`` populated by the
+    scheduled ``prices_refresh`` worker. New callers should read that cache.
     """
-    Get real-time stock price from Yahoo Finance.
-    """
-    import yfinance as yf
+
     try:
-        ticker = yf.Ticker(symbol)
-        # fast_info is often faster than history(period='1d')
-        price = ticker.fast_info.last_price
-        
-        # Fallback if fast_info fails or returns None
-        if not price:
-            history = ticker.history(period="1d")
-            if not history.empty:
-                price = history['Close'].iloc[-1]
-        
-        if not price:
-             raise HTTPException(status_code=404, detail=f"Could not fetch price for {symbol}")
+        quote = fetch_external_price(symbol)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - deprecated endpoint preserves legacy 500s
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        # Try to get dividend yield from info (slower but more detailed)
-        dividend_yield = 0
-        try:
-            info = ticker.info
-            # dividendYield is returned as percentage (e.g. 0.77 for 0.77% or 6.97 for 6.97%)
-            if 'dividendYield' in info and info['dividendYield']:
-                dividend_yield = round(info['dividendYield'], 2)
-        except:
-            pass # Ignore info fetch failures
-
-        return {
-            "symbol": symbol.upper(),
-            "price": round(price, 2),
-            "currency": ticker.fast_info.currency or "USD",
-            "dividend_yield": dividend_yield
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "symbol": quote.symbol,
+        "price": str(quote.price),
+        "currency": quote.currency,
+        "as_of": quote.as_of.isoformat(),
+        "deprecated": True,
+    }
 
 
 @router.get("/latest", response_model=FinanceSnapshot)

@@ -8,6 +8,7 @@ import signal
 import time
 
 from app.worker import ndx_daily_sync  # noqa: F401 - imports schedule registration side effect
+from app.worker import price_cache as _price_cache  # noqa: F401 - registers scheduled jobs
 from app.worker.job_queue import poll_compute_jobs
 from app.worker.registry import JOB_SCHEDULES
 from app.worker.scheduler import get_scheduler, register_cron, register_interval

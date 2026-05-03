@@ -1,5 +1,6 @@
 'use server';
 
+import Decimal from 'decimal.js';
 import { createClient } from '@/lib/supabase/server';
 import { convertCurrency } from '@/lib/currency';
 import type { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
@@ -35,6 +36,21 @@ export type SaveFinanceSnapshotResult =
 export type DeleteFinanceSnapshotResult =
   | { success: true }
   | { success: false; error: string };
+
+export interface PriceCacheResult {
+  price: string;
+  as_of: string;
+  refreshed_at: string;
+  isStale: boolean;
+}
+
+interface PriceCacheRow {
+  price: string | number;
+  as_of: string;
+  refreshed_at: string;
+}
+
+const PRICE_CACHE_STALE_MS = 4 * 60 * 60 * 1000;
 
 // Raw rows from dividend tables — typed narrowly to avoid over-fetching
 interface DividendAccountRow {
@@ -181,6 +197,52 @@ async function enrichWithDividends(items: FinanceItem[]): Promise<void> {
 }
 
 // ── Server Action ─────────────────────────────────────────────────────────────
+
+/**
+ * Reads the latest scheduled price-cache row for an authenticated user.
+ *
+ * Prices remain strings to preserve Postgres numeric precision; callers that
+ * need arithmetic should construct a Decimal from the returned value.
+ */
+export async function getPrice(symbol: string, currency = 'USD'): Promise<PriceCacheResult | null> {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  const normalizedCurrency = currency.trim().toUpperCase() || 'USD';
+  if (!normalizedSymbol) return null;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return null;
+
+  const { data, error } = await supabase
+    .from('price_cache')
+    .select('price, as_of, refreshed_at')
+    .eq('symbol', normalizedSymbol)
+    .eq('currency', normalizedCurrency)
+    .maybeSingle();
+
+  if (error || !data) {
+    if (error) console.error('[getPrice] query error:', error.message);
+    return null;
+  }
+
+  const row = data as PriceCacheRow;
+  const price = new Decimal(String(row.price));
+  if (!price.isFinite() || price.lte(0)) return null;
+
+  const refreshedAtMs = new Date(row.refreshed_at).getTime();
+  const isStale = !Number.isFinite(refreshedAtMs) || Date.now() - refreshedAtMs > PRICE_CACHE_STALE_MS;
+
+  return {
+    price: price.toString(),
+    as_of: row.as_of,
+    refreshed_at: row.refreshed_at,
+    isStale,
+  };
+}
 
 /**
  * Returns the most-recent finance snapshot for the authenticated user's
