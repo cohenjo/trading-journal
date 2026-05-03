@@ -19,4 +19,4 @@ RUN uv pip install alembic
 COPY . .
 
 # Command to run the application
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uv", "run", "python", "-m", "app.worker.runtime"]

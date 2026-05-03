@@ -1,28 +1,19 @@
 services:
   backend:
-    # Worker container: reads from Supabase, computes locally, writes result tables.
-    # This is not a public web service; only /health is bound to localhost for debugging.
+    # Private worker container: reads from Supabase, computes locally, writes result tables.
+    # This is not a public web service and publishes no HTTP ports.
     container_name: trading_journal_backend_supabase
     build:
       context: ./apps/backend
       dockerfile: Dockerfile
-    command: ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-    ports:
-      - "127.0.0.1:8000:8000"
+    command: ["uv", "run", "python", "-m", "app.worker.runtime"]
     environment:
       DATABASE_URL: ${DIRECT_DATABASE_URL:?Set DIRECT_DATABASE_URL to the Supabase Postgres or pooler connection string}
       SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL to your Supabase project URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+      WORKER_TIMEZONE: ${WORKER_TIMEZONE:-Asia/Jerusalem}
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-trading-journal-backend-worker-local-docker}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://127.0.0.1:4317}
     restart: unless-stopped
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
