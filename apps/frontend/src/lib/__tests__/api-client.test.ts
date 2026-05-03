@@ -47,7 +47,7 @@ describe('apiFetch', () => {
       const mockFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
       vi.stubGlobal('fetch', mockFetch);
 
-      await apiFetch('/api/plans/', {
+      await apiFetch('/api/holdings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ foo: 1 }),
