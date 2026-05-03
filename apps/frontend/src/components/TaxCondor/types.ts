@@ -14,10 +14,11 @@ export interface OptionLeg {
   quantity: number;
   greeks: GreekVector;
   price: number;
-  bid?: number;
-  ask?: number;
-  mid?: number;
-  implied_volatility?: number;
+  bid?: number | null;
+  ask?: number | null;
+  mid?: number | null;
+  implied_volatility?: number | null;
+  conid?: number | null;
 }
 
 export interface PnLSimulation {

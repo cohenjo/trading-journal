@@ -29,6 +29,7 @@
     "@nivo/sankey": "^0.99.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
+    "decimal.js": "^10.6.0",
     "html2pdf.js": "^0.14.0",
     "lightweight-charts": "^5.1.0",
     "lucide-react": "^1.14.0",

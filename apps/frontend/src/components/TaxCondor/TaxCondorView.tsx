@@ -1,6 +1,6 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { getTaxCondorRecommendations } from "@/app/tax-condor/actions";
 import { useState } from "react";
 import { TaxCondorRecommendation } from "./types";
 import { RecommendationDetails } from "./RecommendationDetails";
@@ -20,20 +20,11 @@ export default function TaxCondorView() {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(
-        "/api/tax-condor/recommend",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol, budget, use_live_data: useLiveData }),
-        }
-      );
-      
-      if (!res.ok) {
-        throw new Error(`Failed to fetch recommendations: ${res.status}`);
-      }
-      
-      const data = await res.json();
+      const data = await getTaxCondorRecommendations({
+        symbol,
+        budget,
+        use_live_data: useLiveData,
+      });
       setRecommendations(data);
     } catch (err) {
       console.error("Failed to fetch recommendations", err);
@@ -171,7 +162,7 @@ export default function TaxCondorView() {
                       {rec.iron_condor.long_call.implied_volatility && ` | IV ${(rec.iron_condor.long_call.implied_volatility * 100).toFixed(0)}%`}
                     </span>
                   </div>
-                  
+
                   <div className="h-px bg-slate-800 my-2" />
 
                   {/* Put Wing */}
@@ -239,9 +230,9 @@ export default function TaxCondorView() {
       </div>
 
       {selectedRec && (
-        <RecommendationDetails 
-            recommendation={selectedRec} 
-            onClose={() => setSelectedRec(null)} 
+        <RecommendationDetails
+            recommendation={selectedRec}
+            onClose={() => setSelectedRec(null)}
         />
       )}
     </div>
