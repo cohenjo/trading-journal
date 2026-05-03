@@ -1,12 +1,22 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect } from "react";
 import { getLatestFinanceSnapshot } from '@/app/finances/actions';
+import {
+    getTradingConfigs,
+    saveTradingConfig,
+    type TradingAccountConfig,
+} from '@/app/trading/actions';
+
+type TradingAccountFormState = Partial<TradingAccountConfig> & {
+    app_key?: string;
+    app_secret?: string;
+    account_hash?: string;
+};
 
 export default function TradingAccountSettings() {
-    const [configs, setConfigs] = useState<any[]>([]);
-    const [editingConfig, setEditingConfig] = useState<any>({
+    const [configs, setConfigs] = useState<TradingAccountConfig[]>([]);
+    const [editingConfig, setEditingConfig] = useState<TradingAccountFormState>({
         name: "My Broker",
         account_type: "IBKR",
         host: "127.0.0.1",
@@ -26,13 +36,10 @@ export default function TradingAccountSettings() {
 
     const fetchConfigs = async () => {
         try {
-            const res = await apiFetch("/api/trading/configs");
-            if (res.ok) {
-                const data = await res.json();
-                setConfigs(data || []);
-                if (data && data.length > 0) {
-                    setEditingConfig(data[0]);
-                }
+            const data = await getTradingConfigs();
+            setConfigs(data);
+            if (data.length > 0) {
+                setEditingConfig(data[0]);
             }
         } catch (err) {
             console.error("Error fetching trading configs:", err);
@@ -57,16 +64,21 @@ export default function TradingAccountSettings() {
         setSaving(true);
         setMessage("");
         try {
-            const res = await apiFetch("/api/trading/config", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(editingConfig)
+            const result = await saveTradingConfig({
+                name: editingConfig.name ?? "My Broker",
+                account_type: editingConfig.account_type ?? "IBKR",
+                id: editingConfig.id,
+                host: editingConfig.host,
+                port: editingConfig.port,
+                client_id: editingConfig.client_id,
+                linked_account_id: editingConfig.linked_account_id,
             });
-            if (res.ok) {
+            if (result.ok) {
                 setMessage("Settings saved successfully!");
+                setEditingConfig(result.config);
                 fetchConfigs();
             } else {
-                setMessage("Error saving settings.");
+                setMessage(result.error || "Error saving settings.");
             }
         } catch (err) {
             setMessage("Error saving settings.");
@@ -130,7 +142,7 @@ export default function TradingAccountSettings() {
                                 type="text"
                                 title="Account Name"
                                 placeholder="e.g. Schwab Main"
-                                value={editingConfig.name}
+                                value={editingConfig.name ?? ""}
                                 onChange={(e) => setEditingConfig({ ...editingConfig, name: e.target.value })}
                                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-slate-100 focus:outline-none focus:border-blue-500 transition-colors"
                             />
@@ -140,8 +152,8 @@ export default function TradingAccountSettings() {
                             <label className="block text-sm font-medium text-slate-400 mb-2">Account Type</label>
                             <select
                                 title="Account Type"
-                                value={editingConfig.account_type}
-                                onChange={(e) => setEditingConfig({ ...editingConfig, account_type: e.target.value })}
+                                value={editingConfig.account_type ?? "IBKR"}
+                                onChange={(e) => setEditingConfig({ ...editingConfig, account_type: e.target.value as TradingAccountConfig['account_type'] })}
                                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-slate-100 focus:outline-none focus:border-blue-500 transition-colors"
                             >
                                 <option value="IBKR">Interactive Brokers</option>
@@ -153,7 +165,7 @@ export default function TradingAccountSettings() {
                             <label className="block text-sm font-medium text-slate-400 mb-2">Link to Internal Account</label>
                             <select
                                 title="Select internal account to link"
-                                value={editingConfig.linked_account_id}
+                                value={editingConfig.linked_account_id ?? ""}
                                 onChange={(e) => setEditingConfig({ ...editingConfig, linked_account_id: e.target.value })}
                                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-slate-100 focus:outline-none focus:border-blue-500 transition-colors"
                             >

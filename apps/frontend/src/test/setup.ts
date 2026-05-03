@@ -11,38 +11,32 @@ vi.mock("lightweight-charts", () => {
 
   return {
     __chartInstances: chartInstances,
-    AreaSeries: "AreaSeries",
-    CandlestickSeries: "CandlestickSeries",
-    ColorType: { Solid: "solid" },
-    LineStyle: { Solid: 0, Dashed: 1, Dotted: 2 },
-    CrosshairMode: { Normal: 0, Magnet: 1 },
-    createSeriesMarkers: vi.fn(() => ({ setMarkers: vi.fn() })),
     createChart: vi.fn(() => {
-      const instance = {
+      const chart = {
         __series: [] as Array<{ setData: ReturnType<typeof vi.fn> }>,
         addSeries: vi.fn(() => {
           const series = makeSeries();
-          instance.__series.push(series);
+          chart.__series.push(series);
           return series;
         }),
         addLineSeries: vi.fn(() => {
           const series = makeSeries();
-          instance.__series.push(series);
+          chart.__series.push(series);
           return series;
         }),
         addCandlestickSeries: vi.fn(() => {
           const series = makeSeries();
-          instance.__series.push(series);
+          chart.__series.push(series);
           return series;
         }),
         addHistogramSeries: vi.fn(() => {
           const series = makeSeries();
-          instance.__series.push(series);
+          chart.__series.push(series);
           return series;
         }),
         addAreaSeries: vi.fn(() => {
           const series = makeSeries();
-          instance.__series.push(series);
+          chart.__series.push(series);
           return series;
         }),
         removeSeries: vi.fn(),
@@ -59,9 +53,18 @@ vi.mock("lightweight-charts", () => {
         remove: vi.fn(),
         subscribeCrosshairMove: vi.fn(),
       };
-      chartInstances.push(instance);
-      return instance;
+      chartInstances.push(chart);
+      return chart;
     }),
+    createSeriesMarkers: vi.fn(() => ({ setMarkers: vi.fn(), markers: vi.fn(() => []) })),
+    AreaSeries: "AreaSeries",
+    BaselineSeries: "BaselineSeries",
+    CandlestickSeries: "CandlestickSeries",
+    HistogramSeries: "HistogramSeries",
+    LineSeries: "LineSeries",
+    ColorType: { Solid: "solid" },
+    LineStyle: { Solid: 0, Dashed: 1, Dotted: 2 },
+    CrosshairMode: { Normal: 0, Magnet: 1 },
   };
 });
 

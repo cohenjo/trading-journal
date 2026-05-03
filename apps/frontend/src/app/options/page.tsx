@@ -1,6 +1,7 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
+import { apiFetch } from '@/lib/api-client';
+import { createOptionsRecord, listOptionsRecords } from './actions';
 import { useEffect, useMemo, useState } from "react";
 import OptionsChart, { OptionsChartPoint } from "../../components/Options/OptionsChart";
 import OptionsHistory, { OptionsRecord } from "../../components/Options/OptionsHistory";
@@ -33,19 +34,27 @@ export default function OptionsPage() {
   };
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    apiFetch("/api/options")
-      .then((res) => res.json())
-      .then((data) => {
-        setHistoricalData(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch options income:", err);
-        setError("Failed to load options data. Please try again.");
-        setLoading(false);
-      });
+    let cancelled = false;
+
+    async function loadOptionsRecords() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const data = await listOptionsRecords();
+        if (!cancelled) setHistoricalData(data);
+      } catch (err) {
+        console.error("Failed to load options income:", err);
+        if (!cancelled) setError("Failed to load options data. Please try again.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadOptionsRecords();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -82,14 +91,11 @@ export default function OptionsPage() {
 
   const handleSaveHistory = async (newData: OptionsRecord[]) => {
     try {
-      const res = await apiFetch("/api/options", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newData),
-      });
-      if (res.ok) {
-        const saved = await res.json();
-        setHistoricalData(saved);
+      const result = await createOptionsRecord(newData);
+      if (result.ok) {
+        setHistoricalData(result.records);
+      } else {
+        console.error("Failed to save options income:", result.error);
       }
     } catch (err) {
       console.error("Failed to save options income:", err);

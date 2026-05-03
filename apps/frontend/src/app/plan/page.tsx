@@ -6,26 +6,8 @@ import { PlanEditor } from '@/components/Plan/PlanEditor';
 import { PlanDetailsPane } from '@/components/Plan/PlanDetailsPane';
 import { Plan, PlanData } from '@/components/Plan/types';
 import { useSettings } from '../settings/SettingsContext';
-import { getLatestPlan } from './actions';
+import { createPlan, getLatestPlan, updatePlan } from './actions';
 import { getLatestFinanceSnapshot } from '../finances/actions';
-
-async function createPlan(data: PlanData) {
-    const res = await apiFetch('/api/plans/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data), // PlanData maps to plan_in
-    });
-    return res.json();
-}
-
-async function updatePlan(id: number, data: PlanData) {
-    const res = await apiFetch(`/api/plans/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    return res.json();
-}
 
 export default function PlanPage() {
     const { settings } = useSettings();
@@ -61,10 +43,11 @@ export default function PlanPage() {
         setPlan(updatedPlan); // Optimistic Update
 
         if (plan.id) {
-            await updatePlan(plan.id, newData);
+            const result = await updatePlan(plan.id, { data: newData });
+            if (result.ok) setPlan(result.plan);
         } else {
-            const saved = await createPlan(newData);
-            setPlan(saved);
+            const result = await createPlan(newData);
+            if (result.ok) setPlan(result.plan);
         }
     };
 

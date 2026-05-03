@@ -15,19 +15,18 @@ const PAGES = [
  * sub-issue listed below should remove its entry as the migration lands.
  *
  * - /api/plans/simulate    → #173
- * - /api/trading/configs   → #177
+ * - /api/finances/history  → #177
  * - /api/ladder/income     → #177
- * - /api/options           → #177
+ * - /api/options/projection → #189 / TJ-019
  */
 const UNMIGRATED_FASTAPI_PATHS = [
   '/api/plans/simulate',
-  '/api/trading/configs',
+  '/api/finances/history',
   '/api/ladder/income',
   '/api/ladder/overview',
-  '/api/options',
+  '/api/options/projection',
   '/api/backtest',
   '/api/dividends',
-  '/api/pension',
   '/api/holdings',
 ];
 
@@ -57,8 +56,8 @@ function isKnownAcceptableConsoleError(text: string): boolean {
 
   // App-level downstream errors caused by the same un-migrated endpoints
   if (text.includes('Simulation failed') || text.includes('Simulation error')) return true;
+  if (text.includes('Failed to fetch history')) return true;
   if (text.includes('Failed to fetch summary data')) return true;
-  if (text.includes('Failed to fetch options income')) return true;
   if (text.includes('Failed to load ladder data')) return true;
   if (text.includes('Failed to fetch years')) return true;
   if (text.includes('Failed to fetch dividends')) return true;
