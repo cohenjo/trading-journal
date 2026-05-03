@@ -19,6 +19,11 @@ function isKnownAcceptableApiError(url: string, status: number): boolean {
   // TODO #173: /api/plans/simulate 404 until simulate migration lands
   if (url.includes('/api/plans/simulate') && status === 404) return true;
 
+  // TODO #177: remaining un-migrated FastAPI endpoints (TJ-018 / #71 follow-ups)
+  if (url.includes('/api/finances/history') && status === 404) return true;
+  if (url.includes('/api/trading/configs') && status === 404) return true;
+  if (url.includes('/api/ladder/income') && status === 404) return true;
+
   return false;
 }
 
@@ -34,6 +39,11 @@ function isKnownAcceptableConsoleError(text: string): boolean {
 
   // Simulation error is a downstream consequence of simulate 404
   if (text.includes('Simulation failed') || text.includes('Simulation error')) return true;
+
+  // TODO #177: remaining un-migrated FastAPI endpoints (TJ-018 / #71 follow-ups)
+  if (text.includes('/api/finances/history')) return true;
+  if (text.includes('/api/trading/configs')) return true;
+  if (text.includes('/api/ladder/income')) return true;
 
   // React dev-mode warnings / hydration hints
   if (text.includes('Warning:') || text.includes('React does not recognize')) return true;
