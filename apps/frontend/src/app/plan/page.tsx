@@ -1,12 +1,11 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { PlanChart } from '@/components/Plan/PlanChart';
 import { PlanEditor } from '@/components/Plan/PlanEditor';
 import { PlanDetailsPane } from '@/components/Plan/PlanDetailsPane';
 import { Plan, PlanData } from '@/components/Plan/types';
 import { useSettings } from '../settings/SettingsContext';
-import { createPlan, getLatestPlan, updatePlan } from './actions';
+import { createPlan, getLatestPlan, runPlanSimulation, updatePlan } from './actions';
 import { getLatestFinanceSnapshot } from '../finances/actions';
 
 export default function PlanPage() {
@@ -56,25 +55,13 @@ export default function PlanPage() {
         if (!plan || !plan.data) return;
 
         const timer = setTimeout(() => {
-            apiFetch('/api/plans/simulate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    plan: plan.data,
-                    finances: finances,
-                    settings: settings // User Profile (Age, etc)
-                })
+            runPlanSimulation({
+                plan: plan.data,
+                finances,
+                settings: settings as unknown as Record<string, unknown>,
             })
-                .then(async res => {
-                    if (!res.ok) {
-                        const txt = await res.text();
-                        console.error("Simulation failed response:", txt);
-                        throw new Error("Simulation failed: " + txt);
-                    }
-                    return res.json();
-                })
                 .then(data => {
-                    const formatted = data.map((p: any) => ({
+                    const formatted = data.map(p => ({
                         time: `${p.year}-01-01`,
                         value: p.net_worth, // Default view
                         ...p
@@ -83,12 +70,12 @@ export default function PlanPage() {
                     // Set initial selected year if not set or out of range
                     if (formatted.length > 0) {
                         setSelectedYear(prev => {
-                            const exists = formatted.find((p: any) => p.year === prev);
+                            const exists = formatted.find(p => p.year === prev);
                             return exists ? prev : formatted[0].year;
                         });
                     }
                 })
-                .catch(err => console.error("Simulation error:", err));
+                .catch(err => console.error("Plan simulation Server Action error:", err));
         }, 500); // 500ms debounce
 
         return () => clearTimeout(timer);

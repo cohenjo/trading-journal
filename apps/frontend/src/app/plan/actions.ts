@@ -2,6 +2,8 @@
 
 import { createClient } from '@/lib/supabase/server';
 import type { Plan, PlanData } from '@/components/Plan/types';
+import { calculatePlanSimulation } from './simulation';
+import type { PlanSimulationInput, PlanSimulationResult } from './simulation';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,7 @@ export type PlanMutationResult =
   | { ok: false; error: string };
 
 export type PlanDeleteResult = { ok: true } | { ok: false; error: string };
+export type { PlanSimulationInput, PlanSimulationResult } from './simulation';
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
@@ -83,6 +86,13 @@ async function getAuthenticatedHouseholdId(): Promise<string | null> {
 }
 
 // ── Server Actions ────────────────────────────────────────────────────────────
+
+/**
+ * Runs the TJ-020 plan projection in-process with Decimal-backed monetary math.
+ */
+export async function runPlanSimulation(planInput: PlanSimulationInput): Promise<PlanSimulationResult> {
+  return calculatePlanSimulation(planInput);
+}
 
 /**
  * Returns all plans for the authenticated user's household, newest first.

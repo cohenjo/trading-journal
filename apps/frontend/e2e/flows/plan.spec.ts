@@ -82,22 +82,18 @@ test.describe('P0 flow: /plan (authenticated)', () => {
         !m.includes('404') &&
         // Backend 500s (FastAPI not running locally) are infrastructure, not FE bugs
         !m.includes('500') &&
-        !m.includes('Internal Server Error') &&
-        !m.includes('Simulation failed') &&
-        !m.includes('Simulation error')
+        !m.includes('Internal Server Error')
     );
     expect(critical).toHaveLength(0);
   });
 
-  // TODO: happy-path mutation — update a plan parameter and trigger simulation
-  // Skipped until backend JWT forwarding (Fenster PR) + seed data are confirmed.
+  // TODO: happy-path mutation — update a plan parameter and verify Server Action simulation.
   test.fixme('update plan target and run simulation', async ({ authenticatedUser: { page } }) => {
     await page.goto('/plan');
     // 1. Open the plan editor
     // 2. Update a target (e.g. retirement age)
     // 3. Click "Simulate" or "Save"
     // 4. Verify projection chart updates with new milestone
-    // NOTE: requires /api/plans/simulate to accept a JWT-scoped payload
   });
 });
 
@@ -148,11 +144,7 @@ testWithUser.describe('regression #172: plan reads via Server Actions @flow', ()
           if (
             !text.includes('/metrics/page-load') &&
             !text.includes('supabase') &&
-            !text.includes('Simulation failed') &&
-            !text.includes('Simulation error') &&
-            // TODO #173: /api/plans/simulate 404 until simulate migration lands
-            !text.includes('/api/plans/simulate') &&
-            !text.includes('Failed to fetch') // simulate fallback
+            !text.includes('Failed to fetch')
           ) {
             consoleErrors.push(text);
           }

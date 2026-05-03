@@ -1,14 +1,19 @@
-from fastapi import APIRouter
-from typing import List, Optional
 from datetime import date
+from decimal import Decimal
+from typing import List, Optional
+
+from fastapi import APIRouter
 from sqlmodel import SQLModel
+
+from app.services.bond_scanner import fetch_bond_universe, filter_bond_candidates
 
 router = APIRouter()
 
-class BondCandidate(SQLModel):
-    """Simple DTO for bond scanner/search results (mocked for now)."""
 
-    id: str  # CUSIP for USD bonds in this mock
+class BondCandidate(SQLModel):
+    """Deprecated DTO for legacy bond scanner/search results."""
+
+    id: str
     issuer: str
     coupon_rate: float
     maturity_date: date
@@ -17,7 +22,8 @@ class BondCandidate(SQLModel):
     currency: str
     price: float
 
-@router.get("/bonds/scanner", response_model=List[BondCandidate])
+
+@router.get("/bonds/scanner", response_model=List[BondCandidate], deprecated=True)
 def scan_bonds(
     min_maturity: Optional[date] = None,
     max_maturity: Optional[date] = None,
@@ -25,78 +31,30 @@ def scan_bonds(
     min_rating: Optional[str] = None,
     currency: Optional[str] = None,
 ):
-    """Mock bond scanner endpoint backed by a curated in-memory list.
+    """Deprecated FastAPI scanner retained for local/admin compatibility.
 
-    This is intentionally simple and does not hit any real market data
-    source yet; it exists so the frontend can build a realistic search
-    and selection flow.
+    TJ-020 moved the production frontend path to the scheduled
+    ``bonds_scanner_refresh`` worker and ``public.bond_scanner_results``.
     """
 
-    # Very small curated mock universe for now.
-    universe: list[BondCandidate] = [
+    candidates = filter_bond_candidates(
+        fetch_bond_universe(),
+        min_maturity=min_maturity,
+        max_maturity=max_maturity,
+        min_yield=Decimal(str(min_yield)) if min_yield is not None else None,
+        min_rating=min_rating,
+        currency=currency,
+    )
+    return [
         BondCandidate(
-            id="91282CEZ7",  # matches US Treasury holding CUSIP
-            issuer="US Treasury 4.00% 06/30/2037",
-            coupon_rate=0.04,
-            maturity_date=date(2037, 6, 30),
-            yield_to_maturity=0.041,
-            rating="AAA",
-            currency="USD",
-            price=99.2,
-        ),
-        BondCandidate(
-            id="12345CORB",  # matches Corp B holding CUSIP
-            issuer="Corp B 3.50% 03/15/2040",
-            coupon_rate=0.035,
-            maturity_date=date(2040, 3, 15),
-            yield_to_maturity=0.036,
-            rating="AAA",
-            currency="USD",
-            price=101.3,
-        ),
-        BondCandidate(
-            id="12345CORA",  # matches Corp A holding CUSIP
-            issuer="Corp A 5.00% 01/01/2038",
-            coupon_rate=0.05,
-            maturity_date=date(2038, 1, 1),
-            yield_to_maturity=0.052,
-            rating="A",
-            currency="USD",
-            price=100.5,
-        ),
-        BondCandidate(
-            id="EUROISIN1",  # placeholder ISIN-style id for EUR bond
-            issuer="EU Gov 3.00% 09/30/2037",
-            coupon_rate=0.03,
-            maturity_date=date(2037, 9, 30),
-            yield_to_maturity=0.031,
-            rating="AA",
-            currency="EUR",
-            price=100.0,
-        ),
+            id=candidate.symbol,
+            issuer=candidate.issuer,
+            coupon_rate=float(candidate.coupon_rate),
+            maturity_date=candidate.maturity_date,
+            yield_to_maturity=float(candidate.yield_to_maturity),
+            rating=candidate.rating,
+            currency=candidate.currency,
+            price=float(candidate.price),
+        )
+        for candidate in candidates
     ]
-
-    def rating_at_least(candidate_rating: str, threshold: str) -> bool:
-        # Extremely crude ordering for demo purposes.
-        order = ["AAA", "AA", "A", "BBB", "BB", "B", "CCC", "CC", "C", "D"]
-        try:
-            return order.index(candidate_rating) <= order.index(threshold)
-        except ValueError:
-            # Unknown ratings are treated as worst.
-            return False
-
-    results: list[BondCandidate] = []
-    for c in universe:
-        if min_maturity and c.maturity_date < min_maturity:
-            continue
-        if max_maturity and c.maturity_date > max_maturity:
-            continue
-        if min_yield is not None and c.yield_to_maturity < min_yield:
-            continue
-        if currency and c.currency != currency:
-            continue
-        if min_rating and not rating_at_least(c.rating, min_rating):
-            continue
-        results.append(c)
-
-    return results

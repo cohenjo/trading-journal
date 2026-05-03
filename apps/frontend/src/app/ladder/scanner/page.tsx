@@ -1,19 +1,11 @@
 "use client";
-import { apiFetch } from '@/lib/api-client';
 
 import React, { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
-type BondCandidate = {
-  id: string;
-  issuer: string;
-  coupon_rate: number;
-  maturity_date: string;
-  yield_to_maturity: number;
-  rating: string;
-  currency: string;
-  price: number;
-};
+import { listBondScanner, type BondScannerResult } from "./actions";
+
+type BondCandidate = BondScannerResult;
 
 const ScannerPage: React.FC = () => {
   const searchParams = useSearchParams();
@@ -30,7 +22,7 @@ const ScannerPage: React.FC = () => {
   // Initialize maturity filters based on optional fromYear query param.
   useEffect(() => {
     const fromYear = searchParams.get("fromYear");
-    if (fromYear) 
+    if (fromYear)
     {
       const yearNum = Number(fromYear) || new Date().getFullYear();
       setMinMaturity(`${yearNum}-01-01`);
@@ -43,21 +35,16 @@ const ScannerPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const params = new URLSearchParams();
-      if (minMaturity) params.set("min_maturity", minMaturity);
-      if (maxMaturity) params.set("max_maturity", maxMaturity);
-      if (minYield) params.set("min_yield", minYield);
-      if (minRating) params.set("min_rating", minRating);
-      if (currency) params.set("currency", currency);
-
-      const res = await apiFetch(`/api/bonds/scanner?${params.toString()}`);
-      if (!res.ok) {
-        throw new Error(`Request failed with status ${res.status}`);
-      }
-      const data: BondCandidate[] = await res.json();
+      const data = await listBondScanner({
+        min_maturity: minMaturity || undefined,
+        max_maturity: maxMaturity || undefined,
+        min_yield: minYield ? Number(minYield) / 100 : undefined,
+        min_rating: minRating || undefined,
+        currency: currency || undefined,
+      });
       setResults(data);
-    } catch (e: any) {
-      setError(e.message ?? "Search failed");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Search failed");
     } finally {
       setLoading(false);
     }
@@ -132,6 +119,12 @@ const ScannerPage: React.FC = () => {
         {loading ? "Searching..." : "Search"}
       </button>
 
+      {results.length > 0 && (
+        <div className="mt-3 text-xs text-slate-400">
+          Market data refreshed {new Date(results[0].refreshed_at).toLocaleString()}
+        </div>
+      )}
+
       {error && <div className="mt-3 text-sm text-red-400">{error}</div>}
 
       <div className="mt-6 overflow-x-auto text-sm">
@@ -145,6 +138,7 @@ const ScannerPage: React.FC = () => {
               <th className="border border-slate-700 px-2 py-1 text-left">Currency</th>
               <th className="border border-slate-700 px-2 py-1 text-right">Price</th>
               <th className="border border-slate-700 px-2 py-1 text-left">Maturity</th>
+              <th className="border border-slate-700 px-2 py-1 text-left">Freshness</th>
               <th className="border border-slate-700 px-2 py-1" />
             </tr>
           </thead>
@@ -163,6 +157,9 @@ const ScannerPage: React.FC = () => {
                 <td className="border border-slate-800 px-2 py-1 text-right">{b.price.toFixed(2)}</td>
                 <td className="border border-slate-800 px-2 py-1">
                   {new Date(b.maturity_date).toLocaleDateString()}
+                </td>
+                <td className="border border-slate-800 px-2 py-1">
+                  {new Date(b.refreshed_at).toLocaleString()}
                 </td>
                 <td className="border border-slate-800 px-2 py-1 text-center">
                   <button
@@ -184,7 +181,7 @@ const ScannerPage: React.FC = () => {
             {results.length === 0 && !loading && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="border border-slate-800 px-2 py-4 text-center text-slate-400"
                 >
                   No results yet. Adjust filters and click Search.
