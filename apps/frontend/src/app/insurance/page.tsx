@@ -1,7 +1,15 @@
 'use client';
-import { apiFetch } from '@/lib/api-client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import {
+  createInsurancePolicy,
+  deleteInsurancePolicy,
+  listInsurancePolicies,
+  updateInsurancePolicy,
+  type InsurancePolicy,
+  type InsurancePolicyPayload,
+  type InsurancePolicyType,
+} from './actions';
 
 // --- i18n ---
 type Lang = 'en' | 'he';
@@ -31,11 +39,11 @@ const t = {
       owner: 'Owner',
     },
     types: {
-      Life: 'Life',
-      Mortgage: 'Mortgage',
-      Health: 'Health',
-      Disability: 'Disability',
-      Other: 'Other',
+      life: 'Life',
+      mortgage: 'Mortgage',
+      health: 'Health',
+      disability: 'Disability',
+      other: 'Other',
     },
     owners: { You: 'You', Partner: 'Partner' },
     placeholders: {
@@ -80,11 +88,11 @@ const t = {
       owner: 'בעלות',
     },
     types: {
-      Life: 'חיים',
-      Mortgage: 'משכנתא',
-      Health: 'בריאות',
-      Disability: 'אובדן כושר עבודה',
-      Other: 'אחר',
+      life: 'חיים',
+      mortgage: 'משכנתא',
+      health: 'בריאות',
+      disability: 'אובדן כושר עבודה',
+      other: 'אחר',
     },
     owners: { You: 'שלך', Partner: 'בן/בת זוג' },
     placeholders: {
@@ -108,25 +116,19 @@ const t = {
 };
 
 // --- Types ---
-const POLICY_TYPES = ['Life', 'Mortgage', 'Health', 'Disability', 'Other'] as const;
-type PolicyType = (typeof POLICY_TYPES)[number];
+const POLICY_TYPES = ['life', 'mortgage', 'health', 'disability', 'other'] as const;
 
-interface InsurancePolicy {
+type InsurancePolicyForm = Omit<InsurancePolicyPayload, 'policy_number' | 'beneficiaries' | 'expiry_date' | 'website' | 'notes'> & {
   id?: string;
-  type: PolicyType;
-  provider: string;
-  policy_number?: string;
-  sum_insured?: string;
-  monthly_premium?: number | null;
-  beneficiaries?: string;
-  expiry_date?: string;
-  website?: string;
-  notes?: string;
-  owner: string;
-}
+  policy_number: string;
+  beneficiaries: string;
+  expiry_date: string;
+  website: string;
+  notes: string;
+};
 
-const emptyForm: InsurancePolicy = {
-  type: 'Life',
+const emptyForm: InsurancePolicyForm = {
+  type: 'life',
   provider: '',
   policy_number: '',
   sum_insured: '',
@@ -145,7 +147,7 @@ export default function InsurancePage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<InsurancePolicy>({ ...emptyForm });
+  const [form, setForm] = useState<InsurancePolicyForm>({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -153,15 +155,9 @@ export default function InsurancePage() {
 
   const fetchPolicies = useCallback(async () => {
     try {
-      const res = await apiFetch('/api/insurance');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.status === 'success') {
-          setPolicies(data.data || []);
-        }
-      }
+      setPolicies(await listInsurancePolicies());
     } catch {
-      // API not available yet — show empty state
+      setPolicies([]);
     } finally {
       setLoading(false);
     }
@@ -179,7 +175,19 @@ export default function InsurancePage() {
   };
 
   const openEdit = (p: InsurancePolicy) => {
-    setForm({ ...p });
+    setForm({
+      id: p.id,
+      owner: p.owner,
+      type: p.type,
+      provider: p.provider,
+      policy_number: p.policy_number ?? '',
+      sum_insured: p.sum_insured,
+      monthly_premium: p.monthly_premium,
+      beneficiaries: p.beneficiaries ?? '',
+      expiry_date: p.expiry_date ?? '',
+      website: p.website ?? '',
+      notes: p.notes ?? '',
+    });
     setEditingId(p.id || null);
     setShowForm(true);
     setError(null);
@@ -194,21 +202,25 @@ export default function InsurancePage() {
     setSaving(true);
     setError(null);
 
-    const body = {
-      ...form,
+    const payload: InsurancePolicyPayload = {
+      owner: form.owner,
+      type: form.type,
+      provider: form.provider,
+      policy_number: form.policy_number,
+      sum_insured: form.sum_insured,
       monthly_premium: form.monthly_premium || null,
+      beneficiaries: form.beneficiaries,
+      expiry_date: form.expiry_date,
+      website: form.website,
+      notes: form.notes,
     };
 
     try {
-      const url = editingId ? `/api/insurance/${editingId}` : '/api/insurance';
-      const method = editingId ? 'PUT' : 'POST';
-      const res = await apiFetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const result = editingId
+        ? await updateInsurancePolicy(editingId, payload)
+        : await createInsurancePolicy(payload);
 
-      if (!res.ok) throw new Error(`Server error ${res.status}`);
+      if (!result.ok) throw new Error(result.error);
 
       setShowForm(false);
       setEditingId(null);
@@ -223,7 +235,8 @@ export default function InsurancePage() {
   const handleDelete = async (id: string) => {
     if (!window.confirm(labels.confirmDelete)) return;
     try {
-      await apiFetch(`/api/insurance/${id}`, { method: 'DELETE' });
+      const result = await deleteInsurancePolicy(id);
+      if (!result.ok) throw new Error(result.error);
       await fetchPolicies();
     } catch {
       // silent
@@ -273,7 +286,7 @@ export default function InsurancePage() {
                   <label className="block text-sm font-medium text-slate-400 mb-1">{labels.form.type}</label>
                   <select
                     value={form.type}
-                    onChange={(e) => setForm({ ...form, type: e.target.value as PolicyType })}
+                    onChange={(e) => setForm({ ...form, type: e.target.value as InsurancePolicyType })}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-slate-200 focus:ring-blue-500 focus:border-blue-500"
                   >
                     {POLICY_TYPES.map((pt) => (

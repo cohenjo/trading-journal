@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import type { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
+import { saveFinanceSnapshot as saveFinanceSnapshotForDate } from '@/app/finances/actions';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,57 +65,8 @@ export async function saveFinanceSnapshot(
   items: FinanceItem[],
   metrics: FinanceMetrics,
 ): Promise<SaveSnapshotResult> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    return { success: false, error: 'Not authenticated' };
-  }
-
-  // Validate inputs before hitting the DB
-  if (!Array.isArray(items)) {
-    return { success: false, error: 'Invalid payload: items must be an array' };
-  }
-  if (
-    typeof metrics.net_worth !== 'number' ||
-    typeof metrics.total_assets !== 'number' ||
-    typeof metrics.total_liabilities !== 'number' ||
-    typeof metrics.total_savings !== 'number' ||
-    typeof metrics.total_investments !== 'number'
-  ) {
-    return { success: false, error: 'Invalid payload: all metric fields must be numbers' };
-  }
-
-  const householdId = await resolveHouseholdId(user.id);
-  if (!householdId) {
-    return { success: false, error: 'No active household found for your account' };
-  }
-
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const snapshotData: SnapshotData = { items, ...metrics };
-
-  const { error: upsertError } = await supabase.from('finance_snapshots').upsert(
-    {
-      date: today,
-      household_id: householdId,
-      data: snapshotData,
-      net_worth: metrics.net_worth,
-      total_assets: metrics.total_assets,
-      total_liabilities: metrics.total_liabilities,
-    },
-    { onConflict: 'household_id,date' },
-  );
-
-  if (upsertError) {
-    console.error('[saveFinanceSnapshot] upsert error:', upsertError.message);
-    return { success: false, error: 'Failed to save snapshot. Please try again.' };
-  }
-
-  return { success: true };
+  return saveFinanceSnapshotForDate(today, { items, ...metrics });
 }
 
 /**
