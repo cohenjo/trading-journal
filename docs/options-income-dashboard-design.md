@@ -945,3 +945,111 @@ Acceptance criteria:
 2. Decide the open questions above, especially roll window, matching preference, and backfill scope.
 3. After Phase 0, implement schema migrations and worker ingestion in small PRs.
 4. Build the `/options` replacement only after cooked monthly metrics exist, so Fenster can focus on UI fidelity instead of financial reconciliation logic.
+
+## Appendix A: Flex Field → Schema Mapping
+
+Phase 0 uses IBKR Flex XML as the source-of-truth probe format. Attribute availability can vary by account type and Flex UI version; if IBKR exposes an equivalent field with a slightly different name, keep the raw XML payload and normalize during Phase 1 ingestion.
+
+### TradeConfirms → `options_trades`
+
+| Flex XML attribute | Target column | Notes |
+|---|---|---|
+| `tradeID` | `options_trades.source_trade_id` | Primary broker trade identifier. |
+| `transactionID` | `options_trades.source_transaction_id` | Used with `tradeID` for idempotency. |
+| `ibExecID` | `options_trades.source_exec_id` | Optional execution-level uniqueness when available. |
+| `accountId` | `options_trades.account_id` | Also links to account configuration. |
+| `dateTime` | `options_trades.trade_time` | Prefer this over separate date/time fields. |
+| `tradeDate` | `options_trades.trade_date` | Fallback when `dateTime` is absent. |
+| `symbol` | `options_legs.option_symbol`; raw payload | IBKR option symbol can be retained for audit. |
+| `underlyingSymbol` | `options_legs.underlying_symbol` | Required for grouping and roll detection. |
+| `putCall` | `options_legs.right` | Normalize `P`/`PUT` to `put`, `C`/`CALL` to `call`. |
+| `strike` | `options_legs.strike` | Persist as `numeric(18,6)`. |
+| `expiry` | `options_legs.expiry` | Normalize `YYYYMMDD` to date. |
+| `multiplier` | `options_legs.multiplier` | Usually `100` for US equity options. |
+| `currency` | `options_trades.currency`; `options_legs.currency` | Default `USD` only when Flex omits it. |
+| `quantity` | `options_trades.quantity` | Preserve sign from IBKR; side is still normalized separately. |
+| `tradePrice` / `price` | `options_trades.price` | Prefer `tradePrice`; `price` is fallback in some exports. |
+| `proceeds` | `options_trades.gross_amount` | Broker-reported gross amount before commissions/fees. |
+| `commission` / `ibCommission` | `options_trades.commission` | Flex often emits `ibCommission`; map either name. |
+| `taxes` / fees fields | `options_trades.fees` | Not always present in Trades; retain raw payload for reconciliation. |
+| `netCash` | `options_trades.net_cash_flow` | Preferred cash-flow source. |
+| `fifoPnlRealized` | `options_trades.realized_pnl` | Canonical realized P&L per resolved decision §12.2. |
+| `buySell` | `options_trades.side` | Normalize `BUY`/`SELL`. |
+| `openCloseIndicator` | `options_trades.event_type` | `O` → `open`, `C` → `close`; EAE can override lifecycle events. |
+| all row attributes | `options_trades.raw_payload` | Preserve for audit and future field drift. |
+
+### CashTransactions → `options_cash_events`
+
+| Flex XML attribute | Target column | Notes |
+|---|---|---|
+| `transactionID` | `options_cash_events.source_transaction_id` | Primary idempotency key for cash rows. |
+| `accountId` | `options_cash_events.account_id` | Required for household account scope. |
+| `dateTime` | `options_cash_events.event_time` | Preferred timestamp when present. |
+| `date` / `reportDate` | `options_cash_events.event_date` | Fallback date. |
+| `type` | `options_cash_events.event_category`; raw payload | Normalize known option-related types; otherwise `other`. |
+| `description` | `options_cash_events.description` | Useful for assignment/exercise explanations. |
+| `amount` / `netCash` | `options_cash_events.amount` | Prefer `amount`; fallback to `netCash`. |
+| `currency` | `options_cash_events.currency` | Default `USD` only when Flex omits it. |
+| `tradeID` | `options_cash_events.raw_payload` | Flex may not emit this for every cash row; use only as a weak link. |
+| all row attributes | `options_cash_events.raw_payload` | Preserve full source row. |
+
+### OptionEAE → `options_trades` augmentation
+
+| Flex XML attribute | Target column | Notes |
+|---|---|---|
+| `tradeID` | `options_trades.source_trade_id` | Use for lifecycle trade rows when supplied. |
+| `transactionID` | `options_trades.source_transaction_id` | Use for idempotency and cash-event linkage. |
+| `accountId` | `options_trades.account_id` | Required account scope. |
+| `dateTime` / `reportDate` | `options_trades.trade_time`; `options_trades.trade_date` | Normalize lifecycle event date. |
+| `symbol` | `options_legs.option_symbol`; raw payload | Same leg-resolution path as TradeConfirms. |
+| `underlyingSymbol` | `options_legs.underlying_symbol` | Required for strategy grouping. |
+| `putCall` | `options_legs.right` | Normalize to enum. |
+| `strike` | `options_legs.strike` | Persist as `numeric(18,6)`. |
+| `expiry` | `options_legs.expiry` | Normalize to date. |
+| `multiplier` | `options_legs.multiplier` | Usually `100`. |
+| `quantity` | `options_trades.quantity` | Lifecycle quantity; sign conventions should be verified against real XML. |
+| `type` / `action` | `options_trades.event_type`; `raw_payload` flags | Map `Expiration` → `expire`, `Assignment` → `assign`, `Exercise` → `exercise`. |
+| `proceeds` | `options_trades.gross_amount`; `net_cash_flow` fallback | Assignments may represent stock settlement, so tag specially. |
+| `fifoPnlRealized` | `options_trades.realized_pnl` | Prefer Flex when present. |
+| `currency` | `options_trades.currency` | Default `USD` only when Flex omits it. |
+| all row attributes | `options_trades.raw_payload` | Preserve assignment/exercise/expiration flags. |
+
+### OpenPositions → `options_positions`
+
+| Flex XML attribute | Target column | Notes |
+|---|---|---|
+| `accountId` | `options_positions.account_id` | Required account scope. |
+| `symbol` | `options_legs.option_symbol`; raw payload | Resolve or create leg. |
+| `underlyingSymbol` | `options_legs.underlying_symbol` | Required leg attribute. |
+| `putCall` | `options_legs.right` | Normalize to enum. |
+| `strike` | `options_legs.strike` | Persist as `numeric(18,6)`. |
+| `expiry` | `options_legs.expiry` | Normalize to date. |
+| `multiplier` | `options_legs.multiplier` | Usually `100`. |
+| `position` / `quantity` | `options_positions.quantity_open` | Prefer `position`; fallback to `quantity`. |
+| `costBasis` | `options_positions.open_cash_flow`; raw payload | Flex cost basis is not always identical to original option cash flow; reconcile in Phase 1. |
+| `costPrice` | `options_positions.average_open_price` | Fallback when cost basis must be reconstructed. |
+| `markPrice` | `options_positions.raw_payload` | §6 table does not include mark price; propose later `mark_price numeric(18,6)` or keep in raw payload. |
+| `fifoPnlUnrealized` | `options_positions.raw_payload` | §6 table intentionally omits unrealized P&L; keep raw for future MTM add-on. |
+| margin fields if emitted | `options_positions.ib_margin_requirement` | Flex may not emit per-position margin; use account-level or IB Gateway fallback. |
+| all row attributes | future raw payload column or sync-run artifact | §6 `options_positions` currently lacks `raw_payload`; Phase 1 should add it if auditability is required. |
+
+### AccountInformation → `options_flex_sync_state` / sync metadata
+
+The current §6 table is named `options_sync_runs`, not `options_flex_sync_state`. Phase 1 should either store account snapshots in `options_sync_runs.metadata` or add an `options_margin_snapshots` / `options_account_snapshots` table if historical margin charts are required.
+
+| Flex XML attribute | Target column | Notes |
+|---|---|---|
+| `accountId` | `options_sync_runs.metadata.accountId` | Also identifies configured account. |
+| `baseCurrency` / `currency` | `options_sync_runs.metadata.currency` | Prefer `baseCurrency` when present. |
+| `marginRequirement` / `maintenanceMarginRequirement` | `options_sync_runs.metadata.marginRequirement` | Flex naming varies; IB Gateway may be fresher. |
+| `buyingPower` | `options_sync_runs.metadata.buyingPower` | Used for margin utilization alternatives. |
+| `availableFunds` | `options_sync_runs.metadata.availableFunds` | Alternative denominator per §7.6. |
+| `netLiquidation` | `options_sync_runs.metadata.netLiquidation` | Needed for account-wide margin utilization. |
+| all row attributes | `options_sync_runs.metadata.accountInformationRaw` | Preserve exact Flex names for Phase 1 schema decisions. |
+
+### Known Flex gaps / alternatives
+
+- The design prompt references `options_flex_sync_state`; §6 currently defines `options_sync_runs`. Use `options_sync_runs.metadata` in Phase 0/1 unless a dedicated account snapshot table is added.
+- `options_positions.markPrice` and `options_positions.fifoPnlUnrealized` are not present in the §6 DDL. Keep them in raw payload or add explicit columns only if Phase 4 MTM/margin gauges need them.
+- Flex may not emit per-position `marginRequirement`; prefer Account Information or IB Gateway account summary for account-wide margin utilization.
+- CashTransactions may not reliably include `tradeID`; use `transactionID`, dates, descriptions, and raw payload for reconciliation rather than hard-linking every cash row to a trade.
