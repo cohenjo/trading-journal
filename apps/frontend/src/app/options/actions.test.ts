@@ -1,237 +1,100 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockGetUser, mockRevalidatePath } = vi.hoisted(() => ({
-  mockGetUser: vi.fn(),
-  mockRevalidatePath: vi.fn(),
-}));
+const { mockGetUser } = vi.hoisted(() => ({ mockGetUser: vi.fn() }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
-}));
+vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 
-vi.mock('next/cache', () => ({
-  revalidatePath: mockRevalidatePath,
-}));
-
-import { createOptionsRecord, listOptionsRecords } from './actions';
 import { createClient } from '@/lib/supabase/server';
+import { getOptionsMonthlyMetrics, getUserAccountsWithOptionsEnabled } from './actions';
 
 const MOCK_USER_ID = 'user-uuid-1234';
 const MOCK_HOUSEHOLD_ID = 'household-uuid-5678';
-const HOUSEHOLD_ROW = { household_id: MOCK_HOUSEHOLD_ID };
 
-beforeEach(() => {
-  vi.resetAllMocks();
-});
-
-function authOk() {
-  mockGetUser.mockResolvedValue({ data: { user: { id: MOCK_USER_ID } }, error: null });
-}
-
-function authFail() {
-  mockGetUser.mockResolvedValue({ data: { user: null }, error: new Error('no session') });
-}
-
-function householdQuery(data: { household_id: string } | null = HOUSEHOLD_ROW) {
+function householdQuery() {
   return {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
     is: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockResolvedValue({ data, error: null }),
+    maybeSingle: vi.fn().mockResolvedValue({ data: { household_id: MOCK_HOUSEHOLD_ID }, error: null }),
   };
 }
 
-describe('listOptionsRecords', () => {
-  it('returns empty array when not authenticated', async () => {
-    authFail();
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: vi.fn(),
-    });
+beforeEach(() => {
+  vi.resetAllMocks();
+  mockGetUser.mockResolvedValue({ data: { user: { id: MOCK_USER_ID } }, error: null });
+});
 
-    await expect(listOptionsRecords()).resolves.toEqual([]);
+describe('options dashboard actions', () => {
+  it('returns empty monthly metrics when unauthenticated', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: new Error('no session') });
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn() });
+
+    await expect(getOptionsMonthlyMetrics(2026)).resolves.toEqual([]);
   });
 
-  it('returns household-scoped options rows sorted by year', async () => {
-    authOk();
+  it('reads cooked monthly metrics without touching legacy options_income', async () => {
     const order = vi.fn().mockResolvedValue({
-      data: [
-        { year: 2024, amount: '1234.56' },
-        { year: 2025, amount: 7890 },
-      ],
+      data: [{
+        account_id: 'DU123',
+        period_start: '2026-03-01',
+        period_end: '2026-03-31',
+        cash_flow_total: '2700.00',
+        realized_pnl_total: '1000.00',
+        cash_flow_cumulative: '2700.00',
+        realized_pnl_cumulative: '1000.00',
+        variance_gap: '1700.00',
+        variance_gap_cumulative: '1700.00',
+        trade_count: 4,
+        roll_count: 1,
+        roll_positive_count: 0,
+        roll_negative_count: 1,
+        roll_neutral_count: 0,
+        roll_efficiency_pct: '0.00',
+        last_computed_at: '2026-03-31T00:00:00Z',
+      }],
       error: null,
     });
-    const optionsQuery = {
+    const metricsQuery = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      gte: vi.fn().mockReturnThis(),
+      lte: vi.fn().mockReturnThis(),
       order,
     };
     const from = vi.fn((table: string) => {
       if (table === 'household_members') return householdQuery();
-      if (table === 'options_income') return optionsQuery;
+      if (table === 'options_dashboard_monthly') return metricsQuery;
       throw new Error(`Unexpected table: ${table}`);
     });
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from,
-    });
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from });
 
-    const records = await listOptionsRecords();
+    const result = await getOptionsMonthlyMetrics(2026, 'DU123');
 
-    expect(records).toEqual([
-      { year: 2024, amount: 1234.56 },
-      { year: 2025, amount: 7890 },
-    ]);
-    expect(optionsQuery.eq).toHaveBeenCalledWith('household_id', MOCK_HOUSEHOLD_ID);
-    expect(order).toHaveBeenCalledWith('year', { ascending: true });
-  });
-});
-
-describe('createOptionsRecord', () => {
-  it('returns an error when not authenticated and does not write', async () => {
-    authFail();
-    const upsert = vi.fn();
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: vi.fn(() => ({ upsert })),
-    });
-
-    const result = await createOptionsRecord([{ year: 2024, amount: 1000 }]);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/not authenticated/i);
-    expect(upsert).not.toHaveBeenCalled();
+    expect(result).toEqual([{ accountId: 'DU123', periodStart: '2026-03-01', periodEnd: '2026-03-31', cashFlow: '2700.00', realizedPnl: '1000.00', cumulativeCashFlow: '2700.00', cumulativeRealizedPnl: '1000.00', varianceGap: '1700.00', cumulativeVarianceGap: '1700.00', tradeCount: 4, rollCount: 1, rollPositiveCount: 0, rollNegativeCount: 1, rollNeutralCount: 0, rollEfficiencyPct: '0.00', lastComputedAt: '2026-03-31T00:00:00Z' }]);
+    expect(from).not.toHaveBeenCalledWith('options_income');
+    expect(metricsQuery.eq).toHaveBeenCalledWith('account_id', 'DU123');
   });
 
-  it('returns an error when the user has no active household', async () => {
-    authOk();
-    const upsert = vi.fn();
-    const from = vi.fn((table: string) => {
-      if (table === 'household_members') return householdQuery(null);
-      if (table === 'options_income') return { upsert };
-      throw new Error(`Unexpected table: ${table}`);
+  it('lists options-enabled trading accounts for the filter', async () => {
+    const order = vi.fn().mockResolvedValue({
+      data: [{ id: 7, name: 'IBKR Main', account_type: 'IBKR', account_id: 'DU777', linked_account_id: null }],
+      error: null,
     });
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from,
-    });
-
-    const result = await createOptionsRecord([{ year: 2024, amount: 1000 }]);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/no active household/i);
-    expect(upsert).not.toHaveBeenCalled();
-  });
-
-  it('upserts records with session-resolved household_id and composite conflict target', async () => {
-    authOk();
-    const not = vi.fn().mockResolvedValue({ error: null });
-    const deleteQuery = {
+    const accountsQuery = {
+      select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      not,
-    };
-    const upsert = vi.fn().mockResolvedValue({ error: null });
-    const optionsQuery = {
-      upsert,
-      delete: vi.fn(() => deleteQuery),
+      is: vi.fn().mockReturnThis(),
+      order,
     };
     const from = vi.fn((table: string) => {
       if (table === 'household_members') return householdQuery();
-      if (table === 'options_income') return optionsQuery;
+      if (table === 'trading_account_config') return accountsQuery;
       throw new Error(`Unexpected table: ${table}`);
     });
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from,
-    });
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from });
 
-    const result = await createOptionsRecord([
-      { year: 2025, amount: 2000 },
-      { year: 2024, amount: -100.25 },
-    ]);
-
-    expect(result).toEqual({
-      ok: true,
-      records: [
-        { year: 2024, amount: -100.25 },
-        { year: 2025, amount: 2000 },
-      ],
-    });
-    expect(upsert).toHaveBeenCalledWith(
-      [
-        { household_id: MOCK_HOUSEHOLD_ID, year: 2024, amount: -100.25 },
-        { household_id: MOCK_HOUSEHOLD_ID, year: 2025, amount: 2000 },
-      ],
-      { onConflict: 'household_id,year' },
-    );
-    expect(deleteQuery.eq).toHaveBeenCalledWith('household_id', MOCK_HOUSEHOLD_ID);
-    expect(not).toHaveBeenCalledWith('year', 'in', '(2024,2025)');
-    expect(mockRevalidatePath).toHaveBeenCalledWith('/options');
-  });
-
-  it('clears all household rows when saving an empty record set', async () => {
-    authOk();
-    const eq = vi.fn().mockResolvedValue({ error: null });
-    const optionsQuery = {
-      upsert: vi.fn(),
-      delete: vi.fn(() => ({ eq })),
-    };
-    const from = vi.fn((table: string) => {
-      if (table === 'household_members') return householdQuery();
-      if (table === 'options_income') return optionsQuery;
-      throw new Error(`Unexpected table: ${table}`);
-    });
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from,
-    });
-
-    const result = await createOptionsRecord([]);
-
-    expect(result).toEqual({ ok: true, records: [] });
-    expect(optionsQuery.upsert).not.toHaveBeenCalled();
-    expect(eq).toHaveBeenCalledWith('household_id', MOCK_HOUSEHOLD_ID);
-  });
-
-  it('rejects duplicate years before writing', async () => {
-    authOk();
-    const upsert = vi.fn();
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: vi.fn(() => ({ upsert })),
-    });
-
-    const result = await createOptionsRecord([
-      { year: 2024, amount: 1000 },
-      { year: 2024, amount: 2000 },
-    ]);
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/duplicate/i);
-    expect(upsert).not.toHaveBeenCalled();
-  });
-
-  it('returns an error when the DB upsert fails', async () => {
-    authOk();
-    const upsert = vi.fn().mockResolvedValue({ error: { message: 'RLS violation' } });
-    const optionsQuery = {
-      upsert,
-      delete: vi.fn(),
-    };
-    const from = vi.fn((table: string) => {
-      if (table === 'household_members') return householdQuery();
-      if (table === 'options_income') return optionsQuery;
-      throw new Error(`Unexpected table: ${table}`);
-    });
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from,
-    });
-
-    const result = await createOptionsRecord([{ year: 2024, amount: 1000 }]);
-
-    expect(result.ok).toBe(false);
-    expect(optionsQuery.delete).not.toHaveBeenCalled();
+    await expect(getUserAccountsWithOptionsEnabled()).resolves.toEqual([{ id: '7', label: 'IBKR Main (DU777)', accountId: 'DU777', accountType: 'IBKR' }]);
+    expect(accountsQuery.eq).toHaveBeenCalledWith('compute_options_income', true);
   });
 });
