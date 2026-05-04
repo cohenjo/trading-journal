@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 SECTION_ROW_NAMES = {
     "TradeConfirms": "TradeConfirm",
+    "Trades": "Trade",
     "CashTransactions": "CashTransaction",
     "OpenPositions": "OpenPosition",
     "OptionEAE": "OptionEAE",
@@ -140,14 +141,17 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
             if account_id and attrs.get("accountId") != account_id:
                 continue
             counts[section_name] = counts.get(section_name, 0) + 1
-            if section_name == "TradeConfirms":
-                trades.append(parse_trade_confirm(attrs, statement_dates[1]))
+            if section_name in {"TradeConfirms", "Trades"}:
+                if _is_option_contract_row(attrs):
+                    trades.append(parse_trade_confirm(attrs, statement_dates[1]))
             elif section_name == "CashTransactions":
                 cash.append(parse_cash_transaction(attrs))
             elif section_name == "OpenPositions":
-                positions.append(parse_open_position(attrs, statement_dates[1]))
+                if _is_option_contract_row(attrs):
+                    positions.append(parse_open_position(attrs, statement_dates[1]))
             elif section_name == "OptionEAE":
-                eae_rows.append(parse_option_eae(attrs, statement_dates[1]))
+                if _is_option_contract_row(attrs):
+                    eae_rows.append(parse_option_eae(attrs, statement_dates[1]))
             elif section_name == "AccountInformation":
                 account_info.append(parse_account_information(attrs))
     return FlexParseResult(
@@ -245,8 +249,8 @@ def parse_open_position(attrs: dict[str, str], fallback_date: date | None = None
         as_of_date=sync_time.date(),
         opened_at=sync_time,
         quantity_open=_first_decimal(attrs, ("position", "quantity")),
-        average_open_price=_first_decimal(attrs, ("costPrice", "avgCost")),
-        open_cash_flow=_first_decimal(attrs, ("costBasis", "openCashFlow")),
+        average_open_price=_first_decimal(attrs, ("costPrice", "avgCost", "costBasisPrice")),
+        open_cash_flow=_first_decimal(attrs, ("costBasis", "openCashFlow", "costBasisMoney")),
         ib_margin_requirement=_optional_decimal(attrs, "marginRequirement"),
         last_broker_sync_at=sync_time,
         raw_payload=attrs,
@@ -284,6 +288,12 @@ def _statement_dates(root: Element) -> tuple[date | None, date | None]:
     if statement is None:
         return None, None
     return _parse_date_value(statement.attrib.get("fromDate")), _parse_date_value(statement.attrib.get("toDate"))
+
+
+def _is_option_contract_row(attrs: dict[str, str]) -> bool:
+    if attrs.get("assetCategory") == "OPT":
+        return True
+    return all(_optional_text(attrs.get(name)) for name in ("expiry", "strike", "putCall"))
 
 
 def _leg_from_attrs(attrs: dict[str, str]) -> OptionLegKey:

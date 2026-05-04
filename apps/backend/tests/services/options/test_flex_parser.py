@@ -6,7 +6,7 @@ import shutil
 from decimal import Decimal
 from pathlib import Path
 
-from app.services.options.flex_parser import parse_flex_files
+from app.services.options.flex_parser import parse_flex_files, parse_open_position, parse_trade_confirm
 from scripts.flex_synthetic import write_synthetic_files
 
 
@@ -33,3 +33,55 @@ def test_parse_synthetic_flex_rows_into_typed_models() -> None:
     finally:
         if output_dir.exists():
             shutil.rmtree(output_dir)
+
+
+def test_parse_live_flex_trade_and_open_position_aliases() -> None:
+    """Live Activity Flex rows use Trade tags and cost-basis aliases."""
+
+    trade = parse_trade_confirm(
+        {
+            "accountId": "U1234567",
+            "assetCategory": "OPT",
+            "conid": "123456789",
+            "currency": "USD",
+            "dateTime": "20260504;153000",
+            "expiry": "20260619",
+            "fifoPnlRealized": "12.34",
+            "ibCommission": "-1.05",
+            "ibExecID": "exec-1",
+            "multiplier": "100",
+            "netCash": "198.95",
+            "proceeds": "200.00",
+            "putCall": "P",
+            "quantity": "-1",
+            "strike": "450",
+            "symbol": "SPY",
+            "tradeID": "trade-1",
+            "tradePrice": "2.00",
+            "underlyingSymbol": "SPY",
+        }
+    )
+    position = parse_open_position(
+        {
+            "accountId": "U1234567",
+            "assetCategory": "OPT",
+            "conid": "123456789",
+            "costBasisMoney": "-198.95",
+            "costBasisPrice": "1.9895",
+            "currency": "USD",
+            "expiry": "20260619",
+            "multiplier": "100",
+            "openDateTime": "20260504;153000",
+            "position": "-1",
+            "putCall": "P",
+            "strike": "450",
+            "symbol": "SPY",
+            "underlyingSymbol": "SPY",
+        }
+    )
+
+    assert trade.source_trade_id == "trade-1"
+    assert trade.side == "sell"
+    assert trade.leg.expiry.isoformat() == "2026-06-19"
+    assert position.average_open_price == Decimal("1.9895")
+    assert position.open_cash_flow == Decimal("-198.95")
