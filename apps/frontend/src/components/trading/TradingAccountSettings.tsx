@@ -22,7 +22,8 @@ export default function TradingAccountSettings() {
         host: "127.0.0.1",
         port: 4001,
         client_id: 1,
-        linked_account_id: ""
+        linked_account_id: "",
+        compute_options_income: true,
     });
     const [financeAccounts, setFinanceAccounts] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -72,6 +73,7 @@ export default function TradingAccountSettings() {
                 port: editingConfig.port,
                 client_id: editingConfig.client_id,
                 linked_account_id: editingConfig.linked_account_id,
+                compute_options_income: editingConfig.compute_options_income ?? true,
             });
             if (result.ok) {
                 setMessage("Settings saved successfully!");
@@ -94,7 +96,8 @@ export default function TradingAccountSettings() {
             host: "127.0.0.1",
             port: 4001,
             client_id: 1,
-            linked_account_id: ""
+            linked_account_id: "",
+            compute_options_income: true,
         });
     };
 
@@ -247,6 +250,19 @@ export default function TradingAccountSettings() {
                             </>
                         )}
                     </div>
+
+                    <label className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
+                        <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-blue-500"
+                            checked={editingConfig.compute_options_income ?? true}
+                            onChange={(e) => setEditingConfig({ ...editingConfig, compute_options_income: e.target.checked })}
+                        />
+                        <span>
+                            <span className="block font-medium text-slate-100">Compute options income for this account</span>
+                            <span className="block text-slate-500">Enabled by default. The worker will include this account in Flex options ingestion and monthly dashboard metrics.</span>
+                        </span>
+                    </label>
 
                     <div className="pt-4 flex items-center justify-between">
                         <p className={`text-sm ${message.includes("Error") ? "text-red-400" : "text-green-400"}`}>

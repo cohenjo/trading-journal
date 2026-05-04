@@ -17,6 +17,7 @@ export interface TradingAccountConfig {
   account_id: string | null;
   last_synced: string | null;
   last_synced_at: string | null;
+  compute_options_income: boolean;
 }
 
 export interface TradingAccountConfigInput {
@@ -28,6 +29,7 @@ export interface TradingAccountConfigInput {
   client_id?: number | string | null;
   linked_account_id?: string | null;
   account_id?: string | null;
+  compute_options_income?: boolean | null;
   // Legacy Schwab credential fields may still be present in callers, but the
   // Supabase schema intentionally does not persist broker secrets.
   app_key?: string | null;
@@ -71,6 +73,7 @@ const CONFIG_SELECT = [
   'account_id',
   'last_synced',
   'last_synced_at',
+  'compute_options_income',
 ].join(', ');
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -120,6 +123,7 @@ function normalizeConfigInput(input: TradingAccountConfigInput, householdId: str
     port: normalizeNumber(input.port, 4001),
     client_id: normalizeNumber(input.client_id, 1),
     linked_account_id: normalizeOptionalText(input.linked_account_id),
+    compute_options_income: input.compute_options_income ?? true,
     household_id: householdId,
   };
 }

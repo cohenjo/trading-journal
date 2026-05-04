@@ -173,6 +173,7 @@ describe('saveTradingConfig', () => {
       port: 4002,
       client_id: 2,
       linked_account_id: null,
+      compute_options_income: true,
       household_id: MOCK_HOUSEHOLD_ID,
     });
     expect(row).not.toHaveProperty('app_key');
@@ -200,9 +201,11 @@ describe('saveTradingConfig', () => {
       .mockResolvedValueOnce(actionClient)
       .mockResolvedValueOnce(householdClient());
 
-    const result = await saveTradingConfig({ id: 5, name: 'Updated', account_type: 'IBKR' });
+    const result = await saveTradingConfig({ id: 5, name: 'Updated', account_type: 'IBKR', compute_options_income: false });
 
     expect(result.ok).toBe(true);
+    const [row] = update.mock.calls[0] as [Record<string, unknown>];
+    expect(row.compute_options_income).toBe(false);
     expect(eqId).toHaveBeenCalledWith('id', 5);
     expect(eqHousehold).toHaveBeenCalledWith('household_id', MOCK_HOUSEHOLD_ID);
   });
