@@ -1,6 +1,7 @@
 import os
 from urllib.parse import quote_plus
 
+from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlmodel import Session, create_engine
 
@@ -24,8 +25,11 @@ def _normalize_database_url(raw_url: str) -> str:
     return f"postgresql://{username}:{password}@{host}:{port}/{database}"
 
 
+load_dotenv()
+
 DATABASE_URL = _normalize_database_url(
-    os.getenv("DATABASE_URL", "postgresql://user:password@localhost/trading-journal")
+    os.getenv("DIRECT_DATABASE_URL")
+    or os.getenv("DATABASE_URL", "postgresql://user:password@localhost/trading-journal")
 )
 
 engine = create_engine(

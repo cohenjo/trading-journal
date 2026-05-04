@@ -37,6 +37,7 @@ class TradingAccountConfig(SQLModel, table=True):
     account_id: Optional[str] = Field(default=None)
     last_synced: Optional[datetime] = Field(default=None)
     last_synced_at: Optional[datetime] = Field(default=None)
+    compute_options_income: bool = Field(default=True)
     household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
 
 
