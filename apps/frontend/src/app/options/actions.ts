@@ -1,318 +1,373 @@
 'use server';
 
-import Decimal from 'decimal.js';
-import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import type {
+  MonthlyMetric,
+  OptionsEnabledAccount,
+  OptionsFreshness,
+  OptionsTradeSummary,
+  RollEvent,
+  StrategyGroup,
+} from '@/types/options';
 
-export interface OptionsRecord {
-  year: number;
-  amount: number;
+interface HouseholdResult {
+  householdId: string | null;
 }
 
-export interface OptionsProjectionInput {
-  growth_rate: number;
-  cutoff_year: number;
-  final_year: number;
+type NumericLike = string | number | null | undefined;
+
+function decimalString(value: NumericLike): string {
+  if (value === null || value === undefined || value === '') return '0';
+  return String(value);
 }
 
-export interface OptionsProjectionPoint {
-  year: number;
-  amount: number;
-  type: 'historical' | 'projected';
+function nullableDecimalString(value: NumericLike): string | null {
+  if (value === null || value === undefined || value === '') return null;
+  return String(value);
 }
 
-export interface OptionsProjectionResult {
-  data: OptionsProjectionPoint[];
+function text(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
 }
 
-export type OptionsActionResult =
-  | { ok: true; records: OptionsRecord[] }
-  | { ok: false; error: string };
-
-interface OptionsIncomeRow {
-  year: number | string;
-  amount: number | string;
+function isoDate(value: unknown): string {
+  return text(value).slice(0, 10);
 }
 
-interface OptionsProjectionRecord {
-  year: number;
-  amount: Decimal;
+function toInt(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-const MIN_PROJECTION_YEAR = 1900;
-const MAX_PROJECTION_YEAR = 2200;
-const MAX_PROJECTION_YEARS = 200;
-const MIN_GROWTH_RATE = -1;
-const MAX_GROWTH_RATE = 10;
-
-/**
- * Looks up the calling user's active household_id from the authenticated
- * session. Caller input must never provide household scope.
- */
-async function resolveHouseholdId(userId: string): Promise<string | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('household_members')
-    .select('household_id')
-    .eq('user_id', userId)
-    .is('left_at', null)
-    .limit(1)
-    .maybeSingle();
-
-  if (error || !data) return null;
-  return data.household_id as string;
+function dateKey(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
-async function requireHousehold(): Promise<{ ok: true; householdId: string } | { ok: false; error: string }> {
+/** Resolves household scope from the authenticated session; never from caller input. */
+async function getAuthenticatedHousehold(): Promise<HouseholdResult> {
   const supabase = await createClient();
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
 
-  if (authError || !user) return { ok: false, error: 'Not authenticated' };
+  if (authError || !user) return { householdId: null };
 
-  const householdId = await resolveHouseholdId(user.id);
-  if (!householdId) return { ok: false, error: 'No active household found for your account' };
+  const { data, error } = await supabase
+    .from('household_members')
+    .select('household_id')
+    .eq('user_id', user.id)
+    .is('left_at', null)
+    .limit(1)
+    .maybeSingle();
 
-  return { ok: true, householdId };
+  if (error || !data) return { householdId: null };
+  return { householdId: text((data as { household_id?: unknown }).household_id) || null };
 }
 
-function toNumber(value: number | string): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+function applyAccountFilter<T extends { eq: (column: string, value: string) => T }>(
+  query: T,
+  accountId?: string,
+): T {
+  const normalized = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : null;
+  return normalized ? query.eq('account_id', normalized) : query;
 }
 
-function normalizeOptionsRecord(row: OptionsIncomeRow): OptionsRecord {
+function normalizeTrade(row: Record<string, unknown> | null | undefined): OptionsTradeSummary | null {
+  if (!row) return null;
+  const leg = row.options_legs as Record<string, unknown> | null | undefined;
   return {
-    year: Number(row.year),
-    amount: toNumber(row.amount),
+    id: text(row.id),
+    accountId: text(row.account_id),
+    strategyGroupId: row.strategy_group_id === null ? null : text(row.strategy_group_id),
+    eventType: text(row.event_type),
+    side: text(row.side),
+    tradeTime: text(row.trade_time),
+    tradeDate: isoDate(row.trade_date),
+    quantity: decimalString(row.quantity as NumericLike),
+    price: decimalString(row.price as NumericLike),
+    grossAmount: decimalString(row.gross_amount as NumericLike),
+    commission: decimalString(row.commission as NumericLike),
+    fees: decimalString(row.fees as NumericLike),
+    netCashFlow: decimalString(row.net_cash_flow as NumericLike),
+    realizedPnl: decimalString(row.realized_pnl as NumericLike),
+    currency: text(row.currency, 'USD'),
+    underlyingSymbol: leg ? text(leg.underlying_symbol) : undefined,
+    expiry: leg ? isoDate(leg.expiry) : undefined,
+    strike: leg ? decimalString(leg.strike as NumericLike) : undefined,
+    right: leg && (leg.right === 'call' || leg.right === 'put') ? leg.right : undefined,
   };
 }
 
-function normalizeProjectionRecord(row: OptionsIncomeRow): OptionsProjectionRecord {
+function normalizeRollEvent(row: Record<string, unknown>): RollEvent {
   return {
-    year: Number(row.year),
-    amount: new Decimal(String(row.amount)),
+    id: text(row.id),
+    accountId: text(row.account_id),
+    strategyGroupId: text(row.strategy_group_id),
+    detectedAt: text(row.detected_at),
+    detectionStatus: text(row.detection_status),
+    classification: row.classification === 'positive' || row.classification === 'neutral' ? row.classification : 'negative',
+    closedLegRealizedPnl: decimalString(row.closed_leg_realized_pnl as NumericLike),
+    incrementalCashFlow: decimalString(row.incremental_cash_flow as NumericLike),
+    oldExpiry: row.old_expiry === null ? null : isoDate(row.old_expiry),
+    newExpiry: row.new_expiry === null ? null : isoDate(row.new_expiry),
+    oldStrike: nullableDecimalString(row.old_strike as NumericLike),
+    newStrike: nullableDecimalString(row.new_strike as NumericLike),
+    heuristicVersion: text(row.heuristic_version),
+    closedTrade: normalizeTrade(row.closed_trade as Record<string, unknown> | null | undefined),
+    openedTrade: normalizeTrade(row.opened_trade as Record<string, unknown> | null | undefined),
   };
 }
 
-function assertValidProjectionInput(input: OptionsProjectionInput): void {
-  if (!Number.isFinite(input.growth_rate)) {
-    throw new Error('Options projection growth_rate must be finite');
-  }
-  if (input.growth_rate <= MIN_GROWTH_RATE || input.growth_rate > MAX_GROWTH_RATE) {
-    throw new Error('Options projection growth_rate is outside the supported range');
-  }
-  if (!Number.isInteger(input.cutoff_year) || !Number.isInteger(input.final_year)) {
-    throw new Error('Options projection years must be integers');
-  }
-  if (
-    input.cutoff_year < MIN_PROJECTION_YEAR ||
-    input.cutoff_year > MAX_PROJECTION_YEAR ||
-    input.final_year < MIN_PROJECTION_YEAR ||
-    input.final_year > MAX_PROJECTION_YEAR
-  ) {
-    throw new Error('Options projection years are outside the supported range');
-  }
-}
-
-function decimalToResponseNumber(value: Decimal): number {
-  return value.toDecimalPlaces(10).toNumber();
-}
-
-function calculateOptionsProjection(
-  historicalRecords: OptionsProjectionRecord[],
-  input: OptionsProjectionInput,
-): OptionsProjectionResult {
-  assertValidProjectionInput(input);
-
-  if (historicalRecords.length === 0) return { data: [] };
-
-  const historical = [...historicalRecords].sort((a, b) => a.year - b.year);
-  const total = historical.reduce((sum, record) => sum.plus(record.amount), new Decimal(0));
-  const baseAmount = total.dividedBy(historical.length);
-
-  const historicalPoints: OptionsProjectionPoint[] = historical.map((record) => ({
-    year: record.year,
-    amount: decimalToResponseNumber(record.amount),
-    type: 'historical',
-  }));
-
-  if (baseAmount.lessThanOrEqualTo(0)) return { data: historicalPoints };
-
-  const lastHistoricalYear = historical[historical.length - 1]?.year;
-  if (lastHistoricalYear === undefined || input.final_year <= lastHistoricalYear) {
-    return { data: historicalPoints };
-  }
-  if (input.final_year - lastHistoricalYear > MAX_PROJECTION_YEARS) {
-    throw new Error('Options projection horizon exceeds the supported range');
-  }
-
-  const points: OptionsProjectionPoint[] = [...historicalPoints];
-  const growthFactor = new Decimal(1).plus(input.growth_rate);
-  let cutoffValue: Decimal | null = null;
-
-  for (let year = lastHistoricalYear + 1; year <= input.final_year; year += 1) {
-    let currentAmount: Decimal;
-
-    if (year <= input.cutoff_year) {
-      const yearsFromLastHistorical = year - lastHistoricalYear;
-      currentAmount = baseAmount.times(growthFactor.pow(yearsFromLastHistorical));
-      if (year === input.cutoff_year) cutoffValue = currentAmount;
-    } else {
-      cutoffValue ??= baseAmount;
-      currentAmount = cutoffValue;
-    }
-
-    points.push({
-      year,
-      amount: decimalToResponseNumber(currentAmount),
-      type: 'projected',
-    });
-  }
-
-  return { data: points };
-}
-
-function validateOptionsRecords(payload: unknown): OptionsActionResult {
-  if (!Array.isArray(payload)) {
-    return { ok: false, error: 'Options records payload must be an array' };
-  }
-
-  const seenYears = new Set<number>();
-  const records: OptionsRecord[] = [];
-
-  for (const rawRecord of payload) {
-    if (!rawRecord || typeof rawRecord !== 'object') {
-      return { ok: false, error: 'Each options record must be an object' };
-    }
-
-    const record = rawRecord as Record<string, unknown>;
-    const year = Number(record.year);
-    const amount = Number(record.amount);
-
-    if (!Number.isInteger(year) || year <= 0) {
-      return { ok: false, error: 'Each options record year must be a positive integer' };
-    }
-    if (!Number.isFinite(amount)) {
-      return { ok: false, error: 'Each options record amount must be a finite number' };
-    }
-    if (seenYears.has(year)) {
-      return { ok: false, error: `Duplicate options record year: ${year}` };
-    }
-
-    seenYears.add(year);
-    records.push({ year, amount });
-  }
-
-  records.sort((a, b) => a.year - b.year);
-  return { ok: true, records };
-}
-
-/**
- * Lists historical options income rows for the authenticated user's household.
- * Returns an empty array when unauthenticated or when no active household exists.
- */
-export async function listOptionsRecords(): Promise<OptionsRecord[]> {
-  const household = await requireHousehold();
-  if (!household.ok) return [];
+/** Reads cooked monthly options metrics for the selected year and account. */
+export async function getOptionsMonthlyMetrics(year?: number, accountId?: string): Promise<MonthlyMetric[]> {
+  const targetYear = Number.isInteger(year) ? Number(year) : new Date().getFullYear();
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return [];
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('options_income')
-    .select('year, amount')
-    .eq('household_id', household.householdId)
-    .order('year', { ascending: true });
+  let query = supabase
+    .from('options_dashboard_monthly')
+    .select([
+      'account_id',
+      'period_start',
+      'period_end',
+      'cash_flow_total',
+      'realized_pnl_total',
+      'cash_flow_cumulative',
+      'realized_pnl_cumulative',
+      'variance_gap',
+      'variance_gap_cumulative',
+      'trade_count',
+      'roll_count',
+      'roll_positive_count',
+      'roll_negative_count',
+      'roll_neutral_count',
+      'roll_efficiency_pct',
+      'last_computed_at',
+    ].join(', '))
+    .eq('household_id', householdId)
+    .gte('period_start', `${targetYear}-01-01`)
+    .lte('period_start', `${targetYear}-12-31`);
+
+  query = applyAccountFilter(query, accountId);
+  const { data, error } = await query.order('period_start', { ascending: true });
 
   if (error) {
-    console.error('[listOptionsRecords] query error:', error.message);
+    console.error('[getOptionsMonthlyMetrics] query error:', error.message);
     return [];
   }
 
-  return ((data ?? []) as OptionsIncomeRow[]).map(normalizeOptionsRecord);
+  return ((data ?? []) as unknown as Record<string, unknown>[]).map((row) => ({
+    accountId: text(row.account_id),
+    periodStart: isoDate(row.period_start),
+    periodEnd: isoDate(row.period_end),
+    cashFlow: decimalString(row.cash_flow_total as NumericLike),
+    realizedPnl: decimalString(row.realized_pnl_total as NumericLike),
+    cumulativeCashFlow: decimalString(row.cash_flow_cumulative as NumericLike),
+    cumulativeRealizedPnl: decimalString(row.realized_pnl_cumulative as NumericLike),
+    varianceGap: decimalString(row.variance_gap as NumericLike),
+    cumulativeVarianceGap: decimalString(row.variance_gap_cumulative as NumericLike),
+    tradeCount: toInt(row.trade_count),
+    rollCount: toInt(row.roll_count),
+    rollPositiveCount: toInt(row.roll_positive_count),
+    rollNegativeCount: toInt(row.roll_negative_count),
+    rollNeutralCount: toInt(row.roll_neutral_count),
+    rollEfficiencyPct: nullableDecimalString(row.roll_efficiency_pct as NumericLike),
+    lastComputedAt: text(row.last_computed_at),
+  }));
 }
 
-/**
- * Projects options income for the authenticated household using the legacy
- * FastAPI formula: average historical income compounds until cutoff_year, then
- * stays flat through final_year. Monetary math stays in Decimal until response
- * serialization to match the prior JSON shape consumed by the UI.
- */
-export async function getOptionsProjection(input: OptionsProjectionInput): Promise<OptionsProjectionResult> {
-  const household = await requireHousehold();
-  if (!household.ok) return { data: [] };
+/** Reads detected roll events and joined close/open trade details for chart tooltips. */
+export async function getOptionsRollEvents(
+  rangeStart: Date,
+  rangeEnd: Date,
+  accountId?: string,
+): Promise<RollEvent[]> {
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return [];
+
+  const supabase = await createClient();
+  let query = supabase
+    .from('options_roll_events')
+    .select(`
+      id, account_id, strategy_group_id, detected_at, detection_status, classification,
+      closed_leg_realized_pnl, incremental_cash_flow, old_expiry, new_expiry,
+      old_strike, new_strike, heuristic_version,
+      closed_trade:options_trades!options_roll_events_closed_trade_id_fkey(
+        id, account_id, strategy_group_id, event_type, side, trade_time, trade_date,
+        quantity, price, gross_amount, commission, fees, net_cash_flow, realized_pnl, currency,
+        options_legs(underlying_symbol, expiry, strike, right)
+      ),
+      opened_trade:options_trades!options_roll_events_opened_trade_id_fkey(
+        id, account_id, strategy_group_id, event_type, side, trade_time, trade_date,
+        quantity, price, gross_amount, commission, fees, net_cash_flow, realized_pnl, currency,
+        options_legs(underlying_symbol, expiry, strike, right)
+      )
+    `)
+    .eq('household_id', householdId)
+    .neq('detection_status', 'rejected')
+    .gte('detected_at', rangeStart.toISOString())
+    .lte('detected_at', rangeEnd.toISOString());
+
+  query = applyAccountFilter(query, accountId);
+  const { data, error } = await query.order('detected_at', { ascending: true });
+
+  if (error) {
+    console.error('[getOptionsRollEvents] query error:', error.message);
+    return [];
+  }
+
+  return ((data ?? []) as Record<string, unknown>[]).map(normalizeRollEvent);
+}
+
+/** Reads strategy groups, child trades, and roll markers for the selected window. */
+export async function getOptionsStrategyTimeline(
+  rangeStart: Date,
+  rangeEnd: Date,
+  accountId?: string,
+): Promise<StrategyGroup[]> {
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return [];
+
+  const supabase = await createClient();
+  let query = supabase
+    .from('options_strategy_groups')
+    .select(`
+      id, account_id, underlying_symbol, kind, status, opened_at, closed_at,
+      net_cash_flow, realized_pnl, capital_at_risk, notes,
+      options_trades(
+        id, account_id, strategy_group_id, event_type, side, trade_time, trade_date,
+        quantity, price, gross_amount, commission, fees, net_cash_flow, realized_pnl, currency,
+        options_legs(underlying_symbol, expiry, strike, right)
+      ),
+      options_roll_events(
+        id, account_id, strategy_group_id, detected_at, detection_status, classification,
+        closed_leg_realized_pnl, incremental_cash_flow, old_expiry, new_expiry,
+        old_strike, new_strike, heuristic_version
+      )
+    `)
+    .eq('household_id', householdId)
+    .lte('opened_at', rangeEnd.toISOString())
+    .or(`closed_at.is.null,closed_at.gte.${rangeStart.toISOString()}`);
+
+  query = applyAccountFilter(query, accountId);
+  const { data, error } = await query.order('opened_at', { ascending: true });
+
+  if (error) {
+    console.error('[getOptionsStrategyTimeline] query error:', error.message);
+    return [];
+  }
+
+  return ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+    id: text(row.id),
+    accountId: text(row.account_id),
+    underlyingSymbol: text(row.underlying_symbol),
+    kind: row.kind === 'csp' || row.kind === 'vertical_spread' || row.kind === 'roll_chain' ? row.kind : 'ungrouped',
+    status: row.status === 'closed' || row.status === 'expired' || row.status === 'assigned' || row.status === 'mixed' ? row.status : 'open',
+    openedAt: text(row.opened_at),
+    closedAt: row.closed_at === null ? null : text(row.closed_at),
+    netCashFlow: decimalString(row.net_cash_flow as NumericLike),
+    realizedPnl: decimalString(row.realized_pnl as NumericLike),
+    capitalAtRisk: nullableDecimalString(row.capital_at_risk as NumericLike),
+    notes: row.notes === null ? null : text(row.notes),
+    trades: ((row.options_trades ?? []) as Record<string, unknown>[]).map(normalizeTrade).filter((trade): trade is OptionsTradeSummary => trade !== null),
+    rollEvents: ((row.options_roll_events ?? []) as Record<string, unknown>[])
+      .filter((roll) => roll.detection_status !== 'rejected')
+      .map((roll) => normalizeRollEvent(roll)),
+  }));
+}
+
+/** Returns the latest options ingestion sync timestamp visible to the user. */
+export async function getOptionsFreshness(): Promise<OptionsFreshness> {
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return { asOf: null, source: null, status: null };
 
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from('options_income')
-    .select('year, amount')
-    .eq('household_id', household.householdId)
-    .order('year', { ascending: true });
+    .from('options_flex_sync_state')
+    .select('last_sync_at, source, status')
+    .eq('household_id', householdId)
+    .not('last_sync_at', 'is', null)
+    .order('last_sync_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   if (error) {
-    console.error('[getOptionsProjection] query error:', error.message);
-    return { data: [] };
+    console.error('[getOptionsFreshness] query error:', error.message);
+    return { asOf: null, source: null, status: null };
   }
 
-  const historical = ((data ?? []) as OptionsIncomeRow[]).map(normalizeProjectionRecord);
-  return calculateOptionsProjection(historical, input);
+  const row = data as Record<string, unknown> | null;
+  return {
+    asOf: row ? text(row.last_sync_at) || null : null,
+    source: row ? text(row.source) || null : null,
+    status: row ? text(row.status) || null : null,
+  };
 }
 
-/**
- * Replaces the authenticated household's options income history.
- *
- * This mirrors the legacy FastAPI POST /api/options behavior: the client sends
- * the full record set, which is upserted by year and any omitted years are
- * removed. `household_id` is session-derived and protected by Supabase RLS.
- */
-export async function createOptionsRecord(payload: OptionsRecord[]): Promise<OptionsActionResult> {
-  const validation = validateOptionsRecords(payload);
-  if (!validation.ok) return validation;
-
-  const household = await requireHousehold();
-  if (!household.ok) return household;
+/** Lists trading accounts opted into options-income computation for filtering. */
+export async function getUserAccountsWithOptionsEnabled(): Promise<OptionsEnabledAccount[]> {
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return [];
 
   const supabase = await createClient();
-  const rows = validation.records.map((record) => ({
-    household_id: household.householdId,
-    year: record.year,
-    amount: record.amount,
-  }));
+  const { data, error } = await supabase
+    .from('trading_account_config')
+    .select('id, name, account_type, account_id, linked_account_id')
+    .eq('household_id', householdId)
+    .eq('compute_options_income', true)
+    .is('deleted_at', null)
+    .order('name', { ascending: true });
 
-  if (rows.length > 0) {
-    const { error: upsertError } = await supabase
-      .from('options_income')
-      .upsert(rows, { onConflict: 'household_id,year' });
-
-    if (upsertError) {
-      console.error('[createOptionsRecord] upsert error:', upsertError.message);
-      return { ok: false, error: 'Failed to save options income. Please try again.' };
-    }
-
-    const retainedYears = validation.records.map((record) => record.year).join(',');
-    const { error: deleteError } = await supabase
-      .from('options_income')
-      .delete()
-      .eq('household_id', household.householdId)
-      .not('year', 'in', `(${retainedYears})`);
-
-    if (deleteError) {
-      console.error('[createOptionsRecord] prune error:', deleteError.message);
-      return { ok: false, error: 'Failed to prune old options income records. Please try again.' };
-    }
-  } else {
-    const { error: deleteError } = await supabase
-      .from('options_income')
-      .delete()
-      .eq('household_id', household.householdId);
-
-    if (deleteError) {
-      console.error('[createOptionsRecord] delete error:', deleteError.message);
-      return { ok: false, error: 'Failed to clear options income. Please try again.' };
-    }
+  if (error) {
+    console.error('[getUserAccountsWithOptionsEnabled] query error:', error.message);
+    return [];
   }
 
-  revalidatePath('/options');
-  return { ok: true, records: validation.records };
+  return ((data ?? []) as Record<string, unknown>[]).map((row) => {
+    const fallbackId = String(row.id ?? '');
+    const account = text(row.account_id) || text(row.linked_account_id) || fallbackId;
+    const name = text(row.name, account);
+    const type = text(row.account_type, 'IBKR');
+    return {
+      id: fallbackId,
+      label: `${name}${account && account !== name ? ` (${account})` : ''}`,
+      accountId: account,
+      accountType: type,
+    };
+  }).filter((account) => account.accountId.length > 0);
+}
+
+/** Reads recent option trades for the optional drill-down table. */
+export async function getOptionsTrades(
+  rangeStart: Date,
+  rangeEnd: Date,
+  accountId?: string,
+  limit = 50,
+): Promise<OptionsTradeSummary[]> {
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return [];
+
+  const supabase = await createClient();
+  let query = supabase
+    .from('options_trades')
+    .select(`
+      id, account_id, strategy_group_id, event_type, side, trade_time, trade_date,
+      quantity, price, gross_amount, commission, fees, net_cash_flow, realized_pnl, currency,
+      options_legs(underlying_symbol, expiry, strike, right)
+    `)
+    .eq('household_id', householdId)
+    .gte('trade_date', dateKey(rangeStart))
+    .lte('trade_date', dateKey(rangeEnd));
+
+  query = applyAccountFilter(query, accountId);
+  const { data, error } = await query.order('trade_date', { ascending: false }).limit(limit);
+
+  if (error) {
+    console.error('[getOptionsTrades] query error:', error.message);
+    return [];
+  }
+
+  return ((data ?? []) as Record<string, unknown>[]).map(normalizeTrade).filter((trade): trade is OptionsTradeSummary => trade !== null);
 }

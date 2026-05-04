@@ -5,7 +5,8 @@ import { useSettings } from "../settings/SettingsContext";
 import { getDividendDashboard } from "@/app/dividends/actions";
 import StackedIncomeChart, { StackedChartData } from "../../components/Summary/StackedIncomeChart";
 import { getLadderIncome } from "../ladder/actions";
-import { getOptionsProjection } from "../options/actions";
+import Decimal from "decimal.js";
+import { getOptionsMonthlyMetrics } from "../options/actions";
 import type { IncomePoint } from "@/components/Ladder/types";
 
 interface YearAmountPoint {
@@ -32,15 +33,7 @@ export default function SummaryPage() {
     settings.dividendFinalYear,
   ]);
 
-  const optParams = useMemo(() => ({
-    growth_rate: settings.optionsGrowthRate,
-    cutoff_year: settings.cutoffYear,
-    final_year: settings.optionsFinalYear,
-  }), [
-    settings.optionsGrowthRate,
-    settings.cutoffYear,
-    settings.optionsFinalYear,
-  ]);
+  const optionsFinalYear = settings.optionsFinalYear;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -62,9 +55,17 @@ export default function SummaryPage() {
           divData.push({ year, amount: Math.round(projectedDividendAmount * 100) / 100 });
         }
 
-        // 3. Fetch Options Projection
-        const optionsProjection = await getOptionsProjection(optParams);
-        const optData: YearAmountPoint[] = optionsProjection.data;
+        // 3. Read cooked options metrics. The legacy options_income projection is replaced;
+        // use current-year realized P&L as the annual options income signal until Phase 4 forecasting.
+        const optionsMetrics = await getOptionsMonthlyMetrics(currentYear);
+        const currentOptionsRealized = optionsMetrics.reduce(
+          (sum, month) => sum.plus(month.realizedPnl),
+          new Decimal(0),
+        );
+        const optData: YearAmountPoint[] = [];
+        for (let year = currentYear; year <= optionsFinalYear; year += 1) {
+          optData.push({ year, amount: currentOptionsRealized.toDecimalPlaces(2).toNumber() });
+        }
 
         // Merge Data
         // Find range of years
@@ -73,7 +74,7 @@ export default function SummaryPage() {
         divData.forEach((d) => years.add(d.year));
         optData.forEach((d) => years.add(d.year));
 
-        const maxYear = Math.min(divParams.final_year, optParams.final_year);
+        const maxYear = Math.min(divParams.final_year, optionsFinalYear);
         const sortedYears = Array.from(years)
           .sort((a, b) => a - b)
           .filter((y) => y <= maxYear);
@@ -98,7 +99,7 @@ export default function SummaryPage() {
     };
 
     fetchData();
-  }, [divParams, optParams, settings.mainCurrency]);
+  }, [divParams, optionsFinalYear, settings.mainCurrency]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">

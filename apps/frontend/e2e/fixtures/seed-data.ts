@@ -238,12 +238,147 @@ export async function seedTrade(householdId: string, data: TradeSeedData): Promi
   }
 }
 
+export interface OptionsDashboardSeedResult {
+  accountId: string;
+  groupId: string;
+}
+
+/**
+ * Seeds a minimal Phase 3 options dashboard scenario: one enabled account,
+ * three monthly metric rows matching Jony's worked example, one strategy group,
+ * and one negative roll event.
+ */
+export async function seedOptionsDashboard(householdId: string): Promise<OptionsDashboardSeedResult> {
+  const admin = getAdminClient();
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const accountId = `E2E_OPTIONS_${suffix}`;
+
+  const { error: accountError } = await admin.from('trading_account_config').insert({
+    household_id: householdId,
+    name: 'E2E Options Account',
+    account_type: 'IBKR',
+    host: '127.0.0.1',
+    port: 4001,
+    client_id: 1,
+    account_id: accountId,
+    compute_options_income: true,
+  });
+  if (accountError) throw new Error(`[seed-data] insert trading_account_config failed: ${accountError.message}`);
+
+  const { error: syncError } = await admin.from('options_flex_sync_state').insert({
+    household_id: householdId,
+    account_id: accountId,
+    query_name: 'E2E Flex Query',
+    source: 'ibkr_flex',
+    status: 'succeeded',
+    last_sync_at: new Date().toISOString(),
+    last_from_date: '2026-01-01',
+    last_through_date: '2026-03-31',
+    rows_seen: 3,
+    rows_inserted: 3,
+  });
+  if (syncError) throw new Error(`[seed-data] insert options_flex_sync_state failed: ${syncError.message}`);
+
+  const { data: leg, error: legError } = await admin.from('options_legs').insert({
+    household_id: householdId,
+    account_id: accountId,
+    underlying_symbol: 'SPY',
+    option_symbol: `SPY-E2E-${suffix}`,
+    expiry: '2026-03-20',
+    strike: 540,
+    right: 'put',
+    multiplier: 100,
+    currency: 'USD',
+  }).select('id').single();
+  if (legError || !leg) throw new Error(`[seed-data] insert options_legs failed: ${legError?.message ?? 'no row'}`);
+
+  const { data: group, error: groupError } = await admin.from('options_strategy_groups').insert({
+    household_id: householdId,
+    account_id: accountId,
+    underlying_symbol: 'SPY',
+    kind: 'vertical_spread',
+    status: 'closed',
+    opened_at: '2026-01-15T15:30:00Z',
+    closed_at: '2026-03-15T15:30:00Z',
+    net_cash_flow: 2700,
+    realized_pnl: 1000,
+    capital_at_risk: 2300,
+  }).select('id').single();
+  if (groupError || !group) throw new Error(`[seed-data] insert options_strategy_groups failed: ${groupError?.message ?? 'no row'}`);
+
+  const baseTrade = {
+    household_id: householdId,
+    account_id: accountId,
+    strategy_group_id: group.id,
+    leg_id: leg.id,
+    source: 'ibkr_flex',
+    side: 'sell',
+    quantity: 1,
+    price: 30,
+    gross_amount: 3000,
+    commission: 0,
+    fees: 0,
+    currency: 'USD',
+  };
+
+  const { data: closedTrade, error: closedTradeError } = await admin.from('options_trades').insert({
+    ...baseTrade,
+    source_trade_id: `e2e-closed-${suffix}`,
+    event_type: 'close',
+    trade_time: '2026-02-14T15:30:00Z',
+    trade_date: '2026-02-14',
+    net_cash_flow: 200,
+    realized_pnl: -1000,
+  }).select('id').single();
+  if (closedTradeError || !closedTrade) throw new Error(`[seed-data] insert closed options_trades failed: ${closedTradeError?.message ?? 'no row'}`);
+
+  const { data: openedTrade, error: openedTradeError } = await admin.from('options_trades').insert({
+    ...baseTrade,
+    source_trade_id: `e2e-opened-${suffix}`,
+    event_type: 'open',
+    trade_time: '2026-02-14T15:35:00Z',
+    trade_date: '2026-02-14',
+    net_cash_flow: 200,
+    realized_pnl: 0,
+  }).select('id').single();
+  if (openedTradeError || !openedTrade) throw new Error(`[seed-data] insert opened options_trades failed: ${openedTradeError?.message ?? 'no row'}`);
+
+  const { error: rollError } = await admin.from('options_roll_events').insert({
+    household_id: householdId,
+    account_id: accountId,
+    strategy_group_id: group.id,
+    closed_trade_id: closedTrade.id,
+    opened_trade_id: openedTrade.id,
+    detected_at: '2026-02-14T15:35:00Z',
+    detection_status: 'detected',
+    classification: 'negative',
+    closed_leg_realized_pnl: -1000,
+    incremental_cash_flow: 200,
+    old_expiry: '2026-02-20',
+    new_expiry: '2026-03-20',
+    old_strike: 545,
+    new_strike: 540,
+    heuristic_version: 'e2e-v1',
+  });
+  if (rollError) throw new Error(`[seed-data] insert options_roll_events failed: ${rollError.message}`);
+
+  const { error: metricsError } = await admin.from('options_dashboard_monthly').insert([
+    { household_id: householdId, account_id: accountId, period_start: '2026-01-01', period_end: '2026-01-31', cash_flow_total: 3000, realized_pnl_total: 0, cash_flow_cumulative: 3000, realized_pnl_cumulative: 0, variance_gap: 3000, variance_gap_cumulative: 3000, trade_count: 1, roll_count: 0, roll_positive_count: 0, roll_negative_count: 0, roll_neutral_count: 0 },
+    { household_id: householdId, account_id: accountId, period_start: '2026-02-01', period_end: '2026-02-28', cash_flow_total: 200, realized_pnl_total: -1000, cash_flow_cumulative: 3200, realized_pnl_cumulative: -1000, variance_gap: 1200, variance_gap_cumulative: 4200, trade_count: 2, roll_count: 1, roll_positive_count: 0, roll_negative_count: 1, roll_neutral_count: 0, roll_efficiency_pct: 0 },
+    { household_id: householdId, account_id: accountId, period_start: '2026-03-01', period_end: '2026-03-31', cash_flow_total: -500, realized_pnl_total: 2000, cash_flow_cumulative: 2700, realized_pnl_cumulative: 1000, variance_gap: -2500, variance_gap_cumulative: 1700, trade_count: 1, roll_count: 0, roll_positive_count: 0, roll_negative_count: 0, roll_neutral_count: 0 },
+  ]);
+  if (metricsError) throw new Error(`[seed-data] insert options_dashboard_monthly failed: ${metricsError.message}`);
+
+  return { accountId, groupId: group.id as string };
+}
+
 /**
  * Deletes all seeded data for a household.
  *
  * Clears:
  *   - `finance_snapshots` rows for this household (funds + assets)
  *   - `trade` rows for this household
+ *   - options Phase 1/2 dashboard rows for this household
  *
  * Does NOT delete the household itself or the user — that is handled by
  * the `testUser` fixture's afterAll teardown.
@@ -252,6 +387,14 @@ export async function cleanupHouseholdData(householdId: string): Promise<void> {
   const admin = getAdminClient();
 
   const results = await Promise.allSettled([
+    admin.from('options_roll_events').delete().eq('household_id', householdId),
+    admin.from('options_trades').delete().eq('household_id', householdId),
+    admin.from('options_dashboard_monthly').delete().eq('household_id', householdId),
+    admin.from('options_strategy_groups').delete().eq('household_id', householdId),
+    admin.from('options_positions').delete().eq('household_id', householdId),
+    admin.from('options_legs').delete().eq('household_id', householdId),
+    admin.from('options_flex_sync_state').delete().eq('household_id', householdId),
+    admin.from('trading_account_config').delete().eq('household_id', householdId),
     admin.from('finance_snapshots').delete().eq('household_id', householdId),
     admin.from('trade').delete().eq('household_id', householdId),
   ]);
