@@ -179,6 +179,9 @@ export default function NetCashFlowVsRealizedChart({ months }: Props) {
         <div>
           <p className="text-xs uppercase tracking-[0.28em] text-slate-500">Income quality</p>
           <h2 className="mt-2 text-xl font-semibold text-slate-100">Net Cash Flow vs Realized P&amp;L</h2>
+          <p className="mt-2 max-w-2xl text-xs text-slate-500">
+            Includes synthetic assignment adjustments: when an option is assigned, the unrealized loss (strike − market) × shares is recorded as cash flow even though the underlying stock leg itself is not tracked.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
           {([

@@ -26,6 +26,7 @@ class StrategyTrade(RollCandidateTrade):
     household_id: str = ""
     trade_time: datetime | None = None
     multiplier: Decimal = DEFAULT_MULTIPLIER
+    assignment_cash_flow: Decimal = ZERO
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,7 +278,7 @@ def _build_group(builder: _GroupBuilder, by_id: dict[str, StrategyTrade]) -> Str
         closed_at=max(close_times)
         if close_times and all(_is_close(trade) or _has_close(trade, group_trades) for trade in group_trades)
         else None,
-        net_cash_flow=sum((trade.net_cash_flow for trade in group_trades), ZERO),
+        net_cash_flow=sum((trade.net_cash_flow + trade.assignment_cash_flow for trade in group_trades), ZERO),
         realized_pnl=sum((trade.realized_pnl for trade in group_trades), ZERO),
         capital_at_risk_open=capital_at_risk,
         risk_calculation_method=method,

@@ -108,6 +108,7 @@ def _trade_rows() -> list[dict[str, Any]]:
             "strike": Decimal(strike),
             "expiry": expiry,
             "multiplier": Decimal("100"),
+            "assignment_cash_flow": Decimal("0"),
         }
 
     return [

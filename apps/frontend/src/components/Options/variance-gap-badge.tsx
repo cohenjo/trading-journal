@@ -28,6 +28,9 @@ export default function VarianceGapBadge({ cumulativeCashFlow, cumulativeRealize
         <div>
           <p className="text-sm text-slate-400">Cumulative Cash Flow</p>
           <p className="text-3xl font-bold tabular-nums text-emerald-300">{formatSignedUsd(cumulativeCashFlow)}</p>
+          <p className="mt-1 text-xs text-slate-500" title="Synthetic assignment adjustments record (strike − market) × shares as cash flow when assigned stock is not tracked.">
+            Includes synthetic assignment adjustments.
+          </p>
         </div>
         <div>
           <p className="text-sm text-slate-400">Cumulative Realized P&amp;L</p>

@@ -21,6 +21,7 @@ def trade(
     expiry: date = date(2025, 3, 21),
     cash: str = "0",
     pnl: str = "0",
+    assignment_cash: str = "0",
     quantity: str | None = None,
 ) -> StrategyTrade:
     """Build a minimal strategy trade."""
@@ -41,6 +42,7 @@ def trade(
         quantity=Decimal(quantity or ("1" if side == "buy" else "-1")),
         realized_pnl=Decimal(pnl),
         net_cash_flow=Decimal(cash),
+        assignment_cash_flow=Decimal(assignment_cash),
     )
 
 
@@ -99,3 +101,18 @@ def test_idempotent_rerun_produces_same_group_ids() -> None:
     first = group_option_strategies(trades)
     second = group_option_strategies(list(reversed(trades)))
     assert [group.group_id for group in first.groups] == [group.group_id for group in second.groups]
+
+
+def test_assignment_synthetic_cash_flow_rolls_into_group_net_cash_flow() -> None:
+    """Strategy net cash flow includes synthetic assignment adjustments."""
+
+    result = group_option_strategies(
+        [
+            trade("open-short-put", cash="200"),
+            trade(
+                "assignment-close", day=date(2025, 2, 21), indicator="C", side="buy", cash="0", assignment_cash="-2900"
+            ),
+        ]
+    )
+
+    assert result.groups[0].net_cash_flow == Decimal("-2700")

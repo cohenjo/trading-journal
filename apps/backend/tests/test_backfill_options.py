@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from scripts import backfill_options
@@ -218,3 +219,34 @@ def test_same_window_backfill_is_idempotent(monkeypatch) -> None:  # type: ignor
     assert second["trade_count"] == 1
     assert len(session.trades) == 1
     assert len(session.legs) == 1
+
+
+def test_assignment_synthetic_cash_events_are_idempotent(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Re-running the same assignment XML upserts one assign_synth cash event."""
+
+    fixture_dir = Path("tmp/test-options-sync-idempotent")
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    fixture = fixture_dir / "assignment.xml"
+    fixture.write_text(
+        """
+<FlexQueryResponse><FlexStatements><FlexStatement accountId="U1234567" fromDate="20260101" toDate="20260131">
+  <Trades>
+    <Trade accountId="U1234567" assetCategory="OPT" currency="USD" symbol="NFLX  260117P00112000" underlyingSymbol="NFLX" tradeID="opt-1" multiplier="100" strike="112" expiry="2026-01-17" dateTime="2026-01-17;120000" putCall="P" quantity="1" tradePrice="0" proceeds="0" netCash="0" fifoPnlRealized="0" />
+    <Trade accountId="U1234567" assetCategory="STK" currency="USD" symbol="NFLX" underlyingSymbol="NFLX" tradeID="stk-1" multiplier="1" dateTime="2026-01-17;120000" quantity="100" tradePrice="112" closePrice="83" proceeds="0" netCash="0" mtmPnl="-2900" />
+  </Trades>
+  <OptionEAE>
+    <OptionEAE accountId="U1234567" currency="USD" symbol="NFLX  260117P00112000" underlyingSymbol="NFLX" transactionType="Assignment" tradeID="opt-1" />
+  </OptionEAE>
+</FlexStatement></FlexStatements></FlexQueryResponse>
+"""
+    )
+    monkeypatch.setattr("app.worker.handlers.options_sync._select_flex_source", lambda **_kwargs: [fixture])
+    session = InMemoryOptionsSession()
+
+    first = run_flex_options_sync(session, account_id=ACCOUNT_ID)
+    second = run_flex_options_sync(session, account_id=ACCOUNT_ID)
+
+    assert first["cash_event_count"] == 1
+    assert second["cash_event_count"] == 1
+    assert len(session.cash_events) == 1
+    assert next(iter(session.cash_events.values()))["source_transaction_id"] == "assign_synth:stk-1"
