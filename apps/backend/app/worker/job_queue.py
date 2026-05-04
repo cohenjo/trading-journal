@@ -32,6 +32,7 @@ class ComputeJob:
     """Pending compute job row claimed by the worker."""
 
     id: UUID
+    household_id: UUID
     job_type: str
     payload: JobPayload
     attempts: int
@@ -92,7 +93,7 @@ class JobQueuePoller:
                     limit :batch_size
                     for update skip locked
                  )
-                returning id, job_type, payload, attempts
+                returning id, household_id, job_type, payload, attempts
                 """
             ),
             {"max_attempts": MAX_ATTEMPTS, "batch_size": self.batch_size},
@@ -101,6 +102,7 @@ class JobQueuePoller:
         return [
             ComputeJob(
                 id=cast(UUID, row["id"]),
+                household_id=cast(UUID, row["household_id"]),
                 job_type=cast(str, row["job_type"]),
                 payload=cast(JobPayload, row["payload"] or {}),
                 attempts=cast(int, row["attempts"]),
@@ -122,7 +124,7 @@ class JobQueuePoller:
             return
 
         try:
-            result = handler(job.payload)
+            result = handler(_with_job_metadata(job))
         except Exception as exc:  # noqa: BLE001 - queue must capture handler failures
             logger.exception("Compute job %s failed", job.id)
             self._record_failure(session, job, exc)
@@ -176,6 +178,16 @@ class JobQueuePoller:
                 "attempts": next_attempts,
             },
         )
+
+
+def _with_job_metadata(job: ComputeJob) -> JobPayload:
+    """Add queue metadata required by handlers without mutating stored payload."""
+
+    return {
+        **job.payload,
+        "household_id": str(job.household_id),
+        "compute_job_id": str(job.id),
+    }
 
 
 def _json_safe(value: dict[str, Any]) -> str:

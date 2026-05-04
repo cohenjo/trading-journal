@@ -44,7 +44,7 @@ class FakeSession(AbstractContextManager["FakeSession"]):
     def execute(self, statement: object, params: dict[str, Any] | None = None) -> FakeMappings:
         sql = str(statement)
         self.executions.append({"sql": sql, "params": params or {}})
-        if "returning id, job_type, payload, attempts" in sql:
+        if "returning id, household_id, job_type, payload, attempts" in sql:
             return FakeMappings(self.rows)
         return FakeMappings([])
 
@@ -58,7 +58,10 @@ def test_poller_dispatches_handler_and_marks_done() -> None:
     """The poller claims pending jobs, calls the handler, and stores results."""
 
     job_id = UUID("00000000-0000-0000-0000-000000000001")
-    session = FakeSession([{"id": job_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 0}])
+    household_id = UUID("10000000-0000-0000-0000-000000000001")
+    session = FakeSession(
+        [{"id": job_id, "household_id": household_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 0}]
+    )
     seen_payloads: list[dict[str, object]] = []
 
     def handler(payload: dict[str, object]) -> dict[str, object]:
@@ -68,7 +71,13 @@ def test_poller_dispatches_handler_and_marks_done() -> None:
     poller = JobQueuePoller(handlers={"fake": handler}, session_factory=lambda: session)
 
     assert poller.poll_once() == 1
-    assert seen_payloads == [{"x": 1}]
+    assert seen_payloads == [
+        {
+            "x": 1,
+            "household_id": str(household_id),
+            "compute_job_id": str(job_id),
+        }
+    ]
     assert session.committed is True
     assert any(call["params"].get("result") == '{"ok": true}' for call in session.executions)
     assert any("status = 'done'" in call["sql"] for call in session.executions)
@@ -78,7 +87,10 @@ def test_poller_requeues_failed_job_until_retry_cap() -> None:
     """Handler exceptions increment attempts and keep retryable jobs pending."""
 
     job_id = UUID("00000000-0000-0000-0000-000000000002")
-    session = FakeSession([{"id": job_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 1}])
+    household_id = UUID("10000000-0000-0000-0000-000000000002")
+    session = FakeSession(
+        [{"id": job_id, "household_id": household_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 1}]
+    )
 
     def handler(_payload: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("boom")
@@ -96,7 +108,10 @@ def test_poller_marks_failed_at_retry_cap() -> None:
     """The third failed attempt permanently marks the job failed."""
 
     job_id = UUID("00000000-0000-0000-0000-000000000003")
-    session = FakeSession([{"id": job_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 2}])
+    household_id = UUID("10000000-0000-0000-0000-000000000003")
+    session = FakeSession(
+        [{"id": job_id, "household_id": household_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 2}]
+    )
 
     def handler(_payload: dict[str, object]) -> dict[str, object]:
         raise RuntimeError("still broken")
@@ -114,7 +129,10 @@ def test_poller_marks_unknown_job_type_failed() -> None:
     """Unknown job types fail permanently so the queue cannot spin forever."""
 
     job_id = UUID("00000000-0000-0000-0000-000000000004")
-    session = FakeSession([{"id": job_id, "job_type": "missing", "payload": {}, "attempts": 0}])
+    household_id = UUID("10000000-0000-0000-0000-000000000004")
+    session = FakeSession(
+        [{"id": job_id, "household_id": household_id, "job_type": "missing", "payload": {}, "attempts": 0}]
+    )
     poller = JobQueuePoller(handlers={}, session_factory=lambda: session)
 
     assert poller.poll_once() == 1

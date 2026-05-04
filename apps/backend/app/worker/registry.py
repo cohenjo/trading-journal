@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.services.trading_batch import run_trading_sync_batch
+from app.worker.backtest_handler import run_backtest_job
 from app.worker.bonds_scanner import refresh_bond_scanner_results
 from app.worker.pension_pdf_parse import handle_pension_pdf_parse
 
@@ -25,7 +26,10 @@ class JobSchedule:
     seconds: int | None = None
 
 
-JOB_HANDLERS: dict[str, JobHandler] = {"pension_pdf_parse": handle_pension_pdf_parse}
+JOB_HANDLERS: dict[str, JobHandler] = {
+    "pension_pdf_parse": handle_pension_pdf_parse,
+    "backtest": run_backtest_job,
+}
 JOB_SCHEDULES: list[JobSchedule] = [
     JobSchedule(
         job_id="trading_sync",
