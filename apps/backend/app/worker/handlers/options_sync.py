@@ -297,6 +297,7 @@ def _filter_result_by_dates(parsed: FlexParseResult, from_date: date | None, to_
 
 
 def _upsert_leg(session: Session, household_id: str, leg: OptionLegKey) -> str:
+    source_conid = _source_conid_for_insert(session, household_id, leg)
     row = session.execute(
         text(
             """
@@ -318,7 +319,7 @@ def _upsert_leg(session: Session, household_id: str, leg: OptionLegKey) -> str:
         {
             "household_id": household_id,
             "account_id": leg.account_id,
-            "source_conid": leg.source_conid,
+            "source_conid": source_conid,
             "underlying_symbol": leg.underlying_symbol,
             "option_symbol": leg.option_symbol,
             "expiry": leg.expiry,
@@ -330,6 +331,43 @@ def _upsert_leg(session: Session, household_id: str, leg: OptionLegKey) -> str:
         },
     ).scalar_one()
     return str(row)
+
+
+def _source_conid_for_insert(session: Session, household_id: str, leg: OptionLegKey) -> int | None:
+    if leg.source_conid is None:
+        return None
+    conflicting_leg_id = session.execute(
+        text(
+            """
+            select id::text
+              from public.options_legs
+             where household_id = :household_id
+               and account_id = :account_id
+               and source_conid = :source_conid
+               and not (
+                 underlying_symbol = :underlying_symbol
+                 and expiry = :expiry
+                 and strike = :strike
+                 and "right" = :right
+                 and multiplier = :multiplier
+                 and currency = :currency
+               )
+             limit 1
+            """
+        ),
+        {
+            "household_id": household_id,
+            "account_id": leg.account_id,
+            "source_conid": leg.source_conid,
+            "underlying_symbol": leg.underlying_symbol,
+            "expiry": leg.expiry,
+            "strike": leg.strike,
+            "right": leg.right,
+            "multiplier": leg.multiplier,
+            "currency": leg.currency,
+        },
+    ).scalar_one_or_none()
+    return None if conflicting_leg_id else leg.source_conid
 
 
 def _upsert_trade(session: Session, household_id: str, trade: FlexTradeConfirm, leg_id: str) -> None:
