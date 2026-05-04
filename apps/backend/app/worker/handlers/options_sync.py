@@ -179,7 +179,12 @@ def _select_flex_source(*, from_date: date | None, to_date: date | None, synthet
     source = os.getenv("OPTIONS_FLEX_SOURCE", "synthetic").lower()
     if synthetic is True or source == "synthetic" or not os.getenv("IBKR_FLEX_TOKEN"):
         return _synthetic_files()
-    from scripts.flex_probe import fetch_live_xml, parse_args, query_configs_from_env
+    try:
+        from scripts.flex_probe import fetch_live_xml, parse_args, query_configs_from_env
+    except ModuleNotFoundError as exc:
+        if exc.name != "scripts":
+            raise
+        from flex_probe import fetch_live_xml, parse_args, query_configs_from_env
 
     args = parse_args([])
     args.from_date = from_date
