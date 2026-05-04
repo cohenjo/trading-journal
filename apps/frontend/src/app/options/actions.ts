@@ -326,11 +326,11 @@ export async function getUserAccountsWithOptionsEnabled(): Promise<OptionsEnable
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('trading_account_config')
-    .select('id, name, account_type, account_id, linked_account_id')
+    .select('id, account_id, linked_account_id')
     .eq('household_id', householdId)
     .eq('compute_options_income', true)
     .is('deleted_at', null)
-    .order('name', { ascending: true });
+    .order('id', { ascending: true });
 
   if (error) {
     console.error('[getUserAccountsWithOptionsEnabled] query error:', error.message);
@@ -340,13 +340,11 @@ export async function getUserAccountsWithOptionsEnabled(): Promise<OptionsEnable
   return ((data ?? []) as Record<string, unknown>[]).map((row) => {
     const fallbackId = String(row.id ?? '');
     const account = text(row.account_id) || text(row.linked_account_id) || fallbackId;
-    const name = text(row.name, account);
-    const type = text(row.account_type, 'IBKR');
     return {
       id: fallbackId,
-      label: `${name}${account && account !== name ? ` (${account})` : ''}`,
+      label: account,
       accountId: account,
-      accountType: type,
+      accountType: 'IBKR',
     };
   }).filter((account) => account.accountId.length > 0);
 }

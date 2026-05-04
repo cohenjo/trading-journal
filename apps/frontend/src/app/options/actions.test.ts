@@ -78,7 +78,7 @@ describe('options dashboard actions', () => {
 
   it('lists options-enabled trading accounts for the filter', async () => {
     const order = vi.fn().mockResolvedValue({
-      data: [{ id: 7, name: 'IBKR Main', account_type: 'IBKR', account_id: 'DU777', linked_account_id: null }],
+      data: [{ id: 7, account_id: 'DU777', linked_account_id: null }],
       error: null,
     });
     const accountsQuery = {
@@ -94,7 +94,7 @@ describe('options dashboard actions', () => {
     });
     (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from });
 
-    await expect(getUserAccountsWithOptionsEnabled()).resolves.toEqual([{ id: '7', label: 'IBKR Main (DU777)', accountId: 'DU777', accountType: 'IBKR' }]);
+    await expect(getUserAccountsWithOptionsEnabled()).resolves.toEqual([{ id: '7', label: 'DU777', accountId: 'DU777', accountType: 'IBKR' }]);
     expect(accountsQuery.eq).toHaveBeenCalledWith('compute_options_income', true);
   });
 });
