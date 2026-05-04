@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
+import logging
 from pathlib import Path
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element, ParseError
@@ -20,6 +22,8 @@ SECTION_ROW_NAMES = {
     "AccountInformation": "AccountInformation",
 }
 MONEY_ZERO = Decimal("0")
+ASSIGNMENT_TRANSACTION_TYPES = {"assignment", "exercise"}
+logger = logging.getLogger(__name__)
 
 
 class FlexParserError(RuntimeError):
@@ -124,6 +128,20 @@ class FlexParseResult(BaseModel):
     section_counts: dict[str, int] = Field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class _AssignmentOptionLeg:
+    account_id: str
+    underlying_symbol: str
+    trade_date: date
+    trade_time: datetime
+    strike: Decimal
+    share_quantity_abs: Decimal
+    eae_trade_id: str
+    option_trade_id: str
+    transaction_type: str
+    currency: str
+
+
 def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> FlexParseResult:
     """Parse Flex XML files into typed rows, optionally filtering to one account."""
 
@@ -132,7 +150,14 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
     positions: list[FlexOpenPosition] = []
     eae_rows: list[FlexTradeConfirm] = []
     account_info: list[FlexAccountInformation] = []
-    counts: dict[str, int] = {}
+    assignment_eae_attrs: list[dict[str, str]] = []
+    option_trade_attrs: list[dict[str, str]] = []
+    stock_trade_attrs: list[dict[str, str]] = []
+    counts: dict[str, int] = {
+        "assignment_synthetic_emitted": 0,
+        "assignment_synthetic_skipped_no_market": 0,
+        "assignment_synthetic_skipped_ambiguous": 0,
+    }
     for path in paths:
         root = _parse_xml_file(path)
         statement_dates = _statement_dates(root)
@@ -143,17 +168,23 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
             counts[section_name] = counts.get(section_name, 0) + 1
             if section_name in {"TradeConfirms", "Trades"}:
                 if _is_option_contract_row(attrs):
+                    option_trade_attrs.append(attrs)
                     trades.append(parse_trade_confirm(attrs, statement_dates[1]))
+                elif attrs.get("assetCategory") == "STK":
+                    stock_trade_attrs.append(attrs)
             elif section_name == "CashTransactions":
                 cash.append(parse_cash_transaction(attrs))
             elif section_name == "OpenPositions":
                 if _is_option_contract_row(attrs):
                     positions.append(parse_open_position(attrs, statement_dates[1]))
             elif section_name == "OptionEAE":
+                if _is_assignment_lifecycle_row(attrs):
+                    assignment_eae_attrs.append(attrs)
                 if _is_option_contract_row(attrs):
                     eae_rows.append(parse_option_eae(attrs, statement_dates[1]))
             elif section_name == "AccountInformation":
                 account_info.append(parse_account_information(attrs))
+    cash.extend(_assignment_synthetic_cash_events(assignment_eae_attrs, option_trade_attrs, stock_trade_attrs, counts))
     return FlexParseResult(
         trades=trades,
         cash_transactions=cash,
@@ -266,6 +297,163 @@ def parse_account_information(attrs: dict[str, str]) -> FlexAccountInformation:
         currency=attrs.get("baseCurrency") or _currency(attrs),
         raw_payload=attrs,
     )
+
+
+def _assignment_synthetic_cash_events(
+    eae_rows: list[dict[str, str]],
+    option_trade_rows: list[dict[str, str]],
+    stock_trade_rows: list[dict[str, str]],
+    counts: dict[str, int],
+) -> list[FlexCashTransaction]:
+    """Create cash-flow adjustments from assigned/exercised stock legs."""
+
+    option_rows_by_trade_id: dict[str, list[dict[str, str]]] = {}
+    for row in option_trade_rows:
+        trade_id = _optional_text(row.get("tradeID") or row.get("transactionID"))
+        if trade_id:
+            option_rows_by_trade_id.setdefault(trade_id, []).append(row)
+
+    emitted: list[FlexCashTransaction] = []
+    seen_source_ids: set[str] = set()
+    for eae in eae_rows:
+        option_leg = _assignment_option_leg(eae, option_rows_by_trade_id)
+        if option_leg is None:
+            continue
+        matches = [row for row in stock_trade_rows if _stock_row_matches_assignment(row, option_leg)]
+        if len(matches) > 1:
+            counts["assignment_synthetic_skipped_ambiguous"] += 1
+            logger.warning(
+                "Skipping ambiguous assignment synthetic cash event",
+                extra={
+                    "account_id": option_leg.account_id,
+                    "underlying": option_leg.underlying_symbol,
+                    "trade_date": option_leg.trade_date.isoformat(),
+                    "eae_trade_id": option_leg.eae_trade_id,
+                    "stock_trade_ids": [_optional_text(row.get("tradeID")) for row in matches],
+                },
+            )
+            continue
+        if not matches:
+            continue
+        event = _synthetic_cash_from_stock_row(option_leg, matches[0], counts)
+        if event is None or event.source_transaction_id in seen_source_ids:
+            continue
+        seen_source_ids.add(event.source_transaction_id)
+        counts["assignment_synthetic_emitted"] += 1
+        emitted.append(event)
+    return emitted
+
+
+def _assignment_option_leg(
+    eae: dict[str, str], option_rows_by_trade_id: dict[str, list[dict[str, str]]]
+) -> _AssignmentOptionLeg | None:
+    transaction_type = _optional_text(eae.get("transactionType") or eae.get("type") or eae.get("action"))
+    if (transaction_type or "").lower() not in ASSIGNMENT_TRANSACTION_TYPES:
+        return None
+    eae_trade_id = _optional_text(eae.get("tradeID") or eae.get("transactionID"))
+    if not eae_trade_id:
+        return None
+    option_matches = option_rows_by_trade_id.get(eae_trade_id, [])
+    if len(option_matches) != 1:
+        if len(option_matches) > 1:
+            logger.warning(
+                "Skipping assignment synthetic cash event with ambiguous option leg",
+                extra={"eae_trade_id": eae_trade_id, "option_match_count": len(option_matches)},
+            )
+        return None
+    option_row = option_matches[0]
+    trade_time = _datetime_attr(option_row, ("dateTime",), fallback_date=None)
+    return _AssignmentOptionLeg(
+        account_id=_required_any(option_row, ("accountId",)),
+        underlying_symbol=_required_any(option_row, ("underlyingSymbol", "symbol")),
+        trade_date=_date_attr(option_row, ("tradeDate", "dateTime"), fallback=trade_time.date()),
+        trade_time=trade_time,
+        strike=_decimal_attr(option_row, "strike"),
+        share_quantity_abs=abs(
+            _decimal_attr(option_row, "quantity") * (_decimal_attr(option_row, "multiplier") or Decimal("100"))
+        ),
+        eae_trade_id=eae_trade_id,
+        option_trade_id=_required_any(option_row, ("tradeID", "transactionID")),
+        transaction_type=transaction_type or "Assignment",
+        currency=_currency(option_row),
+    )
+
+
+def _stock_row_matches_assignment(row: dict[str, str], option_leg: _AssignmentOptionLeg) -> bool:
+    if _optional_text(row.get("assetCategory")) != "STK":
+        return False
+    account_id = _optional_text(row.get("accountId"))
+    underlying = _optional_text(row.get("underlyingSymbol") or row.get("symbol"))
+    event_time = _optional_datetime_attr(row, ("dateTime",))
+    trade_date = _date_attr(row, ("tradeDate", "dateTime"), fallback=(event_time or option_leg.trade_time).date())
+    return (
+        account_id == option_leg.account_id
+        and underlying == option_leg.underlying_symbol
+        and trade_date == option_leg.trade_date
+        and _first_decimal(row, ("tradePrice", "price")) == option_leg.strike
+        and abs(_decimal_attr(row, "quantity")) == option_leg.share_quantity_abs
+    )
+
+
+def _synthetic_cash_from_stock_row(
+    option_leg: _AssignmentOptionLeg, stock_row: dict[str, str], counts: dict[str, int]
+) -> FlexCashTransaction | None:
+    mtm_pnl = _optional_decimal(stock_row, "mtmPnl")
+    close_price = _optional_decimal(stock_row, "closePrice")
+    trade_price = _first_decimal(stock_row, ("tradePrice", "price"))
+    quantity = _decimal_attr(stock_row, "quantity")
+    formula = "mtmPnl"
+    if mtm_pnl is not None:
+        amount = mtm_pnl
+    elif close_price is not None:
+        amount = quantity * (close_price - trade_price)
+        formula = "computed"
+    else:
+        counts["assignment_synthetic_skipped_no_market"] += 1
+        logger.warning(
+            "Skipping assignment synthetic cash event without market price",
+            extra={
+                "account_id": option_leg.account_id,
+                "underlying": option_leg.underlying_symbol,
+                "eae_trade_id": option_leg.eae_trade_id,
+                "stock_trade_id": _optional_text(stock_row.get("tradeID")),
+            },
+        )
+        return None
+
+    stock_trade_id = _required_any(stock_row, ("tradeID", "transactionID"))
+    market_text = str(close_price) if close_price is not None else "unknown"
+    raw_payload = {
+        "underlying": option_leg.underlying_symbol,
+        "eae_trade_id": option_leg.eae_trade_id,
+        "option_trade_id": option_leg.option_trade_id,
+        "stk_trade_id": stock_trade_id,
+        "strike": str(option_leg.strike),
+        "close_price": str(close_price) if close_price is not None else "",
+        "trade_price": str(trade_price),
+        "quantity": str(quantity),
+        "formula": formula,
+        "transaction_type": option_leg.transaction_type,
+    }
+    return FlexCashTransaction(
+        account_id=option_leg.account_id,
+        source_transaction_id=f"assign_synth:{stock_trade_id}",
+        event_date=option_leg.trade_date,
+        event_time=_optional_datetime_attr(stock_row, ("dateTime",)) or option_leg.trade_time,
+        event_category="assignment_synthetic",
+        description=(
+            f"{option_leg.underlying_symbol} assignment synthetic "
+            f"(strike {option_leg.strike} vs market {market_text}, {abs(quantity)} shares)"
+        ),
+        amount=amount,
+        currency=_currency(stock_row) or option_leg.currency,
+        raw_payload=raw_payload,
+    )
+
+
+def _is_assignment_lifecycle_row(attrs: dict[str, str]) -> bool:
+    transaction_type = _optional_text(attrs.get("transactionType") or attrs.get("type") or attrs.get("action"))
+    return (transaction_type or "").lower() in ASSIGNMENT_TRANSACTION_TYPES
 
 
 def _parse_xml_file(path: Path) -> Element:

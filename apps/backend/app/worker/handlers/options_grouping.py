@@ -120,9 +120,19 @@ def _load_strategy_trades(
                    l."right"::text as right,
                    l.strike,
                    l.expiry,
-                   l.multiplier
+                   l.multiplier,
+                   coalesce(s.assignment_cash_flow, 0) as assignment_cash_flow
               from public.options_trades t
               join public.options_legs l on l.id = t.leg_id
+              left join (
+                   select account_id,
+                          raw_payload ->> 'option_trade_id' as source_trade_id,
+                          sum(amount) as assignment_cash_flow
+                     from public.options_cash_events
+                    where event_category = 'assignment_synthetic'
+                      and source_transaction_id like 'assign_synth:%'
+                    group by account_id, raw_payload ->> 'option_trade_id'
+              ) s on s.account_id = t.account_id and s.source_trade_id = t.source_trade_id
              where {" and ".join(where)}
              order by t.trade_date, t.trade_time, t.id
             """
@@ -148,6 +158,7 @@ def _load_strategy_trades(
             strike=Decimal(str(row["strike"])),
             expiry=row["expiry"],
             multiplier=Decimal(str(row["multiplier"])),
+            assignment_cash_flow=Decimal(str(row["assignment_cash_flow"])),
         )
         for row in rows
     ]

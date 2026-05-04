@@ -206,7 +206,7 @@ def _load_trade_facts(
             select event_date as trade_date, amount as net_cash_flow, 0::numeric as realized_pnl, 0 as trade_count
               from public.options_cash_events
              where {" and ".join(where).replace("trade_date", "event_date")}
-               and event_category = 'option_related'
+               and event_category in ('option_related', 'assignment_synthetic')
              order by trade_date
             """
         ),
