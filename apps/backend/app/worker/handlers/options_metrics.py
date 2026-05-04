@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlmodel import Session
 
 from app.dal.database import engine
-from app.services.options.metrics import OptionMetricTrade, compute_monthly_metrics
+from app.services.options.metrics import OptionMetricRoll, OptionMetricTrade, compute_monthly_metrics
 
 JobPayload = dict[str, object]
 JobResult = dict[str, object]
@@ -58,7 +58,8 @@ def compute_options_monthly_metrics(
     output: dict[str, Any] = {"accounts": [], "row_count": 0}
     for account in accounts:
         rows = _load_trade_facts(session, account["household_id"], account["account_id"], from_date, to_date)
-        metrics = compute_monthly_metrics(rows)
+        rolls = _load_roll_facts(session, account["household_id"], account["account_id"], from_date, to_date)
+        metrics = compute_monthly_metrics(rows, rolls)
         if metrics:
             start = metrics[0].period_start
             end = metrics[-1].period_start
@@ -86,12 +87,16 @@ def compute_options_monthly_metrics(
                           household_id, account_id, period_start, period_end,
                           cash_flow_total, realized_pnl_total,
                           cash_flow_cumulative, realized_pnl_cumulative,
-                          variance_gap, variance_gap_cumulative, trade_count, last_computed_at
+                          variance_gap, variance_gap_cumulative, trade_count,
+                          roll_count, roll_positive_count, roll_negative_count,
+                          roll_neutral_count, roll_efficiency_pct, last_computed_at
                         ) values (
                           :household_id, :account_id, :period_start, :period_end,
                           :cash_flow_total, :realized_pnl_total,
                           :cash_flow_cumulative, :realized_pnl_cumulative,
-                          :variance_gap, :variance_gap_cumulative, :trade_count, now()
+                          :variance_gap, :variance_gap_cumulative, :trade_count,
+                          :roll_count, :roll_positive_count, :roll_negative_count,
+                          :roll_neutral_count, :roll_efficiency_pct, now()
                         )
                         """
                     ),
@@ -109,6 +114,19 @@ def compute_options_monthly_metrics(
                 "cash_flow_total": str(sum((m.cash_flow_total for m in metrics), Decimal("0"))),
                 "realized_pnl_total": str(sum((m.realized_pnl_total for m in metrics), Decimal("0"))),
                 "variance_gap_cumulative": str(metrics[-1].variance_gap_cumulative if metrics else Decimal("0")),
+                "roll_count": sum(m.roll_count for m in metrics),
+                "roll_positive_count": sum(m.roll_positive_count for m in metrics),
+                "roll_negative_count": sum(m.roll_negative_count for m in metrics),
+                "roll_neutral_count": sum(m.roll_neutral_count for m in metrics),
+                "roll_efficiency_pct": str(
+                    (
+                        Decimal(sum(m.roll_positive_count for m in metrics))
+                        / Decimal(sum(m.roll_count for m in metrics))
+                        * Decimal("100")
+                    ).quantize(Decimal("0.01"))
+                    if sum(m.roll_count for m in metrics)
+                    else Decimal("0.00")
+                ),
             }
         )
         output["row_count"] += len(metrics)
@@ -177,6 +195,38 @@ def _load_trade_facts(
             trade_count=int(row["trade_count"]),
         )
         for row in rows
+    ]
+
+
+def _load_roll_facts(
+    session: Session,
+    household_id: str,
+    account_id: str,
+    from_date: date | None,
+    to_date: date | None,
+) -> list[OptionMetricRoll]:
+    where = ["r.household_id = :household_id", "r.account_id = :account_id", "r.detection_status != 'rejected'"]
+    params: dict[str, Any] = {"household_id": household_id, "account_id": account_id}
+    if from_date:
+        where.append("t.trade_date >= :from_date")
+        params["from_date"] = from_date
+    if to_date:
+        where.append("t.trade_date <= :to_date")
+        params["to_date"] = to_date
+    rows = session.execute(
+        text(
+            f"""
+            select t.trade_date as detected_date, r.classification::text as classification
+              from public.options_roll_events r
+              join public.options_trades t on t.id = r.closed_trade_id
+             where {" and ".join(where)}
+             order by t.trade_date, r.id
+            """
+        ),
+        params,
+    ).mappings()
+    return [
+        OptionMetricRoll(detected_date=row["detected_date"], classification=str(row["classification"])) for row in rows
     ]
 
 
