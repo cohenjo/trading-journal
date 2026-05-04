@@ -21,6 +21,7 @@ def test_jony_worked_example_totals() -> None:
         jony = summary["scenario_summaries"]["jony_worked_example"]
         assert Decimal(jony["cash_flow"]) == Decimal("2700.00")
         assert Decimal(jony["fifoPnlRealized"]) == Decimal("1000.00")
+        assert {f"multiyear_smoke_{year}" for year in range(2021, 2025)}.issubset(summary["scenario_summaries"])
     finally:
         if output_dir.exists():
             shutil.rmtree(output_dir)

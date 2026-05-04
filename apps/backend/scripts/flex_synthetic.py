@@ -29,7 +29,7 @@ def base_attrs(trade_id: str, transaction_id: str) -> dict[str, str]:
     }
 
 
-def flex_root(statement_name: str) -> Element:
+def flex_root(statement_name: str, *, from_date: str = "2025-01-01", to_date: str = "2025-12-31") -> Element:
     """Create the shared Flex response/statement envelope."""
     root = Element("FlexQueryResponse", {"queryName": statement_name})
     statements = SubElement(root, "FlexStatements", {"count": "1"})
@@ -38,8 +38,8 @@ def flex_root(statement_name: str) -> Element:
         "FlexStatement",
         {
             "accountId": ACCOUNT_ID,
-            "fromDate": "2025-01-01",
-            "toDate": "2025-12-31",
+            "fromDate": from_date,
+            "toDate": to_date,
             "period": "YearToDate",
         },
     )
@@ -587,6 +587,42 @@ def write_option_eae(path: Path) -> None:
     write_xml(path, root)
 
 
+def write_multiyear_smoke(path: Path, *, year: int, underlying_symbol: str) -> None:
+    """Write one distinct option trade for a historical smoke-test year."""
+
+    root = flex_root(
+        f"synthetic_{year}_smoke",
+        from_date=f"{year}-01-01",
+        to_date=f"{year}-12-31",
+    )
+    section = SubElement(statement(root), "TradeConfirms")
+    SubElement(
+        section,
+        "TradeConfirm",
+        option_trade(
+            trade_id=f"T-SMOKE-{year}-001",
+            transaction_id=f"X-SMOKE-{year}-001",
+            scenario=f"multiyear_smoke_{year}",
+            date_time=f"{year}-06-15;100000",
+            symbol=f"{underlying_symbol:<6}{str(year + 1)[2:]}0117P00100000",
+            underlying_symbol=underlying_symbol,
+            put_call="P",
+            strike="100",
+            expiry=f"{year + 1}0117",
+            quantity="-1",
+            trade_price="1.00",
+            proceeds="100",
+            commission="0",
+            net_cash="100",
+            fifo_pnl_realized="0",
+            buy_sell="SELL",
+            open_close_indicator="O",
+            notes="Minimal historical smoke-test trade for chunked backfills",
+        ),
+    )
+    write_xml(path, root)
+
+
 def write_account_info(path: Path) -> None:
     """Write synthetic AccountInformation rows."""
     root = flex_root("synthetic_account_info")
@@ -613,12 +649,26 @@ def write_account_info(path: Path) -> None:
 def write_synthetic_files(output_dir: Path = DEFAULT_OUTPUT_DIR) -> list[Path]:
     """Write all synthetic Flex fixtures and return their paths."""
     output_dir.mkdir(parents=True, exist_ok=True)
+    yearly_underlyings = {
+        2021: "IBM",
+        2022: "INTC",
+        2023: "AMD",
+        2024: "QQQ",
+    }
     writers = {
         "synthetic_trades.xml": write_trades,
         "synthetic_cash.xml": write_cash,
         "synthetic_positions.xml": write_positions,
         "synthetic_option_eae.xml": write_option_eae,
         "synthetic_account_info.xml": write_account_info,
+        **{
+            f"synthetic_{year}.xml": (
+                lambda path, year=year, underlying=underlying: write_multiyear_smoke(
+                    path, year=year, underlying_symbol=underlying
+                )
+            )
+            for year, underlying in yearly_underlyings.items()
+        },
     }
     paths: list[Path] = []
     for filename, writer in writers.items():

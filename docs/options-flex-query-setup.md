@@ -164,12 +164,30 @@ uv run python scripts/flex_probe.py --account U1234567 --from 2025-01-01 --to 20
 
 The probe writes raw XML to `apps/backend/tmp/flex/` and prints one Python dict summary. Confirm that `row_counts` includes `TradeConfirms`, `CashTransactions`, `OpenPositions`, `OptionEAE`, and `AccountInformation`, then compare one known rolled spread against the broker statement to the cent.
 
-## 6. Troubleshooting
+## 6. Multi-year Backfill
+
+After issue #245 is complete and the Flex Web Service token/query IDs are configured, backfill historical dashboard facts one account at a time. The backfill command chunks the requested range into calendar-year windows because IBKR Flex requests are typically capped at roughly 365 days.
+
+```bash
+cd apps/backend
+set -a && source .env && set +a
+uv run python scripts/backfill_options.py --start 2021-01-01 --end 2024-12-31 --account U1234567
+```
+
+Use `--year 2021` for a single calendar-year retry, and `--dry-run` to parse/run the worker chain while rolling back database writes:
+
+```bash
+uv run python scripts/backfill_options.py --year 2021 --account U1234567 --dry-run
+```
+
+Synthetic fixtures cover 2021-2025 for smoke testing only: 2021-2024 include one distinct trade per year to exercise chunking, and the existing 2025 worked example remains the richer reconciliation fixture. Real historical data still requires Jony to complete the IBKR.com Flex Query setup in issue #245.
+
+## 7. Troubleshooting
 
 - **No token configured:** `flex_probe.py` intentionally falls back to synthetic fixtures so Phase 1 can continue in parallel.
 - **Token expired or revoked:** generate a new token in Flex Web Service Configuration and update `apps/backend/.env` or GitHub secrets.
 - **IP not whitelisted:** add the worker's current public IP in IBKR's Flex Web Service Configuration, or temporarily disable IP restriction if acceptable.
 - **Query ID typo:** re-copy the Query ID from the Flex Queries page and verify it is in the matching `IBKR_FLEX_QUERY_ID_*` variable.
 - **1019 Statement generation in progress:** the probe polls `GetStatement`; if it times out, retry with a smaller date range or increase `--max-polls`.
-- **365-day range failure:** split the date range into multiple runs.
+- **365-day range failure:** rerun the command with `--year YYYY`, or use a narrower `--start/--end` range for the affected year.
 - **Missing fields:** edit the Flex Query and tick every field in Appendix A; rerun the probe and inspect `tmp/flex/*.xml`.

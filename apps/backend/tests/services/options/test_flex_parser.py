@@ -19,7 +19,7 @@ def test_parse_synthetic_flex_rows_into_typed_models() -> None:
     try:
         paths = write_synthetic_files(output_dir)
         parsed = parse_flex_files(paths)
-        assert len(parsed.trades) == 14
+        assert len(parsed.trades) == 18
         first = parsed.trades[0]
         assert first.account_id == "U1234567"
         assert first.leg.underlying_symbol == "SPY"
