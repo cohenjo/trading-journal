@@ -850,6 +850,13 @@ Acceptance criteria:
 - RLS verified for household reads.
 - Worker can retry and produce useful errors.
 
+Backfill flow:
+
+- `scripts/backfill_options.py` accepts `--start YYYY-MM-DD --end YYYY-MM-DD` and `--year YYYY`, then splits the range into inclusive calendar-year chunks to stay within IBKR's typical 365-day Flex limit.
+- Each chunk runs Flex ingestion, strategy grouping/roll detection, margin snapshot sync, and monthly metrics aggregation in order; after a multi-year write run, the CLI refreshes strategy grouping and monthly metrics once more for the full requested range so roll links and cumulative series can span year boundaries. Reruns are idempotent because source IDs and natural option-leg keys use existing upsert constraints.
+- `--dry-run` executes the same chain and rolls back the chunk transaction so operators can inspect counts before writing.
+- Synthetic fixtures cover 2021-2025 for smoke testing: 2021-2024 have one distinct trade per year for chunk verification, while the existing 2025 worked example remains unchanged for reconciliation. Real historical data requires IBKR Flex tokens/query IDs from issue #245.
+
 ### Phase 2 — Roll detection + StrategyGroup linkage + base metrics
 
 Goal: turn trades into income-quality analytics.

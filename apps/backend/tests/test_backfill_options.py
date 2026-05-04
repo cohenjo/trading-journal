@@ -1,0 +1,221 @@
+"""Tests for chunked options backfill CLI behavior."""
+
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+from typing import Any
+
+from scripts import backfill_options
+from app.worker.handlers.options_sync import run_flex_options_sync
+
+HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001"
+ACCOUNT_ID = "U1234567"
+
+
+class FakeScalar:
+    """Scalar wrapper for generated IDs."""
+
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def scalar_one(self) -> str:
+        """Return the fake scalar value."""
+
+        return self.value
+
+    def mappings(self) -> list[dict[str, Any]]:
+        """Return no mappings for scalar statements."""
+
+        return []
+
+
+class FakeMappings:
+    """Mappings wrapper for fake SELECT statements."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+
+    def mappings(self) -> list[dict[str, Any]]:
+        """Return mapping rows."""
+
+        return self.rows
+
+
+class InMemoryOptionsSession:
+    """Small in-memory session that models the worker's upsert semantics."""
+
+    def __init__(self) -> None:
+        self.legs: dict[tuple[Any, ...], str] = {}
+        self.trades: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self.cash_events: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self.positions: list[dict[str, Any]] = []
+        self.sync_states = 0
+        self.commits = 0
+        self.rollbacks = 0
+
+    def __enter__(self) -> InMemoryOptionsSession:
+        """Return this fake session as a context manager."""
+
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        """No-op context manager exit."""
+
+    def commit(self) -> None:
+        """Record a commit."""
+
+        self.commits += 1
+
+    def rollback(self) -> None:
+        """Record a rollback."""
+
+        self.rollbacks += 1
+
+    def execute(self, statement: object, params: dict[str, Any] | None = None) -> FakeScalar | FakeMappings:
+        """Record writes and return deterministic rows for worker SELECTs."""
+
+        sql = str(statement)
+        params = params or {}
+        if "from public.trading_account_config" in sql:
+            return FakeMappings(
+                [
+                    {
+                        "id": 1,
+                        "household_id": HOUSEHOLD_ID,
+                        "account_id": ACCOUNT_ID,
+                        "name": "IBKR Synthetic",
+                    }
+                ]
+            )
+        if "insert into public.options_legs" in sql:
+            key = (
+                params["household_id"],
+                params["account_id"],
+                params["underlying_symbol"],
+                params["expiry"],
+                params["strike"],
+                params["right"],
+                params["multiplier"],
+                params["currency"],
+            )
+            self.legs.setdefault(key, f"leg-{len(self.legs) + 1}")
+            return FakeScalar(self.legs[key])
+        if "insert into public.options_trades" in sql:
+            key = (
+                params["household_id"],
+                "ibkr_flex",
+                params["source_trade_id"],
+                params["source_transaction_id"],
+                params.get("source_exec_id"),
+            )
+            self.trades[key] = dict(params)
+        elif "insert into public.options_cash_events" in sql:
+            key = (params["household_id"], "ibkr_flex", params["source_transaction_id"])
+            self.cash_events[key] = dict(params)
+        elif "delete from public.options_positions" in sql:
+            self.positions = [
+                row
+                for row in self.positions
+                if not (
+                    row["household_id"] == params["household_id"]
+                    and row["account_id"] == params["account_id"]
+                    and row["as_of_date"] == params["as_of_date"]
+                )
+            ]
+        elif "insert into public.options_positions" in sql:
+            self.positions.append(dict(params))
+        elif "insert into public.options_flex_sync_state" in sql:
+            self.sync_states += 1
+        return FakeMappings([])
+
+
+def test_yearly_windows_split_2021_to_2024() -> None:
+    """The 2021-2024 backfill range is split into four IBKR-safe yearly chunks."""
+
+    windows = backfill_options.yearly_windows(date(2021, 1, 1), date(2024, 12, 31))
+    assert [(window.start, window.end) for window in windows] == [
+        (date(2021, 1, 1), date(2021, 12, 31)),
+        (date(2022, 1, 1), date(2022, 12, 31)),
+        (date(2023, 1, 1), date(2023, 12, 31)),
+        (date(2024, 1, 1), date(2024, 12, 31)),
+    ]
+
+
+def test_multiyear_backfill_ingests_one_synthetic_trade_per_year(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    """Chunked backfill processes each synthetic historical year once and commits each chunk."""
+
+    session = InMemoryOptionsSession()
+    monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(
+        backfill_options,
+        "compute_options_monthly_metrics",
+        lambda *args, **kwargs: {
+            "row_count": 1,
+            "accounts": [
+                {
+                    "cash_flow_total": "100",
+                    "realized_pnl_total": "0",
+                    "variance_gap_cumulative": "100",
+                }
+            ],
+        },
+    )
+
+    exit_code = backfill_options.main(
+        ["--synthetic", "--start", "2021-01-01", "--end", "2024-12-31", "--account", ACCOUNT_ID]
+    )
+
+    assert exit_code == 0
+    assert session.commits == 5
+    trades_by_year: dict[int, int] = {}
+    for trade in session.trades.values():
+        trade_year = trade["trade_date"].year
+        trades_by_year[trade_year] = trades_by_year.get(trade_year, 0) + 1
+    assert trades_by_year == {2021: 1, 2022: 1, 2023: 1, 2024: 1}
+    assert sum(Decimal(str(row["net_cash_flow"])) for row in session.trades.values()) == Decimal("400.000000")
+    output = capsys.readouterr().out
+    assert "[backfill 2021] parsed=1" in output
+    assert "[backfill 2024] parsed=1" in output
+
+
+def test_dry_run_rolls_back_each_chunk(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Dry-run mode executes the pipeline but rolls back instead of committing."""
+
+    session = InMemoryOptionsSession()
+    monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
+    assert backfill_options.main(["--synthetic", "--year", "2021", "--dry-run", "--account", ACCOUNT_ID]) == 0
+    assert session.commits == 0
+    assert session.rollbacks == 1
+
+
+def test_same_window_backfill_is_idempotent(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Re-running the same synthetic window does not duplicate trades or legs."""
+
+    monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
+    session = InMemoryOptionsSession()
+    first = run_flex_options_sync(
+        session,  # type: ignore[arg-type]
+        from_date=date(2021, 1, 1),
+        to_date=date(2021, 12, 31),
+        account_id=ACCOUNT_ID,
+        synthetic=True,
+    )
+    second = run_flex_options_sync(
+        session,  # type: ignore[arg-type]
+        from_date=date(2021, 1, 1),
+        to_date=date(2021, 12, 31),
+        account_id=ACCOUNT_ID,
+        synthetic=True,
+    )
+
+    assert first["trade_count"] == 1
+    assert second["trade_count"] == 1
+    assert len(session.trades) == 1
+    assert len(session.legs) == 1

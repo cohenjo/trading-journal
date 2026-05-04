@@ -117,7 +117,7 @@ def run_flex_options_sync(
 
     accounts = _load_accounts(session, account_id=account_id)
     if not accounts:
-        return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0}
+        return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
     paths = _select_flex_source(from_date=from_date, to_date=to_date, synthetic=synthetic)
     total_trades = 0
@@ -137,11 +137,13 @@ def run_flex_options_sync(
             total_cash += counts["cash_event_count"]
             total_positions += counts["position_count"]
             summaries.append({"account_id": parsed_account_id, **counts})
+    total_legs = sum(int(summary.get("leg_count", 0)) for summary in summaries)
     return {
         "accounts": summaries,
         "trade_count": total_trades,
         "cash_event_count": total_cash,
         "position_count": total_positions,
+        "leg_count": total_legs,
         "source_files": [str(path) for path in paths],
     }
 
@@ -190,8 +192,12 @@ def _select_flex_source(*, from_date: date | None, to_date: date | None, synthet
 
 
 def _synthetic_files() -> list[Path]:
+    expected_years = {"2021", "2022", "2023", "2024"}
     paths = sorted(SYNTHETIC_DIR.glob("synthetic_*.xml"))
-    if paths:
+    present_years = {
+        path.stem.removeprefix("synthetic_") for path in paths if path.stem.removeprefix("synthetic_").isdigit()
+    }
+    if paths and expected_years.issubset(present_years):
         return paths
     from scripts.flex_synthetic import write_synthetic_files
 
@@ -226,6 +232,7 @@ def _ingest_account(
     from_date: date | None,
     to_date: date | None,
 ) -> dict[str, int]:
+    parsed = _filter_result_by_dates(parsed, from_date, to_date)
     leg_ids: dict[OptionLegKey, str] = {}
     trades_to_insert = parsed.trades
     for trade in trades_to_insert:
@@ -255,7 +262,35 @@ def _ingest_account(
         "trade_count": len(trades_to_insert),
         "cash_event_count": len(parsed.cash_transactions),
         "position_count": len(parsed.open_positions),
+        "leg_count": len(leg_ids),
     }
+
+
+def _filter_result_by_dates(parsed: FlexParseResult, from_date: date | None, to_date: date | None) -> FlexParseResult:
+    """Keep parsed Flex rows whose business date falls inside the requested window."""
+
+    if from_date is None and to_date is None:
+        return parsed
+
+    def in_window(value: date | None) -> bool:
+        if value is None:
+            return True
+        if from_date and value < from_date:
+            return False
+        if to_date and value > to_date:
+            return False
+        return True
+
+    return FlexParseResult(
+        trades=[row for row in parsed.trades if in_window(row.trade_date)],
+        cash_transactions=[row for row in parsed.cash_transactions if in_window(row.event_date)],
+        open_positions=[row for row in parsed.open_positions if in_window(row.as_of_date)],
+        option_eae=[row for row in parsed.option_eae if in_window(row.trade_date)],
+        account_information=[
+            row for row in parsed.account_information if in_window(row.as_of.date() if row.as_of else None)
+        ],
+        section_counts=parsed.section_counts,
+    )
 
 
 def _upsert_leg(session: Session, household_id: str, leg: OptionLegKey) -> str:

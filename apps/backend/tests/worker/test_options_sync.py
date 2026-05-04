@@ -88,12 +88,11 @@ def test_run_flex_options_sync_ingests_synthetic_source(monkeypatch) -> None:  #
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
     session = FakeSession()
     result = run_flex_options_sync(session)  # type: ignore[arg-type]
-    assert result["trade_count"] == 14
+    assert result["trade_count"] == 18
     assert result["cash_event_count"] == 2
     assert result["position_count"] == 1
-    assert len(session.trades) == 14
-    assert (
-        session.trades[2]["realized_pnl"] == "-1000.000000" or str(session.trades[2]["realized_pnl"]) == "-1000.000000"
-    )
+    assert len(session.trades) == 18
+    losing_roll = next(row for row in session.trades if row["source_trade_id"] == "T-JONY-003")
+    assert losing_roll["realized_pnl"] == "-1000.000000" or str(losing_roll["realized_pnl"]) == "-1000.000000"
     assert len(session.legs) >= 1
     assert session.sync_states == 1
