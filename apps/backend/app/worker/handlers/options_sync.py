@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
+from decimal import Decimal
 import json
 import logging
 import os
@@ -74,6 +75,9 @@ def handle_flex_options_sync(
             from_date=_optional_date(payload.get("from")),
             to_date=_optional_date(payload.get("to")),
         )
+        from app.worker.handlers.options_margin_sync import run_options_margin_sync
+
+        margin_result = run_options_margin_sync(session, account_id=_optional_str(payload.get("account_id")))
         metric_result = compute_options_monthly_metrics(
             session,
             household_id=_optional_str(payload.get("household_id")),
@@ -82,7 +86,7 @@ def handle_flex_options_sync(
             to_date=_optional_date(payload.get("to")),
         )
         session.commit()
-        return {**result, "strategy_groups": grouping_result, "monthly_metrics": metric_result}
+        return {**result, "strategy_groups": grouping_result, "margin": margin_result, "monthly_metrics": metric_result}
 
 
 def run_scheduled_flex_options_sync() -> None:
@@ -93,6 +97,9 @@ def run_scheduled_flex_options_sync() -> None:
 
         result = run_flex_options_sync(session)
         compute_options_strategy_groups(session)
+        from app.worker.handlers.options_margin_sync import run_options_margin_sync
+
+        run_options_margin_sync(session)
         compute_options_monthly_metrics(session)
         session.commit()
     logger.info("Scheduled flex_options_sync completed: %s", result)
@@ -241,6 +248,8 @@ def _ingest_account(
         leg_id = leg_ids.get(position.leg) or _upsert_leg(session, household_id, position.leg)
         leg_ids[position.leg] = leg_id
         _insert_position(session, household_id, position, leg_id)
+    for account_info in parsed.account_information:
+        _upsert_flex_margin_snapshot(session, household_id, account_info)
     _upsert_sync_state(session, household_id, account_id, parsed, from_date, to_date)
     return {
         "trade_count": len(trades_to_insert),
@@ -373,6 +382,55 @@ def _insert_position(session: Session, household_id: str, position: FlexOpenPosi
             "raw_payload": _json(position.raw_payload),
         },
     )
+
+
+def _upsert_flex_margin_snapshot(session: Session, household_id: str, account_info: Any) -> None:
+    raw = account_info.raw_payload
+    margin_used = _first_decimal(raw, ("MaintMarginReq", "maintenanceMargin", "maintMarginReq"))
+    net_liq = _first_decimal(raw, ("NetLiquidation", "netLiquidation", "netLiq"))
+    margin_available = _first_decimal(raw, ("AvailableFunds", "availableFunds", "ExcessLiquidity"))
+    buying_power = _first_decimal(raw, ("BuyingPower", "buyingPower"))
+    if margin_used is None and margin_available is None and buying_power is None:
+        return
+    if margin_available is None and net_liq is not None and margin_used is not None:
+        margin_available = net_liq - margin_used
+    captured_at = (account_info.as_of or datetime.now(timezone.utc)).replace(second=0, microsecond=0)
+    session.execute(
+        text(
+            """
+            insert into public.options_margin_snapshots (
+              household_id, account_id, captured_at, margin_used, margin_available, buying_power, source
+            ) values (
+              :household_id, :account_id, :captured_at, :margin_used, :margin_available, :buying_power, 'flex'
+            )
+            on conflict on constraint options_margin_snapshots_account_captured_key do update set
+              margin_used = excluded.margin_used,
+              margin_available = excluded.margin_available,
+              buying_power = excluded.buying_power,
+              source = 'flex',
+              updated_at = now()
+            """
+        ),
+        {
+            "household_id": household_id,
+            "account_id": account_info.account_id,
+            "captured_at": captured_at,
+            "margin_used": margin_used,
+            "margin_available": margin_available,
+            "buying_power": buying_power,
+        },
+    )
+
+
+def _first_decimal(raw: dict[str, str], names: tuple[str, ...]) -> Decimal | None:
+    for name in names:
+        value = raw.get(name)
+        if value not in (None, ""):
+            try:
+                return Decimal(str(value).replace(",", ""))
+            except Exception:  # noqa: BLE001 - ignore malformed optional Flex account fields
+                return None
+    return None
 
 
 def _upsert_sync_state(

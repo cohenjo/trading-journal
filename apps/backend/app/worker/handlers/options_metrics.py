@@ -12,7 +12,13 @@ from sqlalchemy import text
 from sqlmodel import Session
 
 from app.dal.database import engine
-from app.services.options.metrics import OptionMetricRoll, OptionMetricTrade, compute_monthly_metrics
+from app.services.options.metrics import (
+    OptionCapitalHistory,
+    OptionMarginSnapshot,
+    OptionMetricRoll,
+    OptionMetricTrade,
+    compute_monthly_metrics,
+)
 
 JobPayload = dict[str, object]
 JobResult = dict[str, object]
@@ -59,7 +65,13 @@ def compute_options_monthly_metrics(
     for account in accounts:
         rows = _load_trade_facts(session, account["household_id"], account["account_id"], from_date, to_date)
         rolls = _load_roll_facts(session, account["household_id"], account["account_id"], from_date, to_date)
-        metrics = compute_monthly_metrics(rows, rolls)
+        capital_history = _load_capital_history(
+            session, account["household_id"], account["account_id"], from_date, to_date
+        )
+        margin_snapshots = _load_margin_snapshots(
+            session, account["household_id"], account["account_id"], from_date, to_date
+        )
+        metrics = compute_monthly_metrics(rows, rolls, capital_history, margin_snapshots)
         if metrics:
             start = metrics[0].period_start
             end = metrics[-1].period_start
@@ -89,14 +101,18 @@ def compute_options_monthly_metrics(
                           cash_flow_cumulative, realized_pnl_cumulative,
                           variance_gap, variance_gap_cumulative, trade_count,
                           roll_count, roll_positive_count, roll_negative_count,
-                          roll_neutral_count, roll_efficiency_pct, last_computed_at
+                          roll_neutral_count, roll_efficiency_pct, avg_capital_at_risk,
+                          return_on_capital_at_risk_pct, latest_margin_used,
+                          latest_margin_available, margin_utilization_pct, last_computed_at
                         ) values (
                           :household_id, :account_id, :period_start, :period_end,
                           :cash_flow_total, :realized_pnl_total,
                           :cash_flow_cumulative, :realized_pnl_cumulative,
                           :variance_gap, :variance_gap_cumulative, :trade_count,
                           :roll_count, :roll_positive_count, :roll_negative_count,
-                          :roll_neutral_count, :roll_efficiency_pct, now()
+                          :roll_neutral_count, :roll_efficiency_pct, :avg_capital_at_risk,
+                          :return_on_capital_at_risk_pct, :latest_margin_used,
+                          :latest_margin_available, :margin_utilization_pct, now()
                         )
                         """
                     ),
@@ -127,6 +143,15 @@ def compute_options_monthly_metrics(
                     if sum(m.roll_count for m in metrics)
                     else Decimal("0.00")
                 ),
+                "avg_capital_at_risk": str(metrics[-1].avg_capital_at_risk)
+                if metrics and metrics[-1].avg_capital_at_risk is not None
+                else None,
+                "return_on_capital_at_risk_pct": str(metrics[-1].return_on_capital_at_risk_pct)
+                if metrics and metrics[-1].return_on_capital_at_risk_pct is not None
+                else None,
+                "margin_utilization_pct": str(metrics[-1].margin_utilization_pct)
+                if metrics and metrics[-1].margin_utilization_pct is not None
+                else None,
             }
         )
         output["row_count"] += len(metrics)
@@ -227,6 +252,79 @@ def _load_roll_facts(
     ).mappings()
     return [
         OptionMetricRoll(detected_date=row["detected_date"], classification=str(row["classification"])) for row in rows
+    ]
+
+
+def _load_capital_history(
+    session: Session,
+    household_id: str,
+    account_id: str,
+    from_date: date | None,
+    to_date: date | None,
+) -> list[OptionCapitalHistory]:
+    where = ["g.household_id = :household_id", "g.account_id = :account_id", "h.capital_at_risk is not null"]
+    params: dict[str, Any] = {"household_id": household_id, "account_id": account_id}
+    if to_date:
+        where.append("h.effective_at::date <= :to_date")
+        params["to_date"] = to_date
+    rows = session.execute(
+        text(
+            f"""
+            select h.group_id::text as group_id, h.effective_at, h.capital_at_risk
+              from public.options_strategy_capital_history h
+              join public.options_strategy_groups g on g.id = h.group_id
+             where {" and ".join(where)}
+             order by h.group_id, h.effective_at
+            """
+        ),
+        params,
+    ).mappings()
+    history = [
+        OptionCapitalHistory(
+            group_id=str(row["group_id"]),
+            effective_at=row["effective_at"],
+            capital_at_risk=Decimal(str(row["capital_at_risk"])),
+        )
+        for row in rows
+    ]
+    if from_date:
+        return [row for row in history if row.effective_at.date() <= to_date] if to_date else history
+    return history
+
+
+def _load_margin_snapshots(
+    session: Session,
+    household_id: str,
+    account_id: str,
+    from_date: date | None,
+    to_date: date | None,
+) -> list[OptionMarginSnapshot]:
+    where = ["household_id = :household_id", "account_id = :account_id"]
+    params: dict[str, Any] = {"household_id": household_id, "account_id": account_id}
+    if from_date:
+        where.append("captured_at::date >= :from_date")
+        params["from_date"] = from_date
+    if to_date:
+        where.append("captured_at::date <= :to_date")
+        params["to_date"] = to_date
+    rows = session.execute(
+        text(
+            f"""
+            select captured_at, margin_used, margin_available
+              from public.options_margin_snapshots
+             where {" and ".join(where)}
+             order by captured_at
+            """
+        ),
+        params,
+    ).mappings()
+    return [
+        OptionMarginSnapshot(
+            captured_at=row["captured_at"],
+            margin_used=Decimal(str(row["margin_used"])) if row["margin_used"] is not None else None,
+            margin_available=Decimal(str(row["margin_available"])) if row["margin_available"] is not None else None,
+        )
+        for row in rows
     ]
 
 

@@ -1,10 +1,12 @@
 'use server';
 
+import Decimal from 'decimal.js';
 import { createClient } from '@/lib/supabase/server';
 import type {
   MonthlyMetric,
   OptionsEnabledAccount,
   OptionsFreshness,
+  OptionsMarginSource,
   OptionsTradeSummary,
   RollEvent,
   StrategyGroup,
@@ -41,6 +43,16 @@ function toInt(value: unknown): number {
 
 function dateKey(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function marginSource(value: unknown): OptionsMarginSource | null {
+  return value === 'ib_gateway' || value === 'flex' || value === 'synthetic' ? value : null;
+}
+
+function isOlderThanOneHour(value: string | null): boolean {
+  if (!value) return false;
+  const ageMs = new Decimal(Date.now()).minus(new Date(value).getTime());
+  return ageMs.gt(new Decimal(60 * 60 * 1000));
 }
 
 /** Resolves household scope from the authenticated session; never from caller input. */
@@ -370,4 +382,68 @@ export async function getOptionsTrades(
   }
 
   return ((data ?? []) as Record<string, unknown>[]).map(normalizeTrade).filter((trade): trade is OptionsTradeSummary => trade !== null);
+}
+
+
+/** Reads live capital-efficiency gauge values for the selected options account. */
+export async function getEfficiencyGaugesData(accountId?: string): Promise<import('@/types/options').EfficiencyGaugesData> {
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) {
+    return { rocaR_pct: null, marginUtilization_pct: null, marginSource: null, marginAsOf: null, marginUsed: null, marginAvailable: null, isStale: false };
+  }
+
+  const supabase = await createClient();
+  const accountFilter = typeof accountId === 'string' && accountId.trim() ? accountId.trim() : null;
+  const monthlyQuery = accountFilter
+    ? supabase
+      .from('options_dashboard_monthly')
+      .select('return_on_capital_at_risk_pct')
+      .eq('household_id', householdId)
+      .eq('account_id', accountFilter)
+      .not('return_on_capital_at_risk_pct', 'is', null)
+      .order('period_start', { ascending: false })
+      .limit(1)
+    : supabase
+      .from('options_dashboard_monthly')
+      .select('return_on_capital_at_risk_pct')
+      .eq('household_id', householdId)
+      .not('return_on_capital_at_risk_pct', 'is', null)
+      .order('period_start', { ascending: false })
+      .limit(1);
+
+  const marginQuery = accountFilter
+    ? supabase
+      .from('options_margin_snapshots')
+      .select('captured_at, margin_used, margin_available, source')
+      .eq('household_id', householdId)
+      .eq('account_id', accountFilter)
+      .order('captured_at', { ascending: false })
+      .limit(1)
+    : supabase
+      .from('options_margin_snapshots')
+      .select('captured_at, margin_used, margin_available, source')
+      .eq('household_id', householdId)
+      .order('captured_at', { ascending: false })
+      .limit(1);
+
+  const [monthlyResult, marginResult] = await Promise.all([monthlyQuery.maybeSingle(), marginQuery.maybeSingle()]);
+
+  if (monthlyResult.error) console.error('[getEfficiencyGaugesData] monthly query error:', monthlyResult.error.message);
+  if (marginResult.error) console.error('[getEfficiencyGaugesData] margin query error:', marginResult.error.message);
+
+  const monthly = monthlyResult.data as Record<string, unknown> | null;
+  const margin = marginResult.data as Record<string, unknown> | null;
+  const marginAsOf = margin ? text(margin.captured_at) || null : null;
+
+  return {
+    rocaR_pct: monthly ? nullableDecimalString(monthly.return_on_capital_at_risk_pct as NumericLike) : null,
+    marginUtilization_pct: margin && margin.margin_used !== null && margin.margin_available !== null && new Decimal(decimalString(margin.margin_available as NumericLike)).gt(0)
+      ? new Decimal(decimalString(margin.margin_used as NumericLike)).div(decimalString(margin.margin_available as NumericLike)).times(100).toFixed(2)
+      : null,
+    marginSource: margin ? marginSource(margin.source) : null,
+    marginAsOf,
+    marginUsed: margin ? nullableDecimalString(margin.margin_used as NumericLike) : null,
+    marginAvailable: margin ? nullableDecimalString(margin.margin_available as NumericLike) : null,
+    isStale: isOlderThanOneHour(marginAsOf),
+  };
 }

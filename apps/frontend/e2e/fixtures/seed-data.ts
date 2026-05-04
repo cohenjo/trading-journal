@@ -303,6 +303,8 @@ export async function seedOptionsDashboard(householdId: string): Promise<Options
     net_cash_flow: 2700,
     realized_pnl: 1000,
     capital_at_risk: 2300,
+    capital_at_risk_open: 10000,
+    risk_calculation_method: 'vertical_spread_max_loss',
   }).select('id').single();
   if (groupError || !group) throw new Error(`[seed-data] insert options_strategy_groups failed: ${groupError?.message ?? 'no row'}`);
 
@@ -365,9 +367,20 @@ export async function seedOptionsDashboard(householdId: string): Promise<Options
   const { error: metricsError } = await admin.from('options_dashboard_monthly').insert([
     { household_id: householdId, account_id: accountId, period_start: '2026-01-01', period_end: '2026-01-31', cash_flow_total: 3000, realized_pnl_total: 0, cash_flow_cumulative: 3000, realized_pnl_cumulative: 0, variance_gap: 3000, variance_gap_cumulative: 3000, trade_count: 1, roll_count: 0, roll_positive_count: 0, roll_negative_count: 0, roll_neutral_count: 0 },
     { household_id: householdId, account_id: accountId, period_start: '2026-02-01', period_end: '2026-02-28', cash_flow_total: 200, realized_pnl_total: -1000, cash_flow_cumulative: 3200, realized_pnl_cumulative: -1000, variance_gap: 1200, variance_gap_cumulative: 4200, trade_count: 2, roll_count: 1, roll_positive_count: 0, roll_negative_count: 1, roll_neutral_count: 0, roll_efficiency_pct: 0 },
-    { household_id: householdId, account_id: accountId, period_start: '2026-03-01', period_end: '2026-03-31', cash_flow_total: -500, realized_pnl_total: 2000, cash_flow_cumulative: 2700, realized_pnl_cumulative: 1000, variance_gap: -2500, variance_gap_cumulative: 1700, trade_count: 1, roll_count: 0, roll_positive_count: 0, roll_negative_count: 0, roll_neutral_count: 0 },
+    { household_id: householdId, account_id: accountId, period_start: '2026-03-01', period_end: '2026-03-31', cash_flow_total: -500, realized_pnl_total: 2000, cash_flow_cumulative: 2700, realized_pnl_cumulative: 1000, variance_gap: -2500, variance_gap_cumulative: 1700, trade_count: 1, roll_count: 0, roll_positive_count: 0, roll_negative_count: 0, roll_neutral_count: 0, avg_capital_at_risk: 10000, return_on_capital_at_risk_pct: 20.0, latest_margin_used: 5000, latest_margin_available: 15000, margin_utilization_pct: 33.33 },
   ]);
   if (metricsError) throw new Error(`[seed-data] insert options_dashboard_monthly failed: ${metricsError.message}`);
+
+  const { error: marginError } = await admin.from('options_margin_snapshots').insert({
+    household_id: householdId,
+    account_id: accountId,
+    captured_at: new Date().toISOString(),
+    margin_used: 5000,
+    margin_available: 15000,
+    buying_power: 15000,
+    source: 'synthetic',
+  });
+  if (marginError) throw new Error(`[seed-data] insert options_margin_snapshots failed: ${marginError.message}`);
 
   return { accountId, groupId: group.id as string };
 }
@@ -387,6 +400,7 @@ export async function cleanupHouseholdData(householdId: string): Promise<void> {
   const admin = getAdminClient();
 
   const results = await Promise.allSettled([
+    admin.from('options_margin_snapshots').delete().eq('household_id', householdId),
     admin.from('options_roll_events').delete().eq('household_id', householdId),
     admin.from('options_trades').delete().eq('household_id', householdId),
     admin.from('options_dashboard_monthly').delete().eq('household_id', householdId),

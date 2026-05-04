@@ -1,8 +1,8 @@
 import { test, expect } from './fixtures/test-user';
 import { cleanupHouseholdData, seedOptionsDashboard } from './fixtures/seed-data';
 
-test.describe('Options Income Dashboard Phase 3', () => {
-  test('renders all dashboard widgets from cooked Supabase tables', async ({ testUser: { page, householdId } }) => {
+test.describe('Options Income Dashboard Phase 4', () => {
+  test('renders all dashboard widgets and live gauges from cooked Supabase tables', async ({ testUser: { page, householdId } }) => {
     const consoleErrors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text());
@@ -16,7 +16,9 @@ test.describe('Options Income Dashboard Phase 3', () => {
       await expect(page.getByRole('heading', { name: /Options Income Dashboard/i })).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('freshness-badge')).toBeVisible();
       await expect(page.getByTestId('variance-gap-badge')).toBeVisible();
-      await expect(page.getByTestId('efficiency-gauges')).toContainText('Pending — Phase 4');
+      await expect(page.getByTestId('efficiency-gauges')).not.toContainText('Pending — Phase 4');
+      await expect(page.getByTestId('efficiency-gauges')).toContainText('20.00%');
+      await expect(page.getByTestId('efficiency-gauges')).toContainText('synthetic');
       await expect(page.getByTestId('net-cash-flow-chart')).toBeVisible();
       await expect(page.getByTestId('trade-lifecycle-timeline')).toBeVisible();
       await expect(page.getByTestId('roll-efficiency-donut')).toBeVisible();

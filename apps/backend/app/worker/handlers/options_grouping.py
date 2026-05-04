@@ -119,7 +119,8 @@ def _load_strategy_trades(
                    l.underlying_symbol,
                    l."right"::text as right,
                    l.strike,
-                   l.expiry
+                   l.expiry,
+                   l.multiplier
               from public.options_trades t
               join public.options_legs l on l.id = t.leg_id
              where {" and ".join(where)}
@@ -146,6 +147,7 @@ def _load_strategy_trades(
             right=str(row["right"]),
             strike=Decimal(str(row["strike"])),
             expiry=row["expiry"],
+            multiplier=Decimal(str(row["multiplier"])),
         )
         for row in rows
     ]
@@ -158,10 +160,10 @@ def _persist_grouping(session: Session, result: StrategyGroupingResult) -> None:
                 """
                 insert into public.options_strategy_groups (
                   id, household_id, account_id, underlying_symbol, kind, status, opened_at, closed_at,
-                  net_cash_flow, realized_pnl, metadata
+                  net_cash_flow, realized_pnl, capital_at_risk_open, risk_calculation_method, metadata
                 ) values (
                   :id, :household_id, :account_id, :underlying_symbol, :kind, :status, :opened_at, :closed_at,
-                  :net_cash_flow, :realized_pnl, cast(:metadata as jsonb)
+                  :net_cash_flow, :realized_pnl, :capital_at_risk_open, :risk_calculation_method, cast(:metadata as jsonb)
                 )
                 on conflict (id) do update set
                   underlying_symbol = excluded.underlying_symbol,
@@ -171,6 +173,8 @@ def _persist_grouping(session: Session, result: StrategyGroupingResult) -> None:
                   closed_at = excluded.closed_at,
                   net_cash_flow = excluded.net_cash_flow,
                   realized_pnl = excluded.realized_pnl,
+                  capital_at_risk_open = excluded.capital_at_risk_open,
+                  risk_calculation_method = excluded.risk_calculation_method,
                   metadata = excluded.metadata,
                   updated_at = now()
                 """
@@ -186,7 +190,35 @@ def _persist_grouping(session: Session, result: StrategyGroupingResult) -> None:
                 "closed_at": group.closed_at,
                 "net_cash_flow": group.net_cash_flow,
                 "realized_pnl": group.realized_pnl,
+                "capital_at_risk_open": group.capital_at_risk_open,
+                "risk_calculation_method": group.risk_calculation_method,
                 "metadata": _json(group.metadata),
+            },
+        )
+        session.execute(
+            text("delete from public.options_strategy_capital_history where group_id = :group_id"),
+            {"group_id": group.group_id},
+        )
+    for history in result.capital_history:
+        session.execute(
+            text(
+                """
+                insert into public.options_strategy_capital_history (
+                  group_id, effective_at, capital_at_risk, risk_calculation_method
+                ) values (
+                  :group_id, :effective_at, :capital_at_risk, :risk_calculation_method
+                )
+                on conflict on constraint options_strategy_capital_history_group_effective_key do update set
+                  capital_at_risk = excluded.capital_at_risk,
+                  risk_calculation_method = excluded.risk_calculation_method,
+                  updated_at = now()
+                """
+            ),
+            {
+                "group_id": history.group_id,
+                "effective_at": history.effective_at,
+                "capital_at_risk": history.capital_at_risk,
+                "risk_calculation_method": history.risk_calculation_method,
             },
         )
     for trade_id, group_id in result.trade_group_ids.items():

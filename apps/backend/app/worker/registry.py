@@ -9,6 +9,11 @@ from app.worker.backtest_handler import run_backtest_job
 from app.worker.bonds_scanner import refresh_bond_scanner_results
 from app.worker.handlers.options_grouping import handle_compute_options_strategy_groups
 from app.worker.handlers.options_metrics import handle_compute_options_monthly_metrics
+from app.worker.handlers.options_margin_sync import (
+    handle_options_margin_sync,
+    run_intraday_options_margin_sync,
+    run_scheduled_options_margin_sync,
+)
 from app.worker.handlers.options_sync import handle_flex_options_sync, run_scheduled_flex_options_sync
 from app.worker.pension_pdf_parse import handle_pension_pdf_parse
 
@@ -35,6 +40,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "flex_options_sync": handle_flex_options_sync,
     "compute_options_strategy_groups": handle_compute_options_strategy_groups,
     "compute_options_monthly_metrics": handle_compute_options_monthly_metrics,
+    "options_margin_sync": handle_options_margin_sync,
 }
 JOB_SCHEDULES: list[JobSchedule] = [
     JobSchedule(
@@ -54,5 +60,17 @@ JOB_SCHEDULES: list[JobSchedule] = [
         kind="cron",
         handler=run_scheduled_flex_options_sync,
         cron_expr="30 22 * * *",
+    ),
+    JobSchedule(
+        job_id="options_margin_sync_intraday",
+        kind="interval",
+        seconds=15 * 60,
+        handler=run_intraday_options_margin_sync,
+    ),
+    JobSchedule(
+        job_id="options_margin_sync_daily",
+        kind="cron",
+        handler=run_scheduled_options_margin_sync,
+        cron_expr="35 22 * * *",
     ),
 ]
