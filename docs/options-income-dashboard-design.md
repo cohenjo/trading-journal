@@ -917,18 +917,25 @@ Acceptance criteria:
 
 ---
 
-## 12. Open Questions for Jony
+## 12. Resolved Decisions (from Jony, 2026-05-04)
 
-1. Roll detection window: should default be 15 minutes, 60 minutes, or same trading day?
-2. Matching preference: use IBKR FIFO realized P&L as source of truth, or apply a custom FIFO/LIFO rule in the app?
-3. Tax estimate: which jurisdiction and tax bracket should the dotted tax line assume (US, Israel, mixed, or disabled for now)?
-4. Should the new dashboard supplement `options_income` first, or replace the manual `options_income` table immediately?
-5. Backfill scope: how many years of IBKR options history should Phase 1 import?
-6. Account scope: should all IBKR accounts be included or only a specific account/sub-account used for options income?
-7. Strategy grouping overrides: is manual confirmation/rejection of roll links required in v1, or can v1 be read-only detected classifications?
-8. Neutral roll threshold: should neutral be within `$25`, `$50`, or a percentage of initial credit?
-9. Capital-at-risk convention: for CSPs, should the gauge use gross strike × multiplier or max-loss net of premium?
-10. Margin utilization: should it be account-wide or filtered to a virtual options-only allocation?
+1. **Roll detection window: same trading day.** Jony rarely makes intraday adjustments, so two trades on the same trading-day calendar date qualify as a roll candidate. The 15/60-minute heuristic is dropped in favor of the simpler same-day rule. Strike-distance and right-match guards from §5.2 still apply.
+2. **Matching preference: IBKR FIFO is canonical.** Use `fifoPnlRealized` straight from the Flex Query Trades section as the realized P&L source of truth. We do **not** re-implement matching; we mirror IBKR's books for tax-prep alignment.
+3. **Tax estimate: Israeli capital gains, flat 25%.** The dotted tax line in `<NetCashFlowVsRealizedChart>` is `max(0, cumulative_realized_pnl) × 0.25`. No US bracket logic in v1.
+4. **`options_income` is replaced, not supplemented.** The new schema becomes the only source for the `/options` page. Migration plan: keep `options_income` rows readable until the new ingestion has produced cooked monthly metrics for the same range, then drop the page wiring (table can stay until Phase 3 is shipped, then be deprecated in a follow-up cleanup).
+5. **Backfill scope: 2025-01-01 → today in Phase 1.** A separate follow-up issue tracks extending backfill to 2021-01-01 (Jony wants monthly/yearly history that far back). Backfill-to-2021 is **not** a Phase-1 blocker.
+6. **Account scope: all configured IBKR accounts, opt-out per account.** Add a `compute_options_income BOOLEAN NOT NULL DEFAULT true` column to `trading_account_config` (or the equivalent per-account settings table). The worker only scans accounts with the flag enabled. Frontend exposes a per-account checkbox in account settings.
+7. **Strategy grouping: read-only detected classifications in v1.** The roll detection heuristic runs unattended; users see the result but cannot edit links. Manual override / merge / split is a Phase 5 (post-v1) feature.
+8. **Neutral roll threshold: ±$25 absolute (v1 default).** Configurable later. Jony skipped this question; `$25` is picked as a low-noise default consistent with typical 1-2 contract spread credits. Document the value in the dashboard tooltip.
+9. **Capital-at-risk: max-loss net of premium received.** Confirmed. CSP capital at risk = `(strike × multiplier) − premium_received`. Vertical spread = `(width × multiplier) − net_credit`. Gross strike × multiplier is rejected as overstating risk.
+10. **Margin utilization: account-wide.** Jony does not use margin for stock purchases, so account-level margin used / margin available is a clean signal of options collateral pressure. No virtual sub-account split needed.
+
+### Follow-up issues these decisions imply
+
+- Backfill ingestion to 2021-01-01 (separate issue, scheduled after Phase 1 GA).
+- Manual roll override UI (Phase 5; not in v1 scope).
+- Configurable neutral-roll threshold (Phase 5; v1 hardcodes ±$25).
+- Multi-jurisdiction tax estimate (out of scope; Israel-only in v1).
 
 ---
 
