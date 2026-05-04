@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from app.worker.handlers.options_sync import run_flex_options_sync
+from app.worker.handlers.options_sync import _load_accounts, run_flex_options_sync
 
 
 class FakeScalar:
@@ -51,13 +51,13 @@ class FakeSession:
         sql = str(statement)
         params = params or {}
         if "from public.trading_account_config" in sql:
+            assert "name" not in sql
             return FakeMappings(
                 [
                     {
                         "id": 1,
                         "household_id": "10000000-0000-0000-0000-000000000001",
                         "account_id": "U1234567",
-                        "name": "IBKR Synthetic",
                     }
                 ]
             )
@@ -80,6 +80,16 @@ class FakeSession:
         elif "insert into public.options_flex_sync_state" in sql:
             self.sync_states += 1
         return FakeMappings([])
+
+
+def test_load_accounts_matches_trading_account_config_schema() -> None:
+    """Account loading must not select fields absent from trading_account_config."""
+
+    accounts = _load_accounts(FakeSession(), account_id="U1234567")  # type: ignore[arg-type]
+
+    assert len(accounts) == 1
+    assert accounts[0].account_id == "U1234567"
+    assert accounts[0].config_id == 1
 
 
 def test_run_flex_options_sync_ingests_synthetic_source(monkeypatch) -> None:  # type: ignore[no-untyped-def]

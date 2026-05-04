@@ -49,13 +49,13 @@ class FakeSession:
         sql = str(statement)
         params = params or {}
         if "from public.trading_account_config" in sql:
+            assert "name" not in sql
             return FakeMappings(
                 [
                     {
                         "id": 1,
                         "household_id": "10000000-0000-0000-0000-000000000001",
                         "account_id": "U123",
-                        "name": "IBKR",
                     }
                 ]
             )

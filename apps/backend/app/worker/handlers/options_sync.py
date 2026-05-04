@@ -42,7 +42,6 @@ class OptionsAccount:
     household_id: str
     account_id: str | None
     config_id: int | None = None
-    name: str | None = None
 
 
 def _default_session_factory() -> AbstractContextManager[Session]:
@@ -157,7 +156,7 @@ def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsA
     rows = session.execute(
         text(
             f"""
-            select id, household_id::text as household_id, account_id, name
+            select id, household_id::text as household_id, account_id
               from public.trading_account_config
              where {" and ".join(filters)}
              order by id
@@ -170,7 +169,6 @@ def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsA
             household_id=str(row["household_id"]),
             account_id=str(row["account_id"]) if row["account_id"] else None,
             config_id=int(row["id"]),
-            name=str(row["name"]),
         )
         for row in rows
         if row["household_id"]
