@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
-from app.worker.handlers.options_sync import _load_accounts, run_flex_options_sync
+from app.services.options.flex_parser import OptionLegKey
+from app.worker.handlers.options_sync import _load_accounts, _source_conid_for_insert, run_flex_options_sync
 
 
 class FakeScalar:
@@ -18,6 +21,11 @@ class FakeScalar:
         """Return the fake scalar value."""
 
         return self.value
+
+    def scalar_one_or_none(self) -> str | None:
+        """Return the fake scalar value when present."""
+
+        return self.value or None
 
     def mappings(self) -> list[dict[str, Any]]:
         """Return no mappings for scalar statements."""
@@ -80,6 +88,39 @@ class FakeSession:
         elif "insert into public.options_flex_sync_state" in sql:
             self.sync_states += 1
         return FakeMappings([])
+
+
+class ConidConflictSession:
+    """Fake session for duplicate source_conid checks."""
+
+    def __init__(self, conflicting: bool) -> None:
+        self.conflicting = conflicting
+
+    def execute(self, statement: object, params: dict[str, Any] | None = None) -> FakeScalar:
+        """Return a conflicting leg id only for the conid preflight query."""
+
+        assert "from public.options_legs" in str(statement)
+        assert params and params["source_conid"] == 701529335
+        return FakeScalar("existing-leg" if self.conflicting else "")
+
+
+def test_duplicate_conid_is_dropped_for_different_natural_leg() -> None:
+    """Live Flex can reuse conids across adjusted option symbols."""
+
+    leg = OptionLegKey(
+        account_id="U1234567",
+        underlying_symbol="IBKR",
+        option_symbol="IBKR  260116P00180000",
+        expiry=date(2026, 1, 16),
+        strike=Decimal("180"),
+        right="put",
+        source_conid=701529335,
+    )
+
+    household_id = "10000000-0000-0000-0000-000000000001"
+
+    assert _source_conid_for_insert(ConidConflictSession(conflicting=False), household_id, leg) == 701529335  # type: ignore[arg-type]
+    assert _source_conid_for_insert(ConidConflictSession(conflicting=True), household_id, leg) is None  # type: ignore[arg-type]
 
 
 def test_load_accounts_matches_trading_account_config_schema() -> None:
