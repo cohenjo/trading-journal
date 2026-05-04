@@ -10,8 +10,9 @@ import RollEfficiencyDonut from '@/components/Options/roll-efficiency-donut';
 import TradeLifecycleTimeline from '@/components/Options/trade-lifecycle-timeline';
 import VarianceGapBadge from '@/components/Options/variance-gap-badge';
 import { formatDate, formatSignedUsd } from '@/components/Options/options-format';
-import type { MonthlyMetric, OptionsEnabledAccount, OptionsFreshness, OptionsTradeSummary, RollEvent, StrategyGroup } from '@/types/options';
+import type { EfficiencyGaugesData, MonthlyMetric, OptionsEnabledAccount, OptionsFreshness, OptionsTradeSummary, RollEvent, StrategyGroup } from '@/types/options';
 import {
+  getEfficiencyGaugesData,
   getOptionsFreshness,
   getOptionsMonthlyMetrics,
   getOptionsRollEvents,
@@ -27,6 +28,7 @@ interface DashboardState {
   groups: StrategyGroup[];
   freshness: OptionsFreshness;
   trades: OptionsTradeSummary[];
+  gauges: EfficiencyGaugesData;
 }
 
 const EMPTY_STATE: DashboardState = {
@@ -36,6 +38,7 @@ const EMPTY_STATE: DashboardState = {
   groups: [],
   freshness: { asOf: null, source: null, status: null },
   trades: [],
+  gauges: { rocaR_pct: null, marginUtilization_pct: null, marginSource: null, marginAsOf: null, marginUsed: null, marginAvailable: null, isStale: false },
 };
 
 function yearRange(): number[] {
@@ -146,16 +149,17 @@ export default function OptionsPage() {
       setError(null);
       try {
         const accountFilter = selectedAccount || undefined;
-        const [accounts, months, rolls, groups, freshness, trades] = await Promise.all([
+        const [accounts, months, rolls, groups, freshness, trades, gauges] = await Promise.all([
           getUserAccountsWithOptionsEnabled(),
           getOptionsMonthlyMetrics(selectedYear, accountFilter),
           getOptionsRollEvents(start, end, accountFilter),
           getOptionsStrategyTimeline(start, end, accountFilter),
           getOptionsFreshness(),
           getOptionsTrades(start, end, accountFilter),
+          getEfficiencyGaugesData(accountFilter),
         ]);
 
-        if (!cancelled) setData({ accounts, months, rolls, groups, freshness, trades });
+        if (!cancelled) setData({ accounts, months, rolls, groups, freshness, trades, gauges });
       } catch (err) {
         console.error('Failed to load options dashboard:', err);
         if (!cancelled) setError('Failed to load options dashboard. Please refresh and try again.');
@@ -199,7 +203,7 @@ export default function OptionsPage() {
     <div className="mx-auto max-w-7xl space-y-6 p-6">
       <header className="flex flex-col gap-4 rounded-3xl border border-slate-800 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_35%),#020617] p-6 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.34em] text-blue-300">Phase 3</p>
+          <p className="text-xs uppercase tracking-[0.34em] text-blue-300">Phase 4</p>
           <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-50">Options Income Dashboard</h1>
           <p className="mt-2 text-slate-400">Read-only Flex metrics: cash flow, realized P&amp;L, strategy lifecycle, and roll quality.</p>
         </div>
@@ -240,7 +244,7 @@ export default function OptionsPage() {
         <>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <VarianceGapBadge cumulativeCashFlow={totals.cashFlow} cumulativeRealizedPnl={totals.realized} gap={totals.gap} asOf={totals.asOf} />
-            <div className="lg:col-span-2"><EfficiencyGauges /></div>
+            <div className="lg:col-span-2"><EfficiencyGauges data={data.gauges} /></div>
           </div>
 
           <NetCashFlowVsRealizedChart months={data.months} />

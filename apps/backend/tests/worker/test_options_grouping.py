@@ -107,6 +107,7 @@ def _trade_rows() -> list[dict[str, Any]]:
             "right": "put",
             "strike": Decimal(strike),
             "expiry": expiry,
+            "multiplier": Decimal("100"),
         }
 
     return [

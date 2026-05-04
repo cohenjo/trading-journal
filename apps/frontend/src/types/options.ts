@@ -96,3 +96,15 @@ export interface RollEfficiencyCounts {
   negative: number;
   neutral: number;
 }
+
+export type OptionsMarginSource = 'ib_gateway' | 'flex' | 'synthetic';
+
+export interface EfficiencyGaugesData {
+  rocaR_pct: MoneyString | null;
+  marginUtilization_pct: MoneyString | null;
+  marginSource: OptionsMarginSource | null;
+  marginAsOf: string | null;
+  marginUsed: MoneyString | null;
+  marginAvailable: MoneyString | null;
+  isStale: boolean;
+}

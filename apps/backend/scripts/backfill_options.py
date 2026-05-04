@@ -13,6 +13,7 @@ from sqlmodel import Session
 
 from app.dal.database import engine
 from app.worker.handlers.options_grouping import compute_options_strategy_groups
+from app.worker.handlers.options_margin_sync import run_options_margin_sync
 from app.worker.handlers.options_metrics import compute_options_monthly_metrics
 from app.worker.handlers.options_sync import run_flex_options_sync
 
@@ -51,6 +52,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             from_date=args.from_date,
             to_date=args.to_date,
         )
+        margin_result = run_options_margin_sync(session, account_id=args.account_id)
         metrics_result = compute_options_monthly_metrics(
             session,
             account_id=args.account_id,
@@ -60,6 +62,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         session.commit()
     print("Flex sync:", sync_result)
     print("Strategy grouping:", grouping_result)
+    print("Margin sync:", margin_result)
     print("Monthly metrics:", metrics_result)
     totals = _totals(metrics_result)
     print(
