@@ -238,6 +238,40 @@ export async function seedTrade(householdId: string, data: TradeSeedData): Promi
   }
 }
 
+export interface TradingAccountSeedData {
+  name?: string;
+  accountId?: string;
+  host?: string;
+  port?: number;
+  clientId?: number;
+  computeOptionsIncome?: boolean;
+}
+
+/** Seeds a trading account config row for account-management E2E flows. */
+export async function seedTradingAccount(
+  householdId: string,
+  data: TradingAccountSeedData = {},
+): Promise<{ accountId: string }> {
+  const admin = getAdminClient();
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const accountId = data.accountId ?? `E2E_TRADING_${suffix}`;
+
+  const { error } = await admin.from('trading_account_config').insert({
+    household_id: householdId,
+    name: data.name ?? 'E2E IBKR Account',
+    account_type: 'IBKR',
+    host: data.host ?? '127.0.0.1',
+    port: data.port ?? 4001,
+    client_id: data.clientId ?? 1,
+    account_id: accountId,
+    compute_options_income: data.computeOptionsIncome ?? true,
+  });
+
+  if (error) throw new Error(`[seed-data] insert trading_account_config failed: ${error.message}`);
+
+  return { accountId };
+}
+
 export interface OptionsDashboardSeedResult {
   accountId: string;
   groupId: string;

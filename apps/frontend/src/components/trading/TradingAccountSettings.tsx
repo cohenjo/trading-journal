@@ -14,6 +14,13 @@ type TradingAccountFormState = Partial<TradingAccountConfig> & {
     account_hash?: string;
 };
 
+type FinanceAccountOption = {
+    id: string;
+    name: string;
+    owner?: string;
+    category?: string;
+};
+
 export default function TradingAccountSettings() {
     const [configs, setConfigs] = useState<TradingAccountConfig[]>([]);
     const [editingConfig, setEditingConfig] = useState<TradingAccountFormState>({
@@ -25,7 +32,7 @@ export default function TradingAccountSettings() {
         linked_account_id: "",
         compute_options_income: true,
     });
-    const [financeAccounts, setFinanceAccounts] = useState<any[]>([]);
+    const [financeAccounts, setFinanceAccounts] = useState<FinanceAccountOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState("");
@@ -51,7 +58,10 @@ export default function TradingAccountSettings() {
         try {
             const snapshot = await getLatestFinanceSnapshot();
             if (snapshot?.data?.items) {
-                setFinanceAccounts(snapshot.data.items.filter((i) => i.category === "Investments"));
+                const investmentAccounts = snapshot.data.items
+                    .filter((item) => item.category === "Investments")
+                    .map((item) => ({ id: item.id, name: item.name, owner: item.owner, category: item.category }));
+                setFinanceAccounts(investmentAccounts);
             }
         } catch (err) {
             console.error("Error fetching finance accounts:", err);
@@ -82,7 +92,7 @@ export default function TradingAccountSettings() {
             } else {
                 setMessage(result.error || "Error saving settings.");
             }
-        } catch (err) {
+        } catch {
             setMessage("Error saving settings.");
         } finally {
             setSaving(false);
@@ -118,7 +128,7 @@ export default function TradingAccountSettings() {
                             : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
                             }`}
                     >
-                        {c.name} ({c.account_type})
+                        {c.name ?? c.account_id ?? "My Trading Account"} ({c.account_type})
                     </button>
                 ))}
                 <button

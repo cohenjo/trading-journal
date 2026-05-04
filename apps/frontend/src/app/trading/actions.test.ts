@@ -75,8 +75,9 @@ describe('getTradingConfigs', () => {
         port: 4001,
         client_id: 1,
         linked_account_id: null,
-        account_id: null,
+        account_id: 'U2515365',
         last_synced: null,
+        compute_options_income: true,
       },
     ];
     const order = vi.fn().mockResolvedValue({ data: rows, error: null });
@@ -92,6 +93,11 @@ describe('getTradingConfigs', () => {
     const result = await getTradingConfigs();
 
     expect(from).toHaveBeenCalledWith('trading_account_config');
+    const selectColumns = select.mock.calls[0]?.[0] as string;
+    expect(selectColumns).toContain('name');
+    expect(selectColumns).toContain('account_type');
+    expect(selectColumns).toContain('last_synced');
+    expect(selectColumns).not.toContain('last_synced_at');
     expect(is).toHaveBeenCalledWith('deleted_at', null);
     expect(result).toEqual(rows);
   });
@@ -114,6 +120,8 @@ describe('getTradingConfig', () => {
 
     const result = await getTradingConfig(7);
 
+    const selectColumns = select.mock.calls[0]?.[0] as string;
+    expect(selectColumns).not.toContain('last_synced_at');
     expect(eq).toHaveBeenCalledWith('id', 7);
     expect(result).toEqual(row);
   });

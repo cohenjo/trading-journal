@@ -8,7 +8,7 @@ export type TradingAccountType = 'IBKR' | 'SCHWAB';
 
 export interface TradingAccountConfig {
   id: number;
-  name: string;
+  name: string | null;
   account_type: TradingAccountType;
   host: string;
   port: number;
@@ -16,7 +16,6 @@ export interface TradingAccountConfig {
   linked_account_id: string | null;
   account_id: string | null;
   last_synced: string | null;
-  last_synced_at: string | null;
   compute_options_income: boolean;
 }
 
@@ -72,7 +71,6 @@ const CONFIG_SELECT = [
   'linked_account_id',
   'account_id',
   'last_synced',
-  'last_synced_at',
   'compute_options_income',
 ].join(', ');
 
