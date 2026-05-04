@@ -6,10 +6,14 @@ const mockSnapshotOrder = vi.fn();
 const mockPlanMaybeSingle = vi.fn();
 const mockSnapshotUpdateDateEq = vi.fn();
 const mockPlanUpdateIdEq = vi.fn();
+const mockStorageUpload = vi.fn();
+const mockStorageRemove = vi.fn();
+const mockComputeInsert = vi.fn();
+const mockComputeInsertSingle = vi.fn();
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 
-import { deletePensionReport, getPensionDashboard, listPensionReports } from './actions';
+import { deletePensionReport, getPensionDashboard, listPensionReports, uploadPensionPdf } from './actions';
 import { createClient } from '@/lib/supabase/server';
 
 const MOCK_USER_ID = 'user-uuid-1234';
@@ -35,8 +39,20 @@ function makeSupabaseMock() {
           update: vi.fn(() => ({ eq: vi.fn().mockReturnThis().mockImplementationOnce(function firstEq(this: unknown) { return this; }).mockImplementationOnce(mockPlanUpdateIdEq) })),
         };
       }
+      if (table === 'compute_jobs') {
+        const computeChain = {
+          insert: mockComputeInsert,
+          select: vi.fn().mockReturnThis(),
+          single: mockComputeInsertSingle,
+        };
+        mockComputeInsert.mockReturnValue(computeChain);
+        return computeChain;
+      }
       throw new Error(`Unexpected table: ${table}`);
     }),
+    storage: {
+      from: vi.fn(() => ({ upload: mockStorageUpload, remove: mockStorageRemove })),
+    },
   };
 }
 
@@ -85,6 +101,41 @@ beforeEach(() => {
   mockPlanMaybeSingle.mockResolvedValue({ data: null, error: null });
   mockSnapshotUpdateDateEq.mockResolvedValue({ error: null });
   mockPlanUpdateIdEq.mockResolvedValue({ error: null });
+  mockStorageUpload.mockResolvedValue({ error: null });
+  mockStorageRemove.mockResolvedValue({ error: null });
+  mockComputeInsertSingle.mockResolvedValue({ data: { id: 'job-123' }, error: null });
+});
+
+describe('uploadPensionPdf', () => {
+  it('uploads a PDF under the household prefix and enqueues the parser job', async () => {
+    authOk();
+    const file = new File(['%PDF-1.7'], 'quarterly report.pdf', { type: 'application/pdf' });
+
+    await expect(uploadPensionPdf(file, 'Rita')).resolves.toMatchObject({ jobId: 'job-123' });
+
+    expect(mockStorageUpload).toHaveBeenCalledWith(
+      expect.stringMatching(new RegExp(`^${MOCK_HOUSEHOLD_ID}/.+-quarterly-report\\.pdf$`)),
+      file,
+      expect.objectContaining({ contentType: 'application/pdf', upsert: false }),
+    );
+    expect(mockComputeInsert).toHaveBeenCalledWith({
+      household_id: MOCK_HOUSEHOLD_ID,
+      job_type: 'pension_pdf_parse',
+      payload: expect.objectContaining({
+        household_id: MOCK_HOUSEHOLD_ID,
+        owner: 'Rita',
+        filename: 'quarterly report.pdf',
+        storage_path: expect.stringMatching(new RegExp(`^${MOCK_HOUSEHOLD_ID}/`)),
+      }),
+    });
+  });
+
+  it('rejects non-PDF uploads before Storage is called', async () => {
+    const file = new File(['hello'], 'notes.txt', { type: 'text/plain' });
+
+    await expect(uploadPensionPdf(file)).rejects.toThrow('Only PDF pension reports can be uploaded.');
+    expect(mockStorageUpload).not.toHaveBeenCalled();
+  });
 });
 
 describe('listPensionReports', () => {
@@ -111,7 +162,7 @@ describe('getPensionDashboard', () => {
     const result = await getPensionDashboard();
     expect(result.history[1][PENSION_ID]).toBe(102_000);
     expect(result.accounts[0]).toMatchObject({ id: PENSION_ID, product_name: 'Makif', fund_name: 'Fund' });
-    expect(result.accounts[0].details.draw_income).toBe(true);
+    expect(result.accounts[0]?.details?.draw_income).toBe(true);
     expect(result.milestones[0]).toMatchObject({ owner: 'You', year: 2040 });
     expect(result.projections.length).toBeGreaterThan(0);
   });

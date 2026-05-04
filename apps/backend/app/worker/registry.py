@@ -6,6 +6,7 @@ from typing import Literal
 
 from app.services.trading_batch import run_trading_sync_batch
 from app.worker.bonds_scanner import refresh_bond_scanner_results
+from app.worker.pension_pdf_parse import handle_pension_pdf_parse
 
 JobPayload = dict[str, object]
 JobResult = dict[str, object]
@@ -24,7 +25,7 @@ class JobSchedule:
     seconds: int | None = None
 
 
-JOB_HANDLERS: dict[str, JobHandler] = {}
+JOB_HANDLERS: dict[str, JobHandler] = {"pension_pdf_parse": handle_pension_pdf_parse}
 JOB_SCHEDULES: list[JobSchedule] = [
     JobSchedule(
         job_id="trading_sync",

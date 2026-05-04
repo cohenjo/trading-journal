@@ -1,6 +1,8 @@
 'use server';
 
+import { randomUUID } from 'crypto';
 import { createClient } from '@/lib/supabase/server';
+import { enqueueComputeJob } from '@/lib/compute-jobs';
 import type {
   PensionAccount,
   PensionAccountDetails,
@@ -15,6 +17,8 @@ import type { Plan, PlanItem } from '@/components/Plan/types';
 
 const PENSION_ID_PREFIX = 'pension::';
 const SPOUSE_OWNER_ALIASES = new Set(['spouse', 'rita']);
+const PENSION_UPLOAD_BUCKET = 'pension-uploads';
+const MAX_PENSION_UPLOAD_BYTES = 10 * 1024 * 1024;
 const EMPTY_DASHBOARD: PensionDashboardResponse = {
   status: 'success',
   history: [],
@@ -91,6 +95,62 @@ async function getAuthenticatedHouseholdId(): Promise<string | null> {
 
   if (authError || !user) return null;
   return resolveHouseholdId(user.id);
+}
+
+function sanitizeStorageFilename(filename: string): string {
+  const sanitized = filename
+    .normalize('NFKC')
+    .replace(/[^\p{L}\p{N}._-]+/gu, '-')
+    .replace(/^-+|-+$/gu, '');
+  return sanitized || 'pension-report.pdf';
+}
+
+function validatePensionPdf(file: File): void {
+  if (file.size > MAX_PENSION_UPLOAD_BYTES) {
+    throw new Error('Pension PDF must be 10MB or smaller.');
+  }
+  const hasPdfName = file.name.toLocaleLowerCase().endsWith('.pdf');
+  const hasPdfType = file.type === 'application/pdf' || file.type === '';
+  if (!hasPdfName || !hasPdfType) {
+    throw new Error('Only PDF pension reports can be uploaded.');
+  }
+}
+
+/** Uploads a pension PDF to private Storage and enqueues the parser worker. */
+export async function uploadPensionPdf(
+  file: File,
+  owner = 'You',
+): Promise<{ jobId: string; storagePath: string }> {
+  validatePensionPdf(file);
+  const householdId = await getAuthenticatedHouseholdId();
+  if (!householdId) throw new Error('Not authenticated');
+
+  const storagePath = `${householdId}/${randomUUID()}-${sanitizeStorageFilename(file.name)}`;
+  const supabase = await createClient();
+  const { error: uploadError } = await supabase.storage
+    .from(PENSION_UPLOAD_BUCKET)
+    .upload(storagePath, file, {
+      cacheControl: '3600',
+      contentType: 'application/pdf',
+      upsert: false,
+    });
+
+  if (uploadError) {
+    throw new Error(uploadError.message || 'Failed to upload pension PDF.');
+  }
+
+  try {
+    const jobId = await enqueueComputeJob('pension_pdf_parse', {
+      household_id: householdId,
+      storage_path: storagePath,
+      owner,
+      filename: file.name,
+    });
+    return { jobId, storagePath };
+  } catch (error) {
+    await supabase.storage.from(PENSION_UPLOAD_BUCKET).remove([storagePath]);
+    throw error;
+  }
 }
 
 function safeFloat(value: unknown): number {
