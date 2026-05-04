@@ -85,7 +85,8 @@ export default function TradingAccountDashboard() {
     }
 
     const activeConfig = configs.find(c => c.id === activeAccountId);
-    const freshnessTimestamp = activeConfig?.last_synced_at || activeConfig?.last_synced || stats?.timestamp;
+    const activeAccountLabel = activeConfig?.name ?? activeConfig?.account_id ?? "My Trading Account";
+    const freshnessTimestamp = activeConfig?.last_synced || stats?.timestamp;
     const lastSynced = freshnessTimestamp ? new Date(freshnessTimestamp).toLocaleString() : "Never";
 
     return (
@@ -101,14 +102,14 @@ export default function TradingAccountDashboard() {
                             : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
                             }`}
                     >
-                        {c.name}
+                        {c.name ?? c.account_id ?? "My Trading Account"}
                     </button>
                 ))}
             </div>
 
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div className="text-slate-400 text-sm">
-                    {activeConfig?.account_type} Account: <span className="text-slate-200 font-medium">{activeConfig?.name}</span>
+                    {activeConfig?.account_type} Account: <span className="text-slate-200 font-medium">{activeAccountLabel}</span>
                     <span className="mx-2 opacity-30">|</span>
                     Last Synced: <span className="text-slate-200 font-medium">{lastSynced}</span>
                 </div>
