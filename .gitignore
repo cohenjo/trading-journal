@@ -60,6 +60,7 @@ share/python-wheels/
 MANIFEST
 
 # Data files
+tmp/
 *.xlsx
 # *.csv # User didn't explicitly ask for csv, but often goes with xlsx. I will leave it commented out for now unless specifically asked, but user mentioned "data files". The user prompt specifically mentioned "xlsx files like we added to track bond data". I'll stick to xlsx for now to be precise.
 
