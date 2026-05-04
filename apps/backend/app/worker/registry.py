@@ -7,6 +7,7 @@ from typing import Literal
 from app.services.trading_batch import run_trading_sync_batch
 from app.worker.backtest_handler import run_backtest_job
 from app.worker.bonds_scanner import refresh_bond_scanner_results
+from app.worker.handlers.options_grouping import handle_compute_options_strategy_groups
 from app.worker.handlers.options_metrics import handle_compute_options_monthly_metrics
 from app.worker.handlers.options_sync import handle_flex_options_sync, run_scheduled_flex_options_sync
 from app.worker.pension_pdf_parse import handle_pension_pdf_parse
@@ -32,6 +33,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "pension_pdf_parse": handle_pension_pdf_parse,
     "backtest": run_backtest_job,
     "flex_options_sync": handle_flex_options_sync,
+    "compute_options_strategy_groups": handle_compute_options_strategy_groups,
     "compute_options_monthly_metrics": handle_compute_options_monthly_metrics,
 }
 JOB_SCHEDULES: list[JobSchedule] = [

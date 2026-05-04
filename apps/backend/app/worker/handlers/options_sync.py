@@ -65,6 +65,15 @@ def handle_flex_options_sync(
             account_id=_optional_str(payload.get("account_id")),
             synthetic=_optional_bool(payload.get("synthetic")),
         )
+        from app.worker.handlers.options_grouping import compute_options_strategy_groups
+
+        grouping_result = compute_options_strategy_groups(
+            session,
+            household_id=_optional_str(payload.get("household_id")),
+            account_id=_optional_str(payload.get("account_id")),
+            from_date=_optional_date(payload.get("from")),
+            to_date=_optional_date(payload.get("to")),
+        )
         metric_result = compute_options_monthly_metrics(
             session,
             household_id=_optional_str(payload.get("household_id")),
@@ -73,14 +82,17 @@ def handle_flex_options_sync(
             to_date=_optional_date(payload.get("to")),
         )
         session.commit()
-        return {**result, "monthly_metrics": metric_result}
+        return {**result, "strategy_groups": grouping_result, "monthly_metrics": metric_result}
 
 
 def run_scheduled_flex_options_sync() -> None:
     """Run the daily scheduled Flex sync with configured source selection."""
 
     with _default_session_factory() as session:
+        from app.worker.handlers.options_grouping import compute_options_strategy_groups
+
         result = run_flex_options_sync(session)
+        compute_options_strategy_groups(session)
         compute_options_monthly_metrics(session)
         session.commit()
     logger.info("Scheduled flex_options_sync completed: %s", result)
