@@ -137,6 +137,13 @@ function MainLayoutInner({ children }: { children: ReactNode }) {
                             Trading
                         </div>
                         <Link
+                            href="/dashboard"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Dashboard
+                        </Link>
+                        <Link
                             href="/trading/accounts"
                             className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                             onClick={() => setMenuOpen(false)}
