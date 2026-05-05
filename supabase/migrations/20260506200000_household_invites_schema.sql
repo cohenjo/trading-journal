@@ -193,7 +193,8 @@ grant select, insert, update on public.household_invites to authenticated;
 -- Helper: gen_invite_token()
 -- Returns a 256-bit hex token (64 chars). URL-safe, no padding ambiguity.
 -- Call from Server Action before INSERT into household_invites.
--- INVOKER security: runs as caller; pgcrypto gen_random_bytes is always available.
+-- INVOKER security: runs as caller; pgcrypto is in the extensions schema,
+-- so gen_random_bytes is called with full schema qualification.
 -- ============================================================
 create or replace function public.gen_invite_token()
 returns text
@@ -201,7 +202,7 @@ language sql
 security invoker
 set search_path = public, pg_temp
 as $$
-  select encode(gen_random_bytes(32), 'hex');
+  select encode(extensions.gen_random_bytes(32), 'hex');
 $$;
 
 comment on function public.gen_invite_token() is
