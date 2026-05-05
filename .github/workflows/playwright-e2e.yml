@@ -63,6 +63,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Guard — required secrets must be present
+        env:
+          E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          E2E_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+          E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+        shell: bash
+        run: |
+          missing=()
+          [ -z "$E2E_SUPABASE_URL" ]               && missing+=(E2E_SUPABASE_URL)
+          [ -z "$E2E_SUPABASE_ANON_KEY" ]          && missing+=(E2E_SUPABASE_ANON_KEY)
+          [ -z "$E2E_SUPABASE_SERVICE_ROLE_KEY" ]  && missing+=(E2E_SUPABASE_SERVICE_ROLE_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            for s in "${missing[@]}"; do
+              echo "::error::Required secret '$s' is empty or not set. Add it under Settings → Secrets → Actions."
+            done
+            exit 1
+          fi
+          echo "✅ All required E2E secrets present."
+
       - name: Setup Node 20
         uses: actions/setup-node@v6
         with:
@@ -126,6 +145,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Guard — required secrets must be present
+        env:
+          E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          E2E_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+          E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+        shell: bash
+        run: |
+          missing=()
+          [ -z "$E2E_SUPABASE_URL" ]               && missing+=(E2E_SUPABASE_URL)
+          [ -z "$E2E_SUPABASE_ANON_KEY" ]          && missing+=(E2E_SUPABASE_ANON_KEY)
+          [ -z "$E2E_SUPABASE_SERVICE_ROLE_KEY" ]  && missing+=(E2E_SUPABASE_SERVICE_ROLE_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            for s in "${missing[@]}"; do
+              echo "::error::Required secret '$s' is empty or not set. Add it under Settings → Secrets → Actions."
+            done
+            exit 1
+          fi
+          echo "✅ All required E2E secrets present."
 
       - name: Setup Node 20
         uses: actions/setup-node@v6
@@ -213,6 +251,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Guard — required secrets must be present
+        env:
+          E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          E2E_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+          E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+        shell: bash
+        run: |
+          missing=()
+          [ -z "$E2E_SUPABASE_URL" ]               && missing+=(E2E_SUPABASE_URL)
+          [ -z "$E2E_SUPABASE_ANON_KEY" ]          && missing+=(E2E_SUPABASE_ANON_KEY)
+          [ -z "$E2E_SUPABASE_SERVICE_ROLE_KEY" ]  && missing+=(E2E_SUPABASE_SERVICE_ROLE_KEY)
+          if [ ${#missing[@]} -gt 0 ]; then
+            for s in "${missing[@]}"; do
+              echo "::error::Required secret '$s' is empty or not set. Add it under Settings → Secrets → Actions."
+            done
+            exit 1
+          fi
+          echo "✅ All required E2E secrets present."
 
       - name: Setup Node 20
         uses: actions/setup-node@v6
