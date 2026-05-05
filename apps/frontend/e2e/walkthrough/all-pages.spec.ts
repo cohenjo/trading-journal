@@ -50,7 +50,6 @@ function isKnownAcceptableConsoleError(text: string): boolean {
 
   if (text.includes('Failed to fetch history')) return true;
   if (text.includes('Failed to fetch summary data')) return true;
-  if (text.includes('Failed to fetch years')) return true;
   if (text.includes('Failed to load resource: the server responded with a status of 404')) return true;
 
   // React dev-mode warnings / hydration hints
