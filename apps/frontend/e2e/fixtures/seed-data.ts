@@ -449,6 +449,10 @@ export async function cleanupHouseholdData(householdId: string): Promise<void> {
     // nightly re-runs when deleteE2eUser couldn't delete due to lingering FK refs.
     // Tracked: #267, #232 (dup).
     admin.from('dividend_accounts').delete().eq('household_id', householdId),
+    // wave-2 tables added in issue #176 — bond_holdings and insurance_policies
+    // were missing, causing deleteE2eUser FK failures on nightly re-runs.
+    admin.from('bond_holdings').delete().eq('household_id', householdId),
+    admin.from('insurance_policies').delete().eq('household_id', householdId),
   ]);
 
   for (const result of results) {
