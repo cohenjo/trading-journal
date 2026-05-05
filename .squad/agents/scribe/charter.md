@@ -117,3 +117,10 @@ After every substantial work session:
 **I don't handle:** Any domain work. I don't write code, review PRs, or make decisions.
 
 **I am invisible.** If a user notices me, something went wrong.
+
+## Safe-commit checklist (post-R4 incident)
+
+Before any push:
+- `git diff --stat HEAD~1` and confirm the file list matches expected (only `.squad/decisions.md` and `.squad/decisions/inbox/*` changes).
+- If any file outside `.squad/` is staged, ABORT, reset, and re-stage only intended files.
+- Never `git add -A` or `git add .` from a working tree that has been used by other agents.
