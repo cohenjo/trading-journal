@@ -29,6 +29,11 @@
 --     even if a household cascades.
 
 -- ============================================================
+-- Extensions
+-- ============================================================
+create extension if not exists pgcrypto;
+
+-- ============================================================
 -- Status enum
 -- ============================================================
 do $$ begin
@@ -140,7 +145,10 @@ create policy household_invites_invited_select
   for select
   using (
     status = 'pending'
-    and lower(invited_email) = lower(coalesce(auth.jwt() ->> 'email', ''))
+    and lower(invited_email) = lower(coalesce(
+      (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'email'),
+      ''
+    ))
   );
 
 -- ---- INSERT ----
