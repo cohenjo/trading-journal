@@ -135,3 +135,5 @@
 - Dependency graph documented in strategy doc §11
 
 **Decision file:** `.squad/decisions/inbox/keaton-e2e-testing-strategy.md`
+
+📌 **Team update (2026-05-05T18:32:37Z):** E2E testing strategy and TJ-019/TJ-020 frontend Supabase-only compute architecture decisions merged into shared decisions. Reskill pass extracted e2e-walkthrough-patterns skill from walkthrough assertions pattern. — Scribe (wind-down)

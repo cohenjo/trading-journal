@@ -1,0 +1,72 @@
+[
+  {
+    "name": "after-i-leave",
+    "path": "/after-i-leave",
+    "issue": 116,
+    "wave": 4,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 332,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "analyze",
+    "path": "/analyze",
+    "issue": 117,
+    "wave": 4,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 541,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "plan",
+    "path": "/plan",
+    "issue": 118,
+    "wave": 4,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 711,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "progress",
+    "path": "/progress",
+    "issue": 119,
+    "wave": 4,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 514,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "trading-accounts",
+    "path": "/trading/accounts",
+    "issue": 120,
+    "wave": 2,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 405,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  }
+]

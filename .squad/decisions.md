@@ -5089,3 +5089,371 @@ Dev Supabase catches prod-only issues (migration drift, trigger behavior) that l
 **Status:** 🟢 Landed (PR #165 + #167, commit e2e5ba4; cherry-picked)
 
 **By:** Redfoot
+
+
+# Decision: walkthrough spec now makes assertions, tagged @smoke
+
+**Date:** 2025-08-01  
+**Author:** Redfoot (via Copilot)  
+**Status:** Accepted
+
+## Context
+
+`e2e/walkthrough/all-pages.spec.ts` was a passive data-collection loop that
+wrote results to `/tmp` with no assertions.  The PR-blocking CI job only greps
+for `@smoke` tags, so the walkthrough was effectively untested on every PR.
+
+## Decision
+
+Rewrote the walkthrough to:
+1. Assert HTTP status < 500 per page
+2. Assert no unexpected 4xx/5xx on `/api/*` routes
+3. Assert no unexpected console errors
+4. Tag tests with `@smoke` so they run in the PR-blocking CI tier
+5. Filter known-acceptable noise: `/metrics/page-load` 401s (#125), `/api/plans/simulate` 404s (#173)
+6. Removed `/tmp` file write (forbidden in prod environment)
+
+## Consequences
+
+- All 21 pages in the walkthrough now block PR merge on unexpected errors.
+- Known noise is explicitly filtered with comments referencing the tracking issues.
+- If a page regresses silently (e.g., a new API 404), the walkthrough will catch it.
+
+## Affected files
+
+- `apps/frontend/e2e/walkthrough/all-pages.spec.ts`
+- PR #175
+
+
+# Decision: E2E Testing Strategy
+
+**Date:** 2026-05-02  
+**Author:** Keaton (Lead)  
+**Status:** Approved  
+**Scope:** Cross-team
+
+## Decision
+
+We use **Playwright** for browser-driven E2E tests, running in the existing `apps/frontend/e2e/` directory (not a separate package).
+
+### Test Environment
+
+**Hybrid model:**
+- **Dev Supabase** (`zvbwgxdgxwgduhhzdwjj`) for CI runs — exercises real Supabase round-trips, RLS, household trigger
+- **Local Supabase** (`supabase start`) for developer iteration — fast, offline-capable
+- **Production** — read-only smoke only (page loads, no mutations), triggered post-Vercel-deploy
+
+### Test-User Strategy
+
+Throwaway users with pattern `e2e_<ts>_<rand>@example.com`. Created via service-role admin API, wait for household provisioning trigger, inject auth cookies. Deleted in `afterAll`. Cleanup script catches orphans > 1hr old.
+
+### CI Integration
+
+| Trigger | Suite | Blocking? |
+|---------|-------|-----------|
+| PR | Smoke + Auth | Yes |
+| Nightly (03:00 UTC) | Full (smoke + auth + flows) | Yes (creates issue on failure) |
+| Post-deploy | Prod smoke (read-only) | Alert only |
+
+### Provisioning Helper Language
+
+TypeScript — same runtime as Playwright, direct import into fixtures.
+
+## Rationale
+
+- Dev Supabase catches prod-only issues (migration drift, trigger behavior) that local misses
+- Local Supabase is fastest for iteration but doesn't replicate hosted behavior exactly
+- No mutations against prod eliminates data pollution risk
+- Extending existing scaffold avoids rebuild; fixtures, admin client, cleanup already exist
+
+## Issues
+
+#144 (scaffold), #145 (provisioning), #146 (auth test), #147 (finances flow), #148 (trades flow), #149 (CI workflow), #150 (prod smoke), #151 (seed utilities)
+
+## References
+
+- `docs/testing/e2e-strategy.md`
+- PR #143
+
+
+# Decision: ILA Currency Normalisation in Finance Server Action
+
+**Date:** 2026-05-03
+**Author:** Hockney (Backend Dev)
+**PR:** #172
+
+## Context
+
+The `getLatestFinanceSnapshot` Server Action enriches finance items with dividend
+data. Israeli TA stocks use `ILA` (Agorot, 1 ILA = 0.01 ILS) as their currency
+code. The existing frontend `convertCurrency` utility only knows ILS/USD/EUR.
+
+## Decision
+
+ILA normalisation is handled **locally inside the enrichment logic** in
+`apps/frontend/src/app/finances/actions.ts` rather than in `lib/currency.ts`,
+because:
+
+1. ILA is only relevant for dividend ticker data, not for general UI formatting.
+2. Adding ILA to `CURRENCY_RATES` in `lib/currency.ts` would require updating
+   the `CurrencyCode` union and all downstream formatters.
+3. The normalisation is a single `amount × 0.01` conversion — not worth
+   polluting the shared utility.
+
+## Impact
+
+Any future code that consumes raw TA dividend rates from `dividend_ticker_data`
+must handle ILA → ILS normalisation. The pattern is documented in `actions.ts`
+via `normaliseAmount()`.
+
+
+# Decision: Secret Handling Policy
+
+**Filed by:** Rabin (Security Engineer)
+**Date:** 2026-05-03
+**Trigger:** INC-2026-05-03-001 — Supabase service-role key leaked in `.squad/decisions.md`
+**Status:** Adopted — effective immediately
+
+---
+
+## Policy: Secrets and Credential Handling
+
+### 1. Secret Storage
+
+- **All secrets** (API keys, JWT tokens, OAuth credentials, database passwords, recovery codes)
+  **must be stored in `.env.local` only** (at the `apps/frontend/` or repo root).
+- `.env.local` is gitignored and must **never** be committed.
+- `.env.example` documents variable names with **empty or obviously-fake placeholder values only**.
+  Example: `SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here`.
+- The `.secrets/` directory is gitignored and is for local-disk paste workflows only.
+  **Never commit anything under `.secrets/`.**
+
+### 2. Documentation and Session Logs
+
+- Session logs, inbox files, and decision documents **must never contain live credential values**.
+- Use `$SUPABASE_SERVICE_ROLE_KEY` (env-var reference) or `<REDACTED>` in any markdown/log.
+- The Scribe agent must scan inbox files for `eyJ` (JWT prefix) or known secret patterns before
+  merging and raise a warning if found.
+
+### 3. Pre-commit Protection
+
+- All developer machines must run `pip install pre-commit && pre-commit install` after clone.
+- The `.pre-commit-config.yaml` (committed to repo) includes `gitleaks` secret scanning.
+- CI must run pre-commit checks on all PRs.
+
+### 4. GitHub Push Protection
+
+- GitHub push protection (`secret_scanning_push_protection`) must be **enabled** on the repo.
+- If any push protection alert fires: stop, rotate the leaked credential immediately, then resolve
+  the alert as "revoked" in GitHub.
+
+### 5. Service-role Key Policy
+
+- **Service-role keys must be rotated immediately upon any confirmed or suspected leak.**
+- Service-role keys bypass Row Level Security entirely and are the highest-value credential
+  in the Supabase stack.
+- Service-role keys must only be used server-side (FastAPI backend, GitHub Actions, Vercel
+  environment variables). Never prefix with `NEXT_PUBLIC_`.
+- After rotation: update Vercel env vars, GitHub Actions secrets, and local `.env.local` files.
+
+### 6. Anon Key Policy
+
+- Anon keys (`NEXT_PUBLIC_SUPABASE_ANON_KEY`) are intentionally public and embedded in the
+  browser bundle. They are restricted by RLS policies.
+- Rotate anon keys only if the Supabase project domain itself was compromised, or if you want
+  to force all existing anonymous sessions to re-authenticate.
+- Do NOT rotate anon keys for a service-role key leak unless Rabin advises otherwise.
+
+### 7. Rotation Response Checklist
+
+When a service-role key or equivalent high-value secret is leaked:
+1. Rotate in the upstream service immediately (Supabase Dashboard, Google Cloud, etc.)
+2. Update all deployment targets (Vercel, GitHub Actions, CI secrets)
+3. Redact the value from any tracked files in a hotfix PR
+4. File incident report in `docs/security/incident-YYYY-MM-DD-<slug>.md`
+5. Post-rotation: verify old key returns 401, new key works
+6. Confirm GitHub secret-scanning alert is resolved
+
+### 8. History Rewrite Policy
+
+- **Do not rewrite git history** for a rotated JWT credential (service-role, anon, or personal
+  access token) unless:
+  - The credential cannot be rotated (e.g., a static master password embedded in migration SQL), OR
+  - Forensic evidence shows the leaked credential was actively used by an unauthorized party.
+- For all other cases: rotate → redact → document. The redaction PR is sufficient.
+- If history rewrite is needed, use `git-filter-repo` (not BFG) and coordinate with the full
+  team to re-clone or rebase all outstanding branches.
+
+---
+
+## Rationale
+
+This policy codifies lessons from INC-2026-05-03-001 where a service-role key was inadvertently
+committed via session logs. The core principle is defense-in-depth: gitignore + pre-commit
+scanning + push protection + documentation hygiene, each layer catching what the previous missed.
+
+
+# Decision: Dividend accounts migrated to Server Actions (linked_id as string)
+
+**Date:** 2026-05-06
+**Author:** Hockney (Copilot)
+**PR:** #171
+
+## Context
+
+Migrated `dividend_accounts` CRUD from FastAPI to Next.js Server Actions (PR #171).
+The `dividend_accounts.linked_id` DB column is `integer`, but `FinanceItem.id` is `string`.
+
+## Decision
+
+`importDividendAccount` passes `linked_id` to Supabase as a string and lets PostgREST
+coerce to integer. This matches what FastAPI did (Pydantic model declared `linked_id: str`
+while the ORM column is `integer`). If the ID is non-numeric the insert will fail with a
+DB error and return `{ ok: false }` to the caller — acceptable UX.
+
+`getImportableAccounts` compares both sides with `String()` to handle the int/string mismatch
+when filtering already-linked accounts.
+
+## Impact
+
+- Other squad members working on dividend features should be aware of this type mismatch
+  and handle `linked_id` comparisons with `String()` normalization.
+- Long-term fix: align the DB column type (text) or the FinanceItem ID generation (numeric).
+
+
+# ADR: TJ-019/TJ-020 frontend Supabase-only compute architecture
+
+## Status
+
+Accepted for Phase A. This replaces the TJ-019 tunnel-based backend exposure plan and becomes the canonical direction for TJ-020 implementation work.
+
+## Decision
+
+The Trading Journal frontend deployed on Vercel will only communicate with Supabase: tables, Auth, Storage, and Realtime. The frontend must not make HTTP calls to the Python backend, and there is no backend `NEXT_PUBLIC_API_URL`, browser CORS allow-list, tunnel, or public laptop endpoint in the target architecture.
+
+The Python backend remains valuable, but its role changes from HTTP API to local worker. It runs in Docker on Jony's laptop, reads inputs from Supabase with a server-only credential or scoped database connection, executes existing compute modules under `apps/backend/app/`, and writes results back to dedicated Supabase result tables. FastAPI may continue to expose `/health` for local liveness checks; business endpoints are not frontend integration points and should be removed or made admin-only as Phase B proceeds.
+
+## Rationale
+
+- No tunnel is required, so Vercel never depends on reaching a laptop over a public URL.
+- No browser CORS allow-list is required for the backend because browsers never call it.
+- Jony's laptop is not publicly exposed, reducing the attack surface for a financial application.
+- Supabase remains the source of truth: the frontend reads authenticated rows, subscribes to result changes, and uses Storage for user files.
+- Existing Python computation code can be retained and moved behind worker orchestration without forcing an immediate rewrite.
+
+## Backend operating modes
+
+### Scheduled batch (default)
+
+For data that can be precomputed, the backend runs on a timer, recomputes the dataset, and upserts/overwrites result tables in Supabase. APScheduler in the backend process is the preferred MVP because it keeps scheduling next to the Python compute code. Cron inside the worker container is acceptable if APScheduler introduces operational issues.
+
+Examples: ticker analysis, growth stories, bond scanner results, price cache refreshes, NDX sync, and broker sync jobs.
+
+### Job queue table (on-demand)
+
+For user-triggered heavy compute, a Next.js Server Action inserts a row into a Supabase queue table such as `compute_jobs` with an input payload and `status = 'pending'`. The backend polls for pending jobs every 10 seconds for the MVP, claims one with a transactional status update, runs the Python computation, writes the result table row, and marks the job `done` or `failed`. The frontend subscribes to the job/result row via Supabase Realtime and never calls the backend directly.
+
+LISTEN/NOTIFY or Supabase Realtime-triggered workers can replace polling later, but polling every 10 seconds is the canonical Phase B MVP.
+
+## Tradeoff
+
+When Jony's laptop is offline, asleep, or Docker is stopped, scheduled result tables become stale and pending jobs queue up. This is acceptable per Jony. The user-facing app continues to load because Vercel reads Supabase tables directly; stale timestamps and pending job statuses are visible data states, not HTTP outages.
+
+## Endpoint classification
+
+CRUD/read paths that have already moved or will move directly to Supabase tables are outside this compute matrix. The rows below classify the remaining FastAPI compute, external-data, and side-effect endpoints that must stop being frontend HTTP dependencies.
+
+| Endpoint | Mode | Result table | Notes |
+|---|---|---|---|
+| `/api/plans/simulate` | Server Action preferred; job queue if profiling shows it is too heavy | n/a or `plan_simulations` | Math-only projection path using plan/finance inputs. Port to TypeScript Server Action first; fall back to queued Python worker if runtime or parity risk is too high. |
+| `/api/options/projection` | Server Action | n/a | Analytics math over options income records. Keep computation colocated with the frontend action that reads Supabase rows. |
+| `/api/tax-condor/*` and `/api/tax_condor/*` | Server Action | n/a | Math/recommendation workflow. If live IB data remains required, split live-data refresh into scheduled broker tables and keep recommendation math in a Server Action. |
+| `/api/backtest` | Job queue (on-demand) | `backtest_runs` | Heavy, per-config compute. Server Action inserts a job; worker writes run status, metrics, and trades to `backtest_runs`. Lightweight metadata such as available years moves to a Server Action or market-data table read. |
+| `/api/analyze/*` (yfinance, growth_story) | Batch (daily) | `analysis_tickers`, `analysis_growth_stories` | External yfinance/news-style data. Worker refreshes known/watchlisted tickers and writes freshness/error state. |
+| `/api/bonds/scanner` | Batch (daily) | `bond_scanner_results` | External/curated bond universe. Worker refreshes daily; frontend filters Supabase rows. |
+| `/api/finances/price` | Batch (hourly) | `price_cache` | External lookup/cache. Frontend reads latest price row and freshness. |
+| `/api/ndx/sync` | Batch (daily after market close) | existing `ndx_*` tables | Worker syncs market data after close. Frontend reads existing NDX tables. |
+| `/api/trading/sync` | Batch (frequent, with IB Gateway) | existing trading tables | IB-dependent laptop worker refreshes account summaries/positions, then propagates dependent dividend syncs as a follow-up worker step. |
+| `/api/pension/upload` | Storage trigger / poll | parsed rows in pension tables | User uploads PDF to Supabase Storage. Worker polls Storage bucket for new files, parses, writes pension tables, and records parse status. |
+
+The wildcard rows above intentionally cover the concrete FastAPI routes currently grouped under those routers, such as `/api/analyze/fundamentals/{ticker}`, `/api/analyze/price-history/{ticker}`, `/api/analyze/technicals/{ticker}`, `/api/analyze/options/{ticker}`, `/api/analyze/synthesis/{ticker}`, `/api/analyze/growth-story/{ticker}`, `/api/backtest/run`, `/api/backtest/years`, and `/api/trading/sync-to-dividends`.
+
+## Phase B implementation requirements
+
+- Every new result table in an exposed schema must have RLS enabled and policies matching its read/write model.
+- Service-role keys remain server-only and must never use a `NEXT_PUBLIC_` prefix.
+- Worker writes should include `refreshed_at`, `source`, and error/status fields so the frontend can represent stale or failed refreshes.
+- Frontend migrations are complete only when no `/api/*` references remain for the endpoint being migrated.
+- FastAPI business routes should become admin-only maintenance affordances or be removed after their worker replacement lands.
+
+## Consequences
+
+- PR #206's tunnel-based pivot is superseded.
+- TJ-020 becomes the umbrella for Phase B scheduler, job queue, result table, and frontend migration work.
+- Rabin should review service-role-key handling before any Phase B worker writes are merged.
+
+
+# TJ-019 Decision: Local Docker Compute Backend + Tunnel
+
+## Decision
+
+Run the remaining FastAPI compute backend locally in Docker on Jony's laptop, connect it directly to Supabase Postgres with `DIRECT_DATABASE_URL`, verify Supabase JWTs at the FastAPI boundary, and expose the backend to Vercel through a public tunnel. Cloudflare Tunnel is the recommended tunnel; Tailscale Funnel or ngrok are acceptable fallbacks.
+
+## Rationale
+
+Wave-1 CRUD routes have moved to Supabase-backed frontend paths. The remaining FastAPI routes are compute-heavy workflows (`plans/simulate`, options projection, backtest, pension upload, analyze, tax condor, bond scanner, price lookups, and sync jobs). Keeping those compute workloads on Jony's laptop has zero runtime hosting cost, preserves the existing FastAPI app and Docker workflow, and avoids introducing Railway or another always-on platform after PR #193 was closed.
+
+## Architecture
+
+- `docker-compose.backend.yml` runs only `apps/backend` on port `8000`; it does not start or depend on the legacy local Postgres `db` service.
+- The backend receives `DATABASE_URL=${DIRECT_DATABASE_URL}` so SQLModel/SQLAlchemy talks directly to Supabase Postgres or the Supabase pooler connection string.
+- `SUPABASE_URL` configures JWKS discovery; `SUPABASE_JWT_SECRET` remains available for local/HS256 fallback.
+- Vercel sets `NEXT_PUBLIC_API_URL` to the tunnel URL. Next.js rewrites `/api/*` to that public backend URL.
+- Cloudflare Tunnel publishes `http://localhost:8000` as HTTPS for Vercel production and preview deployments.
+
+## Security
+
+- CORS is an allow-list from `BACKEND_CORS_ORIGINS`; defaults cover local dev, the production Vercel app, and Vercel preview hostnames via `https://*.vercel.app`.
+- FastAPI compute routers remain registered with `Depends(get_current_user)`, so Supabase JWT verification gates every compute endpoint.
+- Public endpoints are limited to root, docs/OpenAPI, auth legacy routes, `/health`, `/health/auth`, and telemetry metrics that already handle optional auth.
+- No service-role key is required for this backend path. Do not expose Supabase service-role credentials to Vercel or the browser.
+- `DIRECT_DATABASE_URL` and `SUPABASE_JWT_SECRET` are server-only secrets stored in Jony's local `.env`, never committed.
+
+## Tradeoffs
+
+- Laptop offline, asleep, or tunnel stopped means Vercel `/api/*` calls return 5xx/connection failures. This is acceptable for TJ-019; the walkthrough allow-list already tolerates the remaining compute endpoints being unavailable.
+- Direct database connectivity keeps the backend simple, but Jony is responsible for local Docker health, laptop uptime, and tunnel process uptime.
+- Cloudflare Tunnel avoids opening router ports, but it adds one local daemon and DNS configuration step. Tailscale Funnel or ngrok can replace it if Cloudflare setup is inconvenient.
+- Runtime cost is effectively zero beyond laptop/network power.
+
+## How to run it
+
+1. Create a local `.env` from `.env.example` and fill:
+   - `DIRECT_DATABASE_URL` from Supabase project `zvbwgxdgxwgduhhzdwjj` Database settings. Include `sslmode=require` when using the direct Postgres URL.
+   - `SUPABASE_URL=https://zvbwgxdgxwgduhhzdwjj.supabase.co`.
+   - `SUPABASE_JWT_SECRET` from Supabase Auth JWT settings if HS256 fallback is needed.
+   - `BACKEND_CORS_ORIGINS=http://localhost:3000,https://trading-journal-cohenjos-projects.vercel.app,https://*.vercel.app` or a tighter preview-domain list.
+2. Start the backend only:
+
+   ```bash
+   docker compose -f docker-compose.backend.yml up -d --build
+   docker compose -f docker-compose.backend.yml ps
+   curl http://localhost:8000/health
+   ```
+
+3. Create and run the Cloudflare Tunnel:
+
+   ```bash
+   cloudflared tunnel login
+   cloudflared tunnel create tj-backend
+   cloudflared tunnel route dns tj-backend api.your-domain.example
+   cloudflared tunnel run tj-backend --url http://localhost:8000
+   ```
+
+4. In Vercel, set `NEXT_PUBLIC_API_URL=https://api.your-domain.example` for Production and Preview environments, then redeploy.
+
+## Owner
+
+Kujan owns the Docker/tunnel workflow. Rabin should review the CORS allow-list and JWT verification posture before merge.
+
+
