@@ -4,7 +4,7 @@
  * Tests for the household bootstrap / onboarding flow:
  *
  *   (a) Existing-household login — no banner, app loads normally.
- *   (b) Sign-out flow — sidebar-signout → /login, Supabase session cookie cleared.
+ *   (b) Sign-out flow — sidebar-signout → /signin, Supabase session cookie cleared.
  *   (c) [skip] First-login household picker — opens dialog, default Individual,
  *       can choose Joint, confirm calls RPC, banner disappears.
  *
@@ -73,7 +73,7 @@ test.describe('household bootstrap @auth', () => {
   // ── (b) Sign-out flow ──────────────────────────────────────────────────────
 
   test(
-    'sign-out: sidebar-signout → /login, session cookie cleared @auth',
+    'sign-out: sidebar-signout → /signin, session cookie cleared @auth',
     async ({ testUser: { page } }) => {
       // Gracefully skip when no local dev server is available
       try {
@@ -117,9 +117,9 @@ test.describe('household bootstrap @auth', () => {
       }
       await signoutBtn.click();
 
-      // Should land on /login after sign-out
-      await page.waitForURL(/\/login/, { timeout: 10_000 });
-      expect(page.url()).toContain('/login');
+      // Should land on /signin after sign-out (MainLayout redirects to /signin; /login also redirects there)
+      await page.waitForURL(/\/(login|signin)/, { timeout: 10_000 });
+      expect(page.url()).toContain('/signin');
 
       // Verify the Supabase session cookie is gone
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
