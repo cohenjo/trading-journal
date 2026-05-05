@@ -293,8 +293,12 @@ jobs:
       - name: Resolve grep pattern
         id: grep
         shell: bash
+        # Security: inputs.suite is passed via env var (not interpolated into shell body)
+        # to prevent shell-injection. Ref: https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+        env:
+          SUITE: ${{ inputs.suite }}
         run: |
-          case "${{ inputs.suite }}" in
+          case "$SUITE" in
             smoke)  echo "pattern=@smoke"           >> "$GITHUB_OUTPUT" ;;
             auth)   echo "pattern=@auth"            >> "$GITHUB_OUTPUT" ;;
             flows)  echo "pattern=@flow"            >> "$GITHUB_OUTPUT" ;;
@@ -302,9 +306,12 @@ jobs:
           esac
 
       - name: Run ${{ inputs.suite || 'all' }} tests
-        run: npx playwright test --grep "${{ steps.grep.outputs.pattern }}" --project=chromium
+        # Security: steps output is passed via env var (not interpolated into shell body)
+        # to prevent shell-injection if the pattern value were ever tainted.
+        run: npx playwright test --grep "$GREP_PATTERN" --project=chromium
         env:
           CI: true
+          GREP_PATTERN: ${{ steps.grep.outputs.pattern }}
           BASE_URL: ${{ inputs.base_url || secrets.E2E_BASE_URL }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
