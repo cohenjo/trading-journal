@@ -145,8 +145,8 @@ def send_flex_request(
     start: date | None,
     end: date | None,
     *,
-    max_retries: int = 5,
-    initial_backoff_seconds: float = 30.0,
+    max_retries: int = 3,
+    initial_backoff_seconds: float = 15.0,
     sleep: Any = time.sleep,
 ) -> str:
     """Call SendRequest and return the Flex reference code.

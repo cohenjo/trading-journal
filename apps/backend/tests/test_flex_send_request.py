@@ -75,7 +75,7 @@ def test_send_flex_request_retries_on_1001_throttle(monkeypatch: pytest.MonkeyPa
     ref = send_flex_request(config, "TOKEN", date(2024, 1, 1), date(2024, 12, 31), sleep=sleeps.append)
     assert ref == "OK"
     assert len(calls) == 2
-    assert sleeps == [30.0]
+    assert sleeps == [15.0]
 
 
 def test_send_flex_request_raises_after_exhausting_1001_retries(monkeypatch: pytest.MonkeyPatch) -> None:
