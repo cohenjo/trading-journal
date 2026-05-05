@@ -139,13 +139,26 @@ def flex_error(root: Element) -> tuple[str | None, str | None]:
     return child_text(root, "ErrorCode"), child_text(root, "ErrorMessage")
 
 
-def send_flex_request(config: QueryConfig, token: str, start: date | None, end: date | None) -> str:
+def send_flex_request(
+    config: QueryConfig,
+    token: str,
+    start: date | None,
+    end: date | None,
+    *,
+    max_retries: int = 5,
+    initial_backoff_seconds: float = 30.0,
+    sleep: Any = time.sleep,
+) -> str:
     """Call SendRequest and return the Flex reference code.
 
     When start/end are supplied we also send `period=CustomDate` so IBKR honors
     the override; otherwise the saved query period (e.g. Last365CalendarDays)
     silently overrides the dates and the response is the wrong window.
     See IBKR Flex Web Service Guide.
+
+    Retries with exponential backoff on transient `1001` (statement could not
+    be generated) errors, which IBKR returns when the same Query ID is fired
+    too frequently. Other Flex error codes fail fast.
     """
     params = {"t": token, "q": config.query_id, "v": "3"}
     if start and end:
@@ -154,14 +167,29 @@ def send_flex_request(config: QueryConfig, token: str, start: date | None, end: 
         params["startdate"] = start.strftime("%Y%m%d")
     if end:
         params["enddate"] = end.strftime("%Y%m%d")
-    root = request_xml(SEND_REQUEST_URL, params)
-    error_code, error_message = flex_error(root)
-    if error_code and error_code != "0":
-        raise FlexProbeError(f"SendRequest failed for {config.name}: {error_code} {error_message or ''}".strip())
-    reference_code = child_text(root, "ReferenceCode")
-    if not reference_code:
-        raise FlexProbeError(f"SendRequest for {config.name} did not return a ReferenceCode")
-    return reference_code
+    backoff = initial_backoff_seconds
+    last_message = ""
+    for attempt in range(1, max_retries + 1):
+        root = request_xml(SEND_REQUEST_URL, params)
+        error_code, error_message = flex_error(root)
+        if error_code == "1001" and attempt < max_retries:
+            print(
+                f"{config.name}: Flex 1001 throttle (attempt {attempt}/{max_retries}); "
+                f"sleeping {backoff:.0f}s before retry",
+                file=sys.stderr,
+            )
+            sleep(backoff)
+            backoff = min(backoff * 2, 480.0)
+            last_message = error_message or ""
+            continue
+        if error_code and error_code != "0":
+            detail = (error_message or last_message or "").strip()
+            raise FlexProbeError(f"SendRequest failed for {config.name}: {error_code} {detail}".strip())
+        reference_code = child_text(root, "ReferenceCode")
+        if not reference_code:
+            raise FlexProbeError(f"SendRequest for {config.name} did not return a ReferenceCode")
+        return reference_code
+    raise FlexProbeError(f"SendRequest failed for {config.name}: 1001 retries exhausted ({last_message})".strip())
 
 
 def get_statement(config: QueryConfig, token: str, reference_code: str, poll_seconds: int, max_polls: int) -> bytes:
