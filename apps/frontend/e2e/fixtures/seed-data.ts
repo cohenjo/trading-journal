@@ -445,6 +445,10 @@ export async function cleanupHouseholdData(householdId: string): Promise<void> {
     admin.from('trading_account_config').delete().eq('household_id', householdId),
     admin.from('finance_snapshots').delete().eq('household_id', householdId),
     admin.from('trade').delete().eq('household_id', householdId),
+    // dividend_accounts was missing — omission caused duplicate PK failures on
+    // nightly re-runs when deleteE2eUser couldn't delete due to lingering FK refs.
+    // Tracked: #267, #232 (dup).
+    admin.from('dividend_accounts').delete().eq('household_id', householdId),
   ]);
 
   for (const result of results) {
