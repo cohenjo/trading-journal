@@ -14,10 +14,12 @@ from sqlmodel import Session
 
 from app.dal.database import engine
 from app.worker.registry import JOB_HANDLERS, JobHandler, JobPayload, JobResult
+from app.worker.retry import backoff_interval_sql
 
 logger = logging.getLogger(__name__)
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 5
 DEFAULT_BATCH_SIZE = 10
+_STALE_RUNNING_MINUTES = 10
 
 
 class SessionFactory(Protocol):
@@ -67,11 +69,33 @@ class JobQueuePoller:
         """
 
         with self.session_factory() as session:
+            self._reclaim_stale_running_jobs(session)
             jobs = self._claim_pending_jobs(session)
             for job in jobs:
                 self._process_job(session, job)
             session.commit()
             return len(jobs)
+
+    def _reclaim_stale_running_jobs(self, session: Session) -> None:
+        """Reset jobs stuck in 'running' state back to 'pending' for retry."""
+
+        rows = session.execute(
+            text(
+                """
+                update public.compute_jobs
+                   set status = 'pending',
+                       next_retry_at = now(),
+                       started_at = null
+                 where status = 'running'
+                   and started_at < now() - interval '"""
+                + str(_STALE_RUNNING_MINUTES)
+                + """ minutes'
+                returning id
+                """
+            )
+        ).fetchall()
+        if rows:
+            logger.warning("Reclaimed %d stale running job(s)", len(rows))
 
     def _claim_pending_jobs(self, session: Session) -> list[ComputeJob]:
         """Mark pending jobs running and return their payloads."""
@@ -89,6 +113,7 @@ class JobQueuePoller:
                      from public.compute_jobs
                     where status = 'pending'
                       and attempts < :max_attempts
+                      and (next_retry_at is null or next_retry_at <= now())
                     order by created_at
                     limit :batch_size
                     for update skip locked
@@ -160,13 +185,19 @@ class JobQueuePoller:
 
         next_attempts = min(job.attempts + 1, MAX_ATTEMPTS)
         next_status = "failed" if permanent or next_attempts >= MAX_ATTEMPTS else "pending"
+        if next_status == "pending":
+            backoff_sql = backoff_interval_sql(next_attempts)
+            retry_expr = f"now() + interval '{backoff_sql}'"
+        else:
+            retry_expr = "null"
         session.execute(
             text(
-                """
+                f"""
                 update public.compute_jobs
                    set status = :status,
                        error = :error,
                        attempts = :attempts,
+                       next_retry_at = {retry_expr},
                        finished_at = case when :status = 'failed' then now() else null end
                  where id = :job_id
                 """

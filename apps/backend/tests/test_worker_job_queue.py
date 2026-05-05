@@ -11,13 +11,18 @@ from app.worker.job_queue import JobQueuePoller
 
 
 class FakeMappings:
-    """Result wrapper that mimics SQLAlchemy's mappings() API."""
+    """Result wrapper that mimics SQLAlchemy's mappings() and fetchall() APIs."""
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self.rows = rows
 
     def mappings(self) -> list[dict[str, Any]]:
         """Return mapping rows."""
+
+        return self.rows
+
+    def fetchall(self) -> list[dict[str, Any]]:
+        """Return rows (used by reclaim stale-running query)."""
 
         return self.rows
 
@@ -105,12 +110,12 @@ def test_poller_requeues_failed_job_until_retry_cap() -> None:
 
 
 def test_poller_marks_failed_at_retry_cap() -> None:
-    """The third failed attempt permanently marks the job failed."""
+    """The fifth failed attempt permanently marks the job failed (MAX_ATTEMPTS=5)."""
 
     job_id = UUID("00000000-0000-0000-0000-000000000003")
     household_id = UUID("10000000-0000-0000-0000-000000000003")
     session = FakeSession(
-        [{"id": job_id, "household_id": household_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 2}]
+        [{"id": job_id, "household_id": household_id, "job_type": "fake", "payload": {"x": 1}, "attempts": 4}]
     )
 
     def handler(_payload: dict[str, object]) -> dict[str, object]:
@@ -121,7 +126,7 @@ def test_poller_marks_failed_at_retry_cap() -> None:
     assert poller.poll_once() == 1
     failure_params = session.executions[-1]["params"]
     assert failure_params["status"] == "failed"
-    assert failure_params["attempts"] == 3
+    assert failure_params["attempts"] == 5
     assert failure_params["error"] == "still broken"
 
 
@@ -140,3 +145,63 @@ def test_poller_marks_unknown_job_type_failed() -> None:
     assert failure_params["status"] == "failed"
     assert failure_params["attempts"] == 1
     assert "No handler registered" in failure_params["error"]
+
+
+def test_poller_failure_sets_backoff_next_retry_at() -> None:
+    """A retryable failure embeds a next_retry_at interval expression in the SQL."""
+
+    job_id = UUID("00000000-0000-0000-0000-000000000005")
+    household_id = UUID("10000000-0000-0000-0000-000000000005")
+    session = FakeSession(
+        [{"id": job_id, "household_id": household_id, "job_type": "fake", "payload": {}, "attempts": 0}]
+    )
+
+    def handler(_payload: dict[str, object]) -> dict[str, object]:
+        raise RuntimeError("transient")
+
+    poller = JobQueuePoller(handlers={"fake": handler}, session_factory=lambda: session)
+    poller.poll_once()
+
+    failure_call = next(
+        (c for c in session.executions if c["params"].get("status") == "pending"),
+        None,
+    )
+    assert failure_call is not None, "Expected a pending re-queue call"
+    assert "next_retry_at" in failure_call["sql"]
+    assert "interval" in failure_call["sql"]
+
+
+def test_poller_permanent_failure_clears_next_retry_at() -> None:
+    """On permanent failure the SQL sets next_retry_at = null."""
+
+    job_id = UUID("00000000-0000-0000-0000-000000000006")
+    household_id = UUID("10000000-0000-0000-0000-000000000006")
+    session = FakeSession(
+        [{"id": job_id, "household_id": household_id, "job_type": "fake", "payload": {}, "attempts": 4}]
+    )
+
+    def handler(_payload: dict[str, object]) -> dict[str, object]:
+        raise RuntimeError("fatal")
+
+    poller = JobQueuePoller(handlers={"fake": handler}, session_factory=lambda: session)
+    poller.poll_once()
+
+    failure_call = next(
+        (c for c in session.executions if c["params"].get("status") == "failed"),
+        None,
+    )
+    assert failure_call is not None
+    assert "next_retry_at = null" in failure_call["sql"]
+
+
+def test_poller_reclaims_stale_running_jobs() -> None:
+    """poll_once issues a reclaim UPDATE for jobs stuck in running state."""
+
+    session = FakeSession([])
+    poller = JobQueuePoller(handlers={}, session_factory=lambda: session)
+    poller.poll_once()
+
+    reclaim_calls = [
+        c for c in session.executions if "next_retry_at = now()" in c["sql"] and "status = 'pending'" in c["sql"]
+    ]
+    assert len(reclaim_calls) == 1, "Expected exactly one stale-running reclaim UPDATE"
