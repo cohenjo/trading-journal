@@ -23,7 +23,23 @@ SECTION_ROW_NAMES = {
 }
 MONEY_ZERO = Decimal("0")
 ASSIGNMENT_TRANSACTION_TYPES = {"assignment", "exercise"}
+# IBKR notes codes that appear on assignment/exercise legs.
+# The `notes` attribute is a semicolon-separated string, e.g. "A;C".
+NOTES_CODE_SEPARATOR = ";"
+NOTES_ASSIGNMENT_CODES: frozenset[str] = frozenset({"a", "ex"})  # A=Assignment, Ex=Exercise
 logger = logging.getLogger(__name__)
+
+
+def _notes_codes(notes_str: str | None) -> frozenset[str]:
+    """Return the normalised (lowercase) set of code tokens from an IBKR notes string."""
+    if not notes_str:
+        return frozenset()
+    return frozenset(tok.strip().lower() for tok in notes_str.split(NOTES_CODE_SEPARATOR) if tok.strip())
+
+
+def _notes_has_assignment_code(notes_str: str | None) -> bool:
+    """Return True if the notes field contains an assignment (A) or exercise (Ex) code."""
+    return bool(_notes_codes(notes_str) & NOTES_ASSIGNMENT_CODES)
 
 
 class FlexParserError(RuntimeError):
@@ -140,6 +156,11 @@ class _AssignmentOptionLeg:
     option_trade_id: str
     transaction_type: str
     currency: str
+    # Order-level identifiers for hardened pairing (IBKR Phase 1 / Gap #ibOrderID).
+    # May be None for legacy data where the field was not included in the Flex query.
+    ib_order_id: str | None = None
+    # Raw notes string from the OPT or EAE row, e.g. "A;C" for assigned-close.
+    opt_notes: str | None = None
 
 
 def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> FlexParseResult:
@@ -319,23 +340,10 @@ def _assignment_synthetic_cash_events(
         option_leg = _assignment_option_leg(eae, option_rows_by_trade_id)
         if option_leg is None:
             continue
-        matches = [row for row in stock_trade_rows if _stock_row_matches_assignment(row, option_leg)]
-        if len(matches) > 1:
-            counts["assignment_synthetic_skipped_ambiguous"] += 1
-            logger.warning(
-                "Skipping ambiguous assignment synthetic cash event",
-                extra={
-                    "account_id": option_leg.account_id,
-                    "underlying": option_leg.underlying_symbol,
-                    "trade_date": option_leg.trade_date.isoformat(),
-                    "eae_trade_id": option_leg.eae_trade_id,
-                    "stock_trade_ids": [_optional_text(row.get("tradeID")) for row in matches],
-                },
-            )
+        matched_row, tier = _select_best_pairing_with_tier(stock_trade_rows, option_leg, counts)
+        if matched_row is None:
             continue
-        if not matches:
-            continue
-        event = _synthetic_cash_from_stock_row(option_leg, matches[0], counts)
+        event = _synthetic_cash_from_stock_row(option_leg, matched_row, counts, pair_method=tier)
         if event is None or event.source_transaction_id in seen_source_ids:
             continue
         seen_source_ids.add(event.source_transaction_id)
@@ -363,6 +371,12 @@ def _assignment_option_leg(
         return None
     option_row = option_matches[0]
     trade_time = _datetime_attr(option_row, ("dateTime",), fallback_date=None)
+    # Prefer ibOrderID from the OPT row; fall back to the EAE row.
+    # raw_payload["notes"] is available at trade.raw_payload["notes"] per Hockney Phase 0 doc.
+    ib_order_id = _optional_text(
+        option_row.get("ibOrderID") or option_row.get("orderID") or eae.get("ibOrderID") or eae.get("orderID")
+    )
+    opt_notes = _optional_text(option_row.get("notes") or eae.get("notes"))
     return _AssignmentOptionLeg(
         account_id=_required_any(option_row, ("accountId",)),
         underlying_symbol=_required_any(option_row, ("underlyingSymbol", "symbol")),
@@ -376,10 +390,13 @@ def _assignment_option_leg(
         option_trade_id=_required_any(option_row, ("tradeID", "transactionID")),
         transaction_type=transaction_type or "Assignment",
         currency=_currency(option_row),
+        ib_order_id=ib_order_id,
+        opt_notes=opt_notes,
     )
 
 
-def _stock_row_matches_assignment(row: dict[str, str], option_leg: _AssignmentOptionLeg) -> bool:
+def _stock_row_heuristic_match(row: dict[str, str], option_leg: _AssignmentOptionLeg) -> bool:
+    """Original date + underlying + strike + quantity heuristic (kept as fallback)."""
     if _optional_text(row.get("assetCategory")) != "STK":
         return False
     account_id = _optional_text(row.get("accountId"))
@@ -395,8 +412,105 @@ def _stock_row_matches_assignment(row: dict[str, str], option_leg: _AssignmentOp
     )
 
 
+def _stock_row_matches_assignment(row: dict[str, str], option_leg: _AssignmentOptionLeg) -> bool:
+    """Backwards-compatible shim — delegates to the heuristic tier."""
+    return _stock_row_heuristic_match(row, option_leg)
+
+
+def _select_best_pairing_with_tier(
+    stock_trade_rows: list[dict[str, str]],
+    option_leg: _AssignmentOptionLeg,
+    counts: dict[str, int],
+) -> tuple[dict[str, str] | None, str]:
+    """Select the best matching STK row for an assignment OPT leg.
+
+    Pairing strategy (in priority order):
+
+    1. **order_id** — Both the OPT row and the STK row carry the same ``ibOrderID``
+       (or ``orderID``).  This is a definitive IBKR-level link and requires no
+       additional validation.
+
+    2. **heuristic_notes** — The classic date + underlying + strike + quantity
+       heuristic returns exactly one candidate *and* that candidate's ``notes``
+       field contains an assignment/exercise code (``A`` or ``Ex``).  The notes
+       code confirms the heuristic hit is genuinely an assignment leg.
+
+    3. **heuristic** — The classic heuristic returns exactly one candidate (legacy
+       behaviour).
+
+    When the heuristic returns multiple candidates the notes field is used to
+    *narrow* the set.  If exactly one candidate has a confirming notes code that
+    single candidate is chosen (tier ``heuristic_notes_narrowed``).  Otherwise the
+    situation is flagged as ambiguous and ``(None, "ambiguous")`` is returned.
+
+    Returns ``(matched_row, tier_name)`` or ``(None, "no_match"|"ambiguous")``.
+    """
+    # ── Tier 1: ibOrderID match ────────────────────────────────────────────────
+    if option_leg.ib_order_id:
+        order_matches = [
+            row
+            for row in stock_trade_rows
+            if _optional_text(row.get("assetCategory")) == "STK"
+            and _optional_text(row.get("accountId")) == option_leg.account_id
+            and _optional_text(row.get("ibOrderID") or row.get("orderID")) == option_leg.ib_order_id
+        ]
+        if len(order_matches) == 1:
+            counts["assignment_paired_by_order_id"] = counts.get("assignment_paired_by_order_id", 0) + 1
+            return (order_matches[0], "order_id")
+        if len(order_matches) > 1:
+            # Multiple STK rows with the same ibOrderID — data anomaly; fall through.
+            logger.warning(
+                "Multiple STK rows share ibOrderID — falling through to heuristic",
+                extra={
+                    "account_id": option_leg.account_id,
+                    "ib_order_id": option_leg.ib_order_id,
+                    "stock_trade_ids": [_optional_text(row.get("tradeID")) for row in order_matches],
+                },
+            )
+
+    # ── Tiers 2 & 3: heuristic (possibly narrowed by notes) ───────────────────
+    heuristic_matches = [row for row in stock_trade_rows if _stock_row_heuristic_match(row, option_leg)]
+
+    if not heuristic_matches:
+        return (None, "no_match")
+
+    if len(heuristic_matches) == 1:
+        stk_row = heuristic_matches[0]
+        if _notes_has_assignment_code(_optional_text(stk_row.get("notes"))):
+            counts["assignment_paired_by_notes"] = counts.get("assignment_paired_by_notes", 0) + 1
+            return (stk_row, "heuristic_notes")
+        counts["assignment_paired_by_heuristic"] = counts.get("assignment_paired_by_heuristic", 0) + 1
+        return (stk_row, "heuristic")
+
+    # Multiple heuristic matches — try to narrow by notes code.
+    notes_confirmed = [row for row in heuristic_matches if _notes_has_assignment_code(_optional_text(row.get("notes")))]
+    if len(notes_confirmed) == 1:
+        counts["assignment_paired_by_notes"] = counts.get("assignment_paired_by_notes", 0) + 1
+        return (notes_confirmed[0], "heuristic_notes_narrowed")
+
+    # Still ambiguous — flag for manual review.
+    counts["assignment_synthetic_skipped_ambiguous"] += 1
+    logger.warning(
+        "Skipping ambiguous assignment synthetic cash event",
+        extra={
+            "account_id": option_leg.account_id,
+            "underlying": option_leg.underlying_symbol,
+            "trade_date": option_leg.trade_date.isoformat(),
+            "eae_trade_id": option_leg.eae_trade_id,
+            "heuristic_candidate_count": len(heuristic_matches),
+            "notes_confirmed_count": len(notes_confirmed),
+            "stock_trade_ids": [_optional_text(row.get("tradeID")) for row in heuristic_matches],
+        },
+    )
+    return (None, "ambiguous")
+
+
 def _synthetic_cash_from_stock_row(
-    option_leg: _AssignmentOptionLeg, stock_row: dict[str, str], counts: dict[str, int]
+    option_leg: _AssignmentOptionLeg,
+    stock_row: dict[str, str],
+    counts: dict[str, int],
+    *,
+    pair_method: str = "heuristic",
 ) -> FlexCashTransaction | None:
     mtm_pnl = _optional_decimal(stock_row, "mtmPnl")
     close_price = _optional_decimal(stock_row, "closePrice")
@@ -434,6 +548,7 @@ def _synthetic_cash_from_stock_row(
         "quantity": str(quantity),
         "formula": formula,
         "transaction_type": option_leg.transaction_type,
+        "pair_method": pair_method,
     }
     return FlexCashTransaction(
         account_id=option_leg.account_id,
