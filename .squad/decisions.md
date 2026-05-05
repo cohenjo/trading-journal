@@ -31,6 +31,16 @@ Ralph dispatched a 4-round board-cleanup pass: 38 open issues + 4 PRs reduced to
 - Dependabot #244 (eslint 10), #236 (Next 16) blocked on Next 16 ecosystem readiness — revisit when `eslint-config-next@16` ships.
 - Keaton flagged: `alert-on-failure` job should guard against creating duplicate issues on consecutive backup failures.
 
+### Round 5/6 addendum — security hotfix and follow-ups
+
+- **Vulnerability discovery + patch** (Kujan, R5): The vulnerable `supabase-migrations.yml` (commit-message expression in `run:` body) leaked onto main via Scribe's R4 consolidation PR (#280). Forensic note: a Scribe agent's auto-commit may have over-broadly added files. Mitigation: PR #275 rebased + merged via #270 hotfix. Main is now safe (env-var pattern).
+- **DATABASE_URL fail-loud** (Kujan, #282 → merged): default removed; pydantic Settings raises RuntimeError if unset OR if URL contains localhost outside APP_ENV=development. 5 unit tests. .env.example and README updated with Supabase pooler URL shape.
+- **Plan simulate Server Action port** (Fenster, R6, #173): plan_service.py migrated to TypeScript Server Action; FastAPI route left in place for deprecation by Hockney in follow-up.
+
+### Process improvement
+
+- **Scribe agents must verify file list before pushing.** Never auto-commit files outside `.squad/decisions/`. Instruction added to scribe charter.
+
 ---
 
 1. **Ticker universe:** Should we restrict to US equities, or support international tickers (TASE, LSE)? yfinance supports both but data coverage varies.
