@@ -4,9 +4,9 @@ services:
     image: postgres:13
     container_name: trading_journal_db
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: trading_journal
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-trading_journal}
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     ports:
@@ -14,7 +14,7 @@ services:
     networks:
       - trading-journal-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d trading_journal"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-user} -d ${POSTGRES_DB:-trading_journal}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -30,7 +30,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: "postgresql://user:password@db:5432/trading_journal"
+      # Use ${DATABASE_URL} to allow overriding with an external DB (e.g. Supabase pooler).
+      # Default uses the Docker-internal Postgres service on the dev credentials below.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://user:password@db:5432/trading_journal}
       OTEL_SERVICE_NAME: "trading-journal-backend"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
@@ -60,7 +62,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: "http://localhost:8000"
+      # NEXT_PUBLIC_API_URL is the backend URL visible from the browser.
+      # Override with the actual backend hostname in non-local environments.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     depends_on:
       backend:
         condition: service_healthy
