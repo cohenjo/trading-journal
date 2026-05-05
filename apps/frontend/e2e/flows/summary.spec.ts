@@ -22,7 +22,7 @@
  *    "Summary", etc.) — using a broad canvas/chart selector + absence-of-error
  *    check as the primary assertions.
  */
-import { test, expect } from '../../e2e/fixtures/auth';
+import { test, expect } from '../fixtures/auth-cookie';
 
 test.describe('P0 flow: /summary (authenticated)', () => {
   test('/summary loads without 5xx @flow', async ({ authenticatedUser: { page } }) => {

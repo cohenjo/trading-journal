@@ -51,8 +51,7 @@ e2e/
 │   └── (next round — maps to pgTAP tests in supabase/tests/)
 ├── fixtures/
 │   ├── admin.ts            ← Supabase service-role admin client (server-only)
-│   ├── auth.ts             ← authenticatedUser + householdOwner Playwright fixtures
-│   ├── auth-cookie.ts      ← cookie-injection auth (preferred over auth.ts)
+│   ├── auth-cookie.ts      ← cookie-injection auth fixture (preferred)
 │   ├── test-user.ts        ← unified fixture: user + household provisioning (issue #144)
 │   └── seed-data.ts        ← per-test data seeding helpers (issue #144)
 └── scripts/

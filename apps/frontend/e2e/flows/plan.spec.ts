@@ -24,7 +24,7 @@
  *   - authenticatedUser fixture: throwaway user, no household seeding.
  *   - testUser fixture: throwaway user + auto-provisioned household for seed tests.
  */
-import { test, expect } from '../../e2e/fixtures/auth';
+import { test, expect } from '../fixtures/auth-cookie';
 import { test as testWithUser } from '../fixtures/test-user';
 import { seedFund, seedAsset, cleanupHouseholdData } from '../fixtures/seed-data';
 
