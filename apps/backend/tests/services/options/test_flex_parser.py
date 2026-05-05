@@ -250,13 +250,21 @@ def _assignment_rows(
     strike: str,
     close: str,
     mtm: str | None = None,
+    opt_order_id: str | None = None,
+    stk_order_id: str | None = None,
+    opt_notes: str | None = None,
+    stk_notes: str | None = None,
 ) -> str:
     mtm_attr = f' mtmPnl="{mtm}"' if mtm is not None else ""
-    return f'''
-<Trade accountId="U1234567" assetCategory="OPT" currency="USD" symbol="{prefix} OPT" underlyingSymbol="{prefix.upper()}" tradeID="{prefix}-opt" multiplier="100" strike="{strike}" expiry="2026-01-17" dateTime="2026-01-17;120000" putCall="{right}" quantity="{opt_qty}" tradePrice="0" proceeds="0" netCash="0" fifoPnlRealized="0" />
-<Trade accountId="U1234567" assetCategory="STK" currency="USD" symbol="{prefix.upper()}" underlyingSymbol="{prefix.upper()}" tradeID="{prefix}-stk" multiplier="1" dateTime="2026-01-17;120000" quantity="{stk_qty}" tradePrice="{strike}" closePrice="{close}" proceeds="0" netCash="0"{mtm_attr} />
+    opt_order_attr = f' ibOrderID="{opt_order_id}"' if opt_order_id else ""
+    stk_order_attr = f' ibOrderID="{stk_order_id}"' if stk_order_id else ""
+    opt_notes_attr = f' notes="{opt_notes}"' if opt_notes else ""
+    stk_notes_attr = f' notes="{stk_notes}"' if stk_notes else ""
+    return f"""
+<Trade accountId="U1234567" assetCategory="OPT" currency="USD" symbol="{prefix} OPT" underlyingSymbol="{prefix.upper()}" tradeID="{prefix}-opt" multiplier="100" strike="{strike}" expiry="2026-01-17" dateTime="2026-01-17;120000" putCall="{right}" quantity="{opt_qty}" tradePrice="0" proceeds="0" netCash="0" fifoPnlRealized="0"{opt_order_attr}{opt_notes_attr} />
+<Trade accountId="U1234567" assetCategory="STK" currency="USD" symbol="{prefix.upper()}" underlyingSymbol="{prefix.upper()}" tradeID="{prefix}-stk" multiplier="1" dateTime="2026-01-17;120000" quantity="{stk_qty}" tradePrice="{strike}" closePrice="{close}" proceeds="0" netCash="0"{mtm_attr}{stk_order_attr}{stk_notes_attr} />
 <!--EAE {prefix}-opt {transaction}-->
-'''
+"""
 
 
 def _eae_row(group: str) -> str:
@@ -432,3 +440,253 @@ def test_phase0_opt_fields_extracted_from_assignment_stub(tmp_path: Path) -> Non
     assert synth.raw_payload["underlying"] == "SPY"
     assert synth.raw_payload["strike"] == "450"
     assert result.section_counts["assignment_synthetic_emitted"] == 1
+
+
+# ── Hardened pairing tests (Issue #265) ───────────────────────────────────────
+
+
+def test_pairing_uses_order_id_as_primary_key() -> None:
+    """ibOrderID match bypasses the heuristic and resolves definitively."""
+
+    output_dir = Path("tmp/test-pairing-order-id")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "order_id.xml"
+    path.write_text(
+        _flex_xml(
+            [
+                _assignment_rows(
+                    "spy-assign",
+                    transaction="Assignment",
+                    right="P",
+                    opt_qty="1",
+                    stk_qty="100",
+                    strike="450",
+                    close="420",
+                    mtm="-3000",
+                    opt_order_id="ORD-99901",
+                    stk_order_id="ORD-99901",
+                    opt_notes="A;C",
+                    stk_notes="A",
+                )
+            ]
+        )
+    )
+
+    parsed = parse_flex_files([path])
+    synthetics = [c for c in parsed.cash_transactions if c.event_category == "assignment_synthetic"]
+
+    assert len(synthetics) == 1
+    assert synthetics[0].raw_payload["pair_method"] == "order_id"
+    assert synthetics[0].amount == Decimal("-3000")
+    assert parsed.section_counts.get("assignment_paired_by_order_id") == 1
+
+
+def test_pairing_order_id_resolves_same_day_multi_assignment_ambiguity() -> None:
+    """With ibOrderID, two same-day same-strike SPY assignments pair to their correct STK legs."""
+
+    output_dir = Path("tmp/test-pairing-order-id-multi")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "multi.xml"
+    # Two SPY short-put assignments on the same date, same strike, same quantity —
+    # the heuristic alone would flag them as ambiguous; ibOrderID resolves each cleanly.
+    rows_a = _assignment_rows(
+        "spy-a",
+        transaction="Assignment",
+        right="P",
+        opt_qty="1",
+        stk_qty="100",
+        strike="450",
+        close="420",
+        mtm="-3000",
+        opt_order_id="ORD-AAA",
+        stk_order_id="ORD-AAA",
+    )
+    rows_b = _assignment_rows(
+        "spy-b",
+        transaction="Assignment",
+        right="P",
+        opt_qty="1",
+        stk_qty="100",
+        strike="450",
+        close="420",
+        mtm="-3100",
+        opt_order_id="ORD-BBB",
+        stk_order_id="ORD-BBB",
+    )
+    # Rewrite underlyingSymbol to SPY in both sets to maximise heuristic collision.
+    for old, new in [("SPY-A", "SPY"), ("SPY-B", "SPY")]:
+        rows_a = rows_a.replace(old, new)
+        rows_b = rows_b.replace(old, new).replace(old.lower(), new.lower())
+    path.write_text(_flex_xml([rows_a, rows_b]))
+
+    parsed = parse_flex_files([path])
+    synthetics = [c for c in parsed.cash_transactions if c.event_category == "assignment_synthetic"]
+
+    assert len(synthetics) == 2
+    assert all(c.raw_payload["pair_method"] == "order_id" for c in synthetics)
+    assert sorted(c.amount for c in synthetics) == [Decimal("-3100"), Decimal("-3000")]
+
+
+def test_pairing_exercise_pair_via_notes_code() -> None:
+    """Exercise (Ex) notes code on the STK row is recognised as an assignment-family code."""
+
+    output_dir = Path("tmp/test-pairing-exercise-notes")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "exercise.xml"
+    path.write_text(
+        _flex_xml(
+            [
+                _assignment_rows(
+                    "aapl-ex",
+                    transaction="Exercise",
+                    right="C",
+                    opt_qty="10",
+                    stk_qty="1000",
+                    strike="180",
+                    close="200",
+                    mtm="20000",
+                    stk_notes="Ex",
+                )
+            ]
+        )
+    )
+
+    parsed = parse_flex_files([path])
+    synthetics = [c for c in parsed.cash_transactions if c.event_category == "assignment_synthetic"]
+
+    assert len(synthetics) == 1
+    assert synthetics[0].raw_payload["pair_method"] in {"heuristic_notes", "heuristic"}
+    assert synthetics[0].amount == Decimal("20000")
+
+
+def test_pairing_notes_narrows_ambiguous_heuristic_match() -> None:
+    """When two STK rows pass the heuristic, the one with notes='A' wins."""
+
+    output_dir = Path("tmp/test-pairing-notes-narrowing")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "narrowing.xml"
+    # Main assignment rows — STK leg has notes="A".
+    rows = _assignment_rows(
+        "qqqm",
+        transaction="Assignment",
+        right="P",
+        opt_qty="2",
+        stk_qty="200",
+        strike="100",
+        close="90",
+        mtm="-2000",
+        stk_notes="A",
+    )
+    # Inject a second STK row (same account/underlying/date/price/qty) WITHOUT notes.
+    noise_stk = (
+        '<Trade accountId="U1234567" assetCategory="STK" currency="USD" symbol="QQQM"'
+        ' underlyingSymbol="QQQM" tradeID="qqqm-stk-noise" multiplier="1"'
+        ' dateTime="2026-01-17;120000" quantity="200" tradePrice="100"'
+        ' closePrice="90" proceeds="0" netCash="0" />'
+    )
+    xml = _flex_xml([rows])
+    xml = xml.replace("</Trades>", noise_stk + "</Trades>")
+    path.write_text(xml)
+
+    parsed = parse_flex_files([path])
+    synthetics = [c for c in parsed.cash_transactions if c.event_category == "assignment_synthetic"]
+
+    assert len(synthetics) == 1
+    assert synthetics[0].raw_payload["pair_method"] == "heuristic_notes_narrowed"
+    assert synthetics[0].raw_payload["stk_trade_id"] == "qqqm-stk"
+    assert synthetics[0].amount == Decimal("-2000")
+
+
+def test_pairing_expiration_emits_no_stk_leg() -> None:
+    """Expired options (transactionType=Expiration) are outside ASSIGNMENT_TRANSACTION_TYPES."""
+
+    output_dir = Path("tmp/test-pairing-expiration")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "expiry.xml"
+    xml = (
+        "<FlexQueryResponse><FlexStatements>"
+        '<FlexStatement accountId="U1234567" fromDate="20260101" toDate="20260131">'
+        "<Trades>"
+        '<Trade accountId="U1234567" assetCategory="OPT" currency="USD" symbol="IWM OPT"'
+        ' underlyingSymbol="IWM" tradeID="exp-opt-1" multiplier="100" strike="180"'
+        ' expiry="2026-01-17" dateTime="2026-01-17;160000" putCall="P"'
+        ' quantity="1" tradePrice="0" proceeds="0" netCash="0" fifoPnlRealized="0"'
+        ' notes="Ep" />'
+        "</Trades>"
+        "<OptionEAE>"
+        '<OptionEAE accountId="U1234567" currency="USD" symbol="IWM OPT"'
+        ' underlyingSymbol="IWM" transactionType="Expiration" tradeID="exp-opt-1" />'
+        "</OptionEAE>"
+        "</FlexStatement></FlexStatements></FlexQueryResponse>"
+    )
+    path.write_text(xml)
+
+    parsed = parse_flex_files([path])
+    assert [c for c in parsed.cash_transactions if c.event_category == "assignment_synthetic"] == []
+    assert parsed.section_counts.get("assignment_synthetic_emitted", 0) == 0
+
+
+def test_pairing_ambiguous_without_notes_flags_for_review(caplog) -> None:  # type: ignore[no-untyped-def]
+    """Two STK rows same date/underlying/strike/qty, neither with notes → ambiguous."""
+
+    output_dir = Path("tmp/test-pairing-ambiguous-no-notes")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "ambiguous-no-notes.xml"
+    rows = _assignment_rows(
+        "xlf",
+        transaction="Assignment",
+        right="P",
+        opt_qty="1",
+        stk_qty="100",
+        strike="38",
+        close="35",
+        mtm="-300",
+    )
+    duplicate_stk = (
+        '<Trade accountId="U1234567" assetCategory="STK" currency="USD" symbol="XLF"'
+        ' underlyingSymbol="XLF" tradeID="xlf-stk-2" multiplier="1"'
+        ' dateTime="2026-01-17;120000" quantity="100" tradePrice="38"'
+        ' closePrice="35" proceeds="0" netCash="0" />'
+    )
+    xml = _flex_xml([rows])
+    xml = xml.replace("</Trades>", duplicate_stk + "</Trades>")
+    path.write_text(xml)
+
+    with caplog.at_level("WARNING", logger="app.services.options.flex_parser"):
+        parsed = parse_flex_files([path])
+
+    assert [c for c in parsed.cash_transactions if c.event_category == "assignment_synthetic"] == []
+    assert parsed.section_counts["assignment_synthetic_skipped_ambiguous"] == 1
+    assert "ambiguous" in caplog.text.lower()
+
+
+def test_pairing_heuristic_fallback_when_no_order_id_or_notes() -> None:
+    """Legacy data without ibOrderID or notes still pairs via classic heuristic."""
+
+    output_dir = Path("tmp/test-pairing-heuristic-fallback")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / "heuristic.xml"
+    path.write_text(
+        _flex_xml(
+            [
+                _assignment_rows(
+                    "voo",
+                    transaction="Assignment",
+                    right="P",
+                    opt_qty="1",
+                    stk_qty="100",
+                    strike="400",
+                    close="390",
+                    mtm="-1000",
+                    # No opt_order_id, stk_order_id, or notes — pure legacy data.
+                )
+            ]
+        )
+    )
+
+    parsed = parse_flex_files([path])
+    synthetics = [c for c in parsed.cash_transactions if c.event_category == "assignment_synthetic"]
+
+    assert len(synthetics) == 1
+    assert synthetics[0].raw_payload["pair_method"] == "heuristic"
+    assert synthetics[0].amount == Decimal("-1000")
