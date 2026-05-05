@@ -15,6 +15,7 @@ from app.worker.handlers.options_margin_sync import (
     run_scheduled_options_margin_sync,
 )
 from app.worker.handlers.options_sync import handle_flex_options_sync, run_scheduled_flex_options_sync
+from app.worker.handlers.pnl_daily import handle_pnl_daily
 from app.worker.pension_pdf_parse import handle_pension_pdf_parse
 
 JobPayload = dict[str, object]
@@ -41,6 +42,7 @@ JOB_HANDLERS: dict[str, JobHandler] = {
     "compute_options_strategy_groups": handle_compute_options_strategy_groups,
     "compute_options_monthly_metrics": handle_compute_options_monthly_metrics,
     "options_margin_sync": handle_options_margin_sync,
+    "pnl_daily": handle_pnl_daily,
 }
 JOB_SCHEDULES: list[JobSchedule] = [
     JobSchedule(
