@@ -8,7 +8,7 @@ import uvicorn
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
-from app.dal.database import check_database_connection, create_db_and_tables
+from app.dal.database import check_database_connection, create_db_and_tables, validate_database_url
 from app.utils.decimal_encoder import decimal_default
 from app.dependencies import get_current_user
 from app.api import (
@@ -80,6 +80,7 @@ class DecimalSafeJSONResponse(JSONResponse):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_database_url()
     print("Creating tables..")
     create_db_and_tables()
     await _warmup_jwks_cache()

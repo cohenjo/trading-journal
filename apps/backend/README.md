@@ -8,16 +8,37 @@ The worker runs in Docker on Jony's laptop, reads inputs from Supabase with a se
 
 Copy the root `.env.example` or `apps/backend/.env.example` to a local `.env` and fill server-only values. Never commit real credentials.
 
+> **Important:** `DATABASE_URL` has no default. The backend **refuses to start** if it is missing or resolves to `localhost` outside of a local dev environment. See [Obtaining the Supabase pooler URL](#obtaining-the-supabase-pooler-url) below.
+
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | Supabase Postgres direct or pooler connection string used by the worker for reads and writes. Use an elevated role only on the server-side worker and include `sslmode=require` for Supabase-hosted Postgres. |
-| `DIRECT_DATABASE_URL` | Compose convenience | `docker-compose.backend.yml` maps this value into `DATABASE_URL`; set it to the Supabase direct or pooler URL. |
+| `DATABASE_URL` | **Yes — no default** | Supabase transaction-mode pooler URL. Backend will not start without this. |
+| `DIRECT_DATABASE_URL` | Compose convenience | `docker-compose.backend.yml` maps this value into `DATABASE_URL`; same format as `DATABASE_URL`. |
 | `SUPABASE_URL` | Yes | Supabase project URL for Auth/JWKS checks and Storage client access. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional, server-only | Required only when worker code needs Supabase Storage access or privileged writes that cannot be performed with the database connection. This key bypasses RLS; never expose it to the browser and never prefix it with `NEXT_PUBLIC_`. |
+| `APP_ENV` | Optional | Set to `development` or `local` to allow localhost DATABASE_URL in dev. Defaults to production-mode validation. |
 | `WORKER_TIMEZONE` | Optional | APScheduler timezone. Defaults to `Asia/Jerusalem`. |
 | `WORKER_POLL_INTERVAL_SECONDS` | Optional | `compute_jobs` polling interval. Defaults to `5`. |
 | `IB_GATEWAY_HOST` / `IB_GATEWAY_PORT` | Optional | IB Gateway TCP endpoint used by the scheduled trading sync health check and IBKR connection. Defaults to `127.0.0.1:4002`. Legacy `IB_HOST` / `IB_PORT` are also honored. |
 | `OTEL_SERVICE_NAME` / `OTEL_EXPORTER_OTLP_ENDPOINT` | Optional | Local observability settings. |
+
+## Obtaining the Supabase pooler URL
+
+The backend requires the **transaction-mode pooler** URL (PgBouncer, port 6543).
+
+1. Open the [Supabase Dashboard](https://supabase.com/dashboard) → select your project
+2. Go to **Project Settings → Database → Connection string**
+3. Choose **Transaction mode** from the dropdown
+4. Copy the connection string — it looks like:
+   ```
+   postgresql://postgres.{project-ref}:{password}@aws-1-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require
+   ```
+
+**Gotchas:**
+- Region prefix is `aws-1`, **not** `aws-0` (commonly assumed from copy-pasted snippets)
+- Username contains a dot: `postgres.{project-ref}`
+- `sslmode=require` is mandatory — omitting it causes GSSAPI negotiation errors
+- Use port `6543` (pooler), **not** `5432` (direct) — `pg_dump` needs port 5432, but the worker uses the pooler
 
 ## Adding a scheduled batch job
 
