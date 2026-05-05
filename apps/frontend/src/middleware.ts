@@ -6,7 +6,8 @@ import { NextResponse, type NextRequest } from 'next/server';
  * Add paths here that should be accessible without a login.
  */
 const PUBLIC_ROUTES: readonly string[] = [
-  '/login',
+  '/signin',
+  '/login',       // legacy redirect — kept so the redirect itself is not auth-gated
   '/favicon.ico',
 ];
 
@@ -65,10 +66,10 @@ async function updateSession(request: NextRequest): Promise<NextResponse> {
 
   const { pathname } = request.nextUrl;
 
-  // Auth guard: redirect unauthenticated users to /login
+  // Auth guard: redirect unauthenticated users to /signin
   if (!data?.claims && !isPublicRoute(pathname)) {
     const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
+    loginUrl.pathname = '/signin';
     loginUrl.searchParams.set('next', pathname);
     // IMPORTANT: copy updated cookies onto the redirect so the session
     // refresh from getClaims() isn't lost.

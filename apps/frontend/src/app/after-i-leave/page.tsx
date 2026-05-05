@@ -1,4 +1,5 @@
 'use client';
+export const dynamic = 'force-dynamic';
 
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';

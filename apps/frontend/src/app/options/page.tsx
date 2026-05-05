@@ -1,4 +1,5 @@
 'use client';
+export const dynamic = 'force-dynamic';
 
 import Decimal from 'decimal.js';
 import Link from 'next/link';
