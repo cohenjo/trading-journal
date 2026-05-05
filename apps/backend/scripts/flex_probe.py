@@ -140,8 +140,16 @@ def flex_error(root: Element) -> tuple[str | None, str | None]:
 
 
 def send_flex_request(config: QueryConfig, token: str, start: date | None, end: date | None) -> str:
-    """Call SendRequest and return the Flex reference code."""
+    """Call SendRequest and return the Flex reference code.
+
+    When start/end are supplied we also send `period=CustomDate` so IBKR honors
+    the override; otherwise the saved query period (e.g. Last365CalendarDays)
+    silently overrides the dates and the response is the wrong window.
+    See IBKR Flex Web Service Guide.
+    """
     params = {"t": token, "q": config.query_id, "v": "3"}
+    if start and end:
+        params["period"] = "CustomDate"
     if start:
         params["startdate"] = start.strftime("%Y%m%d")
     if end:
