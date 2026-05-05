@@ -54,9 +54,9 @@ test.describe('smoke / supabase health', () => {
     const status = response?.status() ?? 0;
     const finalUrl = page.url();
 
-    // Skip if not deployed (404), requires auth (401/403), or redirected to login
-    const redirectedToLogin = finalUrl.includes('/login');
-    if (status === 404 || status === 401 || status === 403 || redirectedToLogin) {
+    // Skip if not deployed (404), requires auth (401/403), or redirected to sign-in
+    const redirectedToSignIn = finalUrl.includes('/login') || finalUrl.includes('/signin');
+    if (status === 404 || status === 401 || status === 403 || redirectedToSignIn) {
       test.skip(true, `/health/auth not available (status=${status}, url=${finalUrl}); skipping`);
       return;
     }
