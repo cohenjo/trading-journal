@@ -1,3 +1,37 @@
+## 2026-05-05 — Ralph board cleanup pass (Squad orchestration)
+
+### Context
+Ralph dispatched a 4-round board-cleanup pass: 38 open issues + 4 PRs reduced to ~28 issues + 5 PRs (3 squad fixes in flight). Round 1 triaged untriaged issues and cleared duplicate noise. Round 2 reviewed dependabot PRs, audited secrets, started Phase 0 IBKR work. Round 3 merged 3 squad fixes (E2E secrets guard, IBKR Phase 0 doc+fix). Round 4 cleaned up the remaining queue.
+
+### Decisions made
+- **Backup workflow** (Kujan, #271 merged): added PGDG APT repo before postgresql-client install; `alert-on-failure` should de-dup on consecutive failures (follow-up not opened).
+- **E2E cleanup ordering** (Redfoot, #272 merged): added `dividend_accounts` to `cleanupHouseholdData`; FK order matters (children before parents).
+- **E2E wave-2 cleanup** (Redfoot, #277 in flight): also added `bond_holdings`, `insurance_policies` to cleanup.
+- **Secrets gap pattern** (Kujan, #162 closed, #274 merged): rotation-window left secrets empty for ~5 hours; added fail-fast guard step to all E2E jobs to error early when any required secret is missing. Pattern reusable for any secret-dependent workflow.
+- **CI auto-apply migrations** (Kujan, #275 in flight): trigger on push to main + commit-message marker `[apply-migrations]`; safe default = diff-only without marker; `workflow_dispatch` always applies. Use `DIRECT_DATABASE_URL` (not pooler). **Hardening**: never inline `${{ github.event.head_commit.message }}` into `run:` body — use intermediate `env:` var per GH security guidance.
+- **IBKR Flex Query field mapping** (Hockney, #276 merged): all critical fields verified. Bug fix: `parse_option_eae` now reads `transactionType` first; previously misclassified assignments as `"adjustment"`. Gap #3 (`levelOfDetail` double-count) flagged High for Phase 1.
+- **STK assignment pairing** (McManus, #279 in flight): 3-tier algorithm — `order_id` (primary, definitive) → `heuristic_notes` (date+underlying+strike+qty + notes-code confirmation) → `heuristic` (legacy fallback). Ambiguous matches rejected and logged. `pair_method` stored in `raw_payload`.
+- **DATABASE_URL fail-loud** (Kujan, #126 in flight): default removed; pydantic Settings validation errors at startup if unset. Same for `DIRECT_DATABASE_URL`.
+
+### Issues closed
+- #99 (stale meta-tracker)
+- #132, #141, #160, #231, #266 (nightly backup duplicates → root cause + fix in #271)
+- #162 (E2E secrets gap — rotation-window post-mortem; fail-fast guard added)
+- #170 (CI auto-migrations design landed in PR #275)
+- #232 (E2E nightly dup of #267)
+- #245 (IBKR Flex Phase 0 verification — PR #276)
+- #265 (STK pairing — PR #279)
+- #267 (E2E nightly cleanup fix — PR #272)
+
+### Open follow-ups
+- #275 needs re-review after Kujan's shell-injection fix.
+- #277 needs review.
+- #176 partial — `/cash-flow`, `/pension`, `/summary` CRUD blocked on FastAPI test access; `/progress`, `/trading/accounts` are P3.
+- `deleteE2eUser` cascade audit — Redfoot fixed `bond_holdings` and `insurance_policies`; full sweep TBD.
+- Dependabot #244 (eslint 10), #236 (Next 16) blocked on Next 16 ecosystem readiness — revisit when `eslint-config-next@16` ships.
+- Keaton flagged: `alert-on-failure` job should guard against creating duplicate issues on consecutive backup failures.
+
+---
 
 1. **Ticker universe:** Should we restrict to US equities, or support international tickers (TASE, LSE)? yfinance supports both but data coverage varies.
 2. **Persistence:** Should analysis results be saved to DB, or is this always live/ephemeral? Recommend ephemeral for v1.
@@ -5093,8 +5127,8 @@ Dev Supabase catches prod-only issues (migration drift, trigger behavior) that l
 
 # Decision: walkthrough spec now makes assertions, tagged @smoke
 
-**Date:** 2025-08-01  
-**Author:** Redfoot (via Copilot)  
+**Date:** 2025-08-01
+**Author:** Redfoot (via Copilot)
 **Status:** Accepted
 
 ## Context
@@ -5127,9 +5161,9 @@ Rewrote the walkthrough to:
 
 # Decision: E2E Testing Strategy
 
-**Date:** 2026-05-02  
-**Author:** Keaton (Lead)  
-**Status:** Approved  
+**Date:** 2026-05-02
+**Author:** Keaton (Lead)
+**Status:** Approved
 **Scope:** Cross-team
 
 ## Decision
@@ -5455,5 +5489,3 @@ Wave-1 CRUD routes have moved to Supabase-backed frontend paths. The remaining F
 ## Owner
 
 Kujan owns the Docker/tunnel workflow. Rabin should review the CORS allow-list and JWT verification posture before merge.
-
-
