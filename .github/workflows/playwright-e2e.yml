@@ -175,7 +175,7 @@ jobs:
           retention-days: 7
 
       - name: Create GitHub issue on nightly failure
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         if: failure()
         with:
           script: |
