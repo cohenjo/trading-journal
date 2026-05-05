@@ -15,7 +15,7 @@
  *    Until that PR lands, createE2eUser will work but the sign-in cookie may not
  *    gate /summary properly.  Mark the auth-dependent assertion as fixme if needed.
  */
-import { test, expect } from '../../e2e/fixtures/auth';
+import { test, expect } from '../fixtures/auth-cookie';
 
 test.describe('P0 flow: / → /summary (authenticated)', () => {
   test('authenticated user lands on /summary after visiting / @flow', async ({

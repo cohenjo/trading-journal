@@ -19,7 +19,7 @@
  * Auth strategy: testUser fixture (throwaway user + auto-provisioned household).
  * The save path uses Next.js Server Actions → Supabase; no FastAPI dependency.
  */
-import { test, expect } from '../../e2e/fixtures/auth';
+import { test, expect } from '../fixtures/auth-cookie';
 import { test as testWithUser } from '../fixtures/test-user';
 import { cleanupHouseholdData } from '../fixtures/seed-data';
 
