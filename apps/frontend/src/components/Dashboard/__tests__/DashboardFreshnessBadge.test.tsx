@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import DashboardFreshnessBadge from '../DashboardFreshnessBadge';
-import type { HouseholdRefreshState } from '@/app/dashboard/actions';
+import type { HouseholdRefreshState } from '@/app/dashboard/dashboard.types';
 
 const BASE_STATE: HouseholdRefreshState = {
   jobType: 'pnl_daily',

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
-import type { FreshnessStatus, HouseholdRefreshState } from '@/app/dashboard/actions';
+import type { FreshnessStatus, HouseholdRefreshState } from '@/app/dashboard/dashboard.types';
 
 interface DashboardFreshnessBadgeProps {
   freshnessStatus: FreshnessStatus;

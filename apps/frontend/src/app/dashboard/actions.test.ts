@@ -6,12 +6,11 @@ import { createClient } from '@/lib/supabase/server';
 import {
   computeFreshnessStatus,
   secondsSince,
-  getDashboardSnapshot,
-  triggerHouseholdRefresh,
   STALE_THRESHOLD_MS,
   REFRESH_RATE_LIMIT_SECONDS,
   type HouseholdRefreshState,
-} from './actions';
+} from './dashboard.types';
+import { getDashboardSnapshot, triggerHouseholdRefresh } from './actions';
 
 // ─── Unit tests for pure helpers ──────────────────────────────────────────────
 
