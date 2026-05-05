@@ -34,7 +34,7 @@ dependencies = [
     "passlib[bcrypt]>=1.7.4",
     "bcrypt<5.1",
     "pydantic-settings>=2.14.0",
-    "pydantic[email]>=2.11.7",
+    "pydantic[email]>=2.13.3",
     "apscheduler>=3.11.2",
 ]
 requires-python = ">=3.10"
