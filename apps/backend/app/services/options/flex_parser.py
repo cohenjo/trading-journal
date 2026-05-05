@@ -228,7 +228,7 @@ def parse_option_eae(attrs: dict[str, str], fallback_date: date | None = None) -
 
     leg = _leg_from_attrs(attrs)
     trade_time = _datetime_attr(attrs, ("dateTime", "reportDate"), fallback_date=fallback_date)
-    event_type = _event_type_from_lifecycle(attrs.get("type") or attrs.get("action"))
+    event_type = _event_type_from_lifecycle(attrs.get("transactionType") or attrs.get("type") or attrs.get("action"))
     quantity = _decimal_attr(attrs, "quantity")
     return FlexTradeConfirm(
         account_id=leg.account_id,
