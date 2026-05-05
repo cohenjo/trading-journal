@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BacktestChart } from "@/components/Backtest/BacktestChart";
 import { subscribeToComputeJob, type ComputeJob } from "@/lib/compute-job-subscriptions";
-import { enqueueBacktest, getBacktestRun, type BacktestConfig } from "./actions";
+import { enqueueBacktest, getBacktestRun, getBacktestYears, type BacktestConfig } from "./actions";
 
 interface Trade {
   date: string;
@@ -51,7 +51,8 @@ interface BacktestJobResult {
   backtest_run_id: string;
 }
 
-function yearsSince2018(): number[] {
+/** Synchronous fallback used as initial state before the Server Action resolves. */
+function yearsSince2018Sync(): number[] {
   const currentYear = new Date().getUTCFullYear();
   return Array.from({ length: currentYear - 2018 + 1 }, (_, index) => 2018 + index);
 }
@@ -146,8 +147,11 @@ function buildChartData(results: BacktestResponse | null, showRealizedOnly: bool
 }
 
 export default function BacktestPage() {
-  const years = useMemo(yearsSince2018, []);
-  const [selectedYear, setSelectedYear] = useState<number>(years[years.length - 1] ?? 2024);
+  const [years, setYears] = useState<number[]>(yearsSince2018Sync);
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    const initial = yearsSince2018Sync();
+    return initial[initial.length - 1] ?? 2024;
+  });
   const [stepDays, setStepDays] = useState<number>(1);
   const [underlying, setUnderlying] = useState<string>("NDX");
   const [leapUnderlying, setLeapUnderlying] = useState<string>("NDX");
@@ -155,6 +159,24 @@ export default function BacktestPage() {
   const [showRealizedOnly, setShowRealizedOnly] = useState(false);
   const [viewState, setViewState] = useState<BacktestViewState>({ status: "idle" });
   const unsubscribeRef = useRef<(() => void) | null>(null);
+
+  // Load available years from the Server Action (migrated from GET /api/backtest/years).
+  useEffect(() => {
+    let cancelled = false;
+    getBacktestYears()
+      .then((loaded) => {
+        if (!cancelled && loaded.length > 0) {
+          setYears(loaded);
+          setSelectedYear((prev) =>
+            loaded.includes(prev) ? prev : (loaded[loaded.length - 1] ?? prev)
+          );
+        }
+      })
+      .catch(() => {
+        // Keep the synchronous fallback already in state.
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => () => {
     unsubscribeRef.current?.();

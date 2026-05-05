@@ -5,7 +5,7 @@ vi.mock('@/lib/compute-jobs', () => ({ enqueueComputeJob: mocks.enqueueComputeJo
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 
 import { createClient } from '@/lib/supabase/server';
-import { enqueueBacktest, getBacktestRun, listBacktestRuns } from './actions';
+import { enqueueBacktest, getBacktestRun, getBacktestYears, listBacktestRuns } from './actions';
 
 const { enqueueComputeJob, getUser } = mocks;
 const currentYear = new Date().getUTCFullYear();
@@ -19,4 +19,36 @@ describe('backtest actions', () => {
   it('lists backtest runs through Supabase RLS', async () => { const rows = [{ id: 'run-1', household_id: 'hh-1', compute_job_id: 'job-1', config, result: { final_equity: '101000' }, started_at: '2026-05-03T00:00:00Z', finished_at: '2026-05-03T00:00:01Z', created_at: '2026-05-03T00:00:00Z' }]; const runsChain = chain({ data: rows, error: null }); (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser }, from: vi.fn(() => runsChain) }); await expect(listBacktestRuns()).resolves.toEqual(rows); expect(runsChain.order).toHaveBeenCalledWith('created_at', { ascending: false }); expect(runsChain.limit).toHaveBeenCalledWith(20); });
   it('fetches one backtest run by id', async () => { const row = { id: 'run-1', household_id: 'hh-1', compute_job_id: null, config, result: { final_equity: '101000' }, started_at: null, finished_at: null, created_at: '2026-05-03T00:00:00Z' }; const runsChain = chain({ data: row, error: null }); (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser }, from: vi.fn(() => runsChain) }); await expect(getBacktestRun('run-1')).resolves.toEqual(row); expect(runsChain.eq).toHaveBeenCalledWith('id', 'run-1'); });
   it('returns empty list when unauthenticated', async () => { getUser.mockResolvedValue({ data: { user: null }, error: new Error('no session') }); (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser }, from: vi.fn() }); await expect(listBacktestRuns()).resolves.toEqual([]); });
+});
+
+describe('getBacktestYears', () => {
+  it('returns a range starting at 2018 through the current UTC year', async () => {
+    const years = await getBacktestYears();
+    const thisYear = new Date().getUTCFullYear();
+    expect(years[0]).toBe(2018);
+    expect(years[years.length - 1]).toBe(thisYear);
+    expect(years.length).toBe(thisYear - 2018 + 1);
+  });
+
+  it('returns consecutive integers with no gaps', async () => {
+    const years = await getBacktestYears();
+    for (let i = 1; i < years.length; i++) {
+      expect(years[i]).toBe((years[i - 1] ?? 0) + 1);
+    }
+  });
+
+  it('includes 2018 (launch year) and the current year', async () => {
+    const years = await getBacktestYears();
+    const thisYear = new Date().getUTCFullYear();
+    expect(years).toContain(2018);
+    expect(years).toContain(thisYear);
+  });
+
+  it('returns only integers with no NaN or float values', async () => {
+    const years = await getBacktestYears();
+    for (const y of years) {
+      expect(Number.isInteger(y)).toBe(true);
+      expect(y).toBeGreaterThan(0);
+    }
+  });
 });

@@ -41,3 +41,17 @@ export async function getBacktestRun(id: string): Promise<BacktestRun | null> {
   if (error) throw new Error(error.message);
   return data ? normalizeRun(data as BacktestRunRow) : null;
 }
+
+/**
+ * Return the list of years for which historical backtest data is available.
+ *
+ * Migrated from `GET /api/backtest/years` (now deprecated on the FastAPI
+ * compute backend). The range is fixed at 2018–currentYear; no database
+ * round-trip is needed because the boundary is a constant, not user data.
+ */
+export async function getBacktestYears(): Promise<number[]> {
+  const START_YEAR = 2018;
+  const currentYear = new Date().getUTCFullYear();
+  if (currentYear < START_YEAR) return [];
+  return Array.from({ length: currentYear - START_YEAR + 1 }, (_, i) => START_YEAR + i);
+}
