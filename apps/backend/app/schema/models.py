@@ -9,6 +9,7 @@ from sqlmodel import Field, SQLModel
 
 class ManualTrade(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
     timestamp: datetime
     symbol: str
     side: str
@@ -21,6 +22,7 @@ class ManualTrade(SQLModel, table=True):
 
 class Trade(SQLModel, table=True):
     tradeID: int = Field(sa_column=Column("tradeID", BigInteger, primary_key=True))
+    household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
     accountId: str
     acctAlias: Optional[str] = None
     model: Optional[str] = None
@@ -107,7 +109,10 @@ class Trade(SQLModel, table=True):
 
 
 class DailySummary(SQLModel, table=True):
+    # TODO(#311): migrate to composite PK (household_id, date) — single-column PK on date
+    # does not enforce per-household uniqueness at the DB level. Follow-up migration required.
     date: date_type = Field(primary_key=True)
+    household_id: Optional[UUID] = Field(default=None, foreign_key="households.id", index=True)
     total_pnl: Decimal = Field(sa_column=Column(Numeric(18, 6)))
     winning_trades: int
     losing_trades: int

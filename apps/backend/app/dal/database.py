@@ -30,18 +30,33 @@ def _normalize_database_url(raw_url: str) -> str:
     return f"postgresql://{username}:{password}@{host}:{port}/{database}"
 
 
-def _resolve_database_url() -> str:
-    """Resolve DATABASE_URL from environment variables.
+def _resolve_web_database_url() -> str:
+    """Resolve the pooler URL for web traffic.
 
-    Priority: DIRECT_DATABASE_URL > DATABASE_URL.
-    Returns the sentinel constant when neither is set so that the module can
-    be imported safely (e.g. in tests that override get_session).  Real
-    validation happens at application startup via validate_database_url().
+    Priority: DATABASE_URL (transaction-mode pooler) -> DIRECT_DATABASE_URL fallback.
+    Returns the sentinel constant when neither is set.
+    """
+    raw = os.getenv("DATABASE_URL") or os.getenv("DIRECT_DATABASE_URL")
+    if not raw:
+        return _DB_URL_NOT_CONFIGURED
+    return _normalize_database_url(raw)
+
+
+def _resolve_direct_database_url() -> str:
+    """Resolve the direct connection URL for batch/migration use.
+
+    Priority: DIRECT_DATABASE_URL -> DATABASE_URL fallback.
+    Returns the sentinel constant when neither is set.
     """
     raw = os.getenv("DIRECT_DATABASE_URL") or os.getenv("DATABASE_URL")
     if not raw:
         return _DB_URL_NOT_CONFIGURED
     return _normalize_database_url(raw)
+
+
+# Keep old name for backward compatibility with validate_database_url()
+def _resolve_database_url() -> str:
+    return _resolve_web_database_url()
 
 
 def validate_database_url() -> None:
@@ -97,10 +112,23 @@ def validate_database_url() -> None:
 
 load_dotenv()
 
-DATABASE_URL = _resolve_database_url()
+DATABASE_URL = _resolve_web_database_url()
+DIRECT_DATABASE_URL = _resolve_direct_database_url()
 
+# Web engine: uses transaction-mode pooler (DATABASE_URL) — suitable for FastAPI requests.
+# psycopg2 does not use server-side prepared statements by default, so no special
+# PgBouncer compatibility flags are needed here.
 engine = create_engine(
     DATABASE_URL,
+    echo=os.getenv("DATABASE_ECHO", "false").lower() == "true",
+    pool_pre_ping=True,
+)
+
+# Direct engine: uses session-mode / direct connection (DIRECT_DATABASE_URL).
+# Used for batch jobs, migrations, and COPY-based ingestion that need a persistent
+# connection rather than a pooled one.
+direct_engine = create_engine(
+    DIRECT_DATABASE_URL,
     echo=os.getenv("DATABASE_ECHO", "false").lower() == "true",
     pool_pre_ping=True,
 )
@@ -123,4 +151,10 @@ def check_database_connection() -> bool:
 
 def get_session():
     with Session(engine) as session:
+        yield session
+
+
+def get_direct_session():
+    """Session using the direct (non-pooled) engine for batch operations."""
+    with Session(direct_engine) as session:
         yield session
