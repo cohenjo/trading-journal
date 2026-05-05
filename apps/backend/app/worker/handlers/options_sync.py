@@ -176,8 +176,13 @@ def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsA
 
 
 def _select_flex_source(*, from_date: date | None, to_date: date | None, synthetic: bool | None) -> list[Path]:
-    source = os.getenv("OPTIONS_FLEX_SOURCE", "synthetic").lower()
-    if synthetic is True or source == "synthetic" or not os.getenv("IBKR_FLEX_TOKEN"):
+    token = os.getenv("IBKR_FLEX_TOKEN")
+    source_env = os.getenv("OPTIONS_FLEX_SOURCE")
+    source = source_env.lower() if source_env else None
+    if source == "live" and not token:
+        raise RuntimeError("OPTIONS_FLEX_SOURCE=live requires IBKR_FLEX_TOKEN to be set in the environment")
+    use_synthetic = synthetic is True or source == "synthetic" or (source is None and not token)
+    if use_synthetic:
         return _synthetic_files()
     try:
         from scripts.flex_probe import fetch_live_xml, parse_args, query_configs_from_env

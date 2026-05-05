@@ -56,6 +56,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--year", type=int, help="Backfill one calendar year, e.g. --year 2021")
     parser.add_argument("--account", dest="account_id", help="Broker accountId; defaults to all enabled accounts")
     parser.add_argument("--synthetic", action="store_true", help="Read tmp/flex/synthetic_*.xml instead of live Flex")
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Force live IBKR Flex fetch (sets OPTIONS_FLEX_SOURCE=live; requires IBKR_FLEX_TOKEN)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Run parsing/workers and roll back database writes")
     return parser.parse_args(argv)
 
@@ -98,13 +103,22 @@ def main(argv: Iterable[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    if args.synthetic and args.live:
+        print("error: --synthetic and --live are mutually exclusive", file=sys.stderr)
+        return 2
     if args.synthetic:
         os.environ["OPTIONS_FLEX_SOURCE"] = "synthetic"
+    elif args.live:
+        os.environ["OPTIONS_FLEX_SOURCE"] = "live"
 
+    source_label = os.getenv("OPTIONS_FLEX_SOURCE")
+    if not source_label:
+        source_label = "live (auto: IBKR_FLEX_TOKEN set)" if os.getenv("IBKR_FLEX_TOKEN") else "synthetic (no token)"
     windows = yearly_windows(start, end)
     print(
         f"Backfilling options income from {start} to {end} "
-        f"in {len(windows)} yearly chunk(s){' (dry run)' if args.dry_run else ''}"
+        f"in {len(windows)} yearly chunk(s) [source={source_label}]"
+        f"{' (dry run)' if args.dry_run else ''}"
     )
     combined_sync: dict[str, int] = {"trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
     last_metrics: dict[str, object] = {"accounts": [], "row_count": 0}

@@ -147,3 +147,59 @@ def test_run_flex_options_sync_ingests_synthetic_source(monkeypatch) -> None:  #
     assert losing_roll["realized_pnl"] == "-1000.000000" or str(losing_roll["realized_pnl"]) == "-1000.000000"
     assert len(session.legs) >= 1
     assert session.sync_states == 1
+
+
+def test_select_flex_source_defaults_to_live_when_token_present(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Unset OPTIONS_FLEX_SOURCE + token present -> live (no synthetic fallback)."""
+
+    from app.worker.handlers import options_sync as mod
+
+    monkeypatch.delenv("OPTIONS_FLEX_SOURCE", raising=False)
+    monkeypatch.setenv("IBKR_FLEX_TOKEN", "fake-token")
+    called: dict[str, Any] = {}
+
+    def fake_fetch(configs, token, args):  # type: ignore[no-untyped-def]
+        called["token"] = token
+        called["from"] = args.from_date
+        called["to"] = args.to_date
+        return []
+
+    monkeypatch.setattr(mod, "_synthetic_files", lambda: ["SHOULD_NOT_BE_CALLED"])
+    import sys as _sys
+    import types as _types
+
+    fake_module = _types.ModuleType("scripts.flex_probe")
+    fake_module.fetch_live_xml = fake_fetch  # type: ignore[attr-defined]
+    fake_module.parse_args = lambda _argv: _types.SimpleNamespace(from_date=None, to_date=None)  # type: ignore[attr-defined]
+    fake_module.query_configs_from_env = lambda: []  # type: ignore[attr-defined]
+    monkeypatch.setitem(_sys.modules, "scripts.flex_probe", fake_module)
+    monkeypatch.setitem(_sys.modules, "scripts", _types.ModuleType("scripts"))
+
+    paths = mod._select_flex_source(from_date=date(2024, 1, 1), to_date=date(2024, 12, 31), synthetic=False)
+    assert paths == []
+    assert called["token"] == "fake-token"
+
+
+def test_select_flex_source_live_without_token_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Explicit OPTIONS_FLEX_SOURCE=live without token must error, not silently fall back."""
+
+    from app.worker.handlers import options_sync as mod
+    import pytest as _pytest
+
+    monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "live")
+    monkeypatch.delenv("IBKR_FLEX_TOKEN", raising=False)
+    with _pytest.raises(RuntimeError, match="IBKR_FLEX_TOKEN"):
+        mod._select_flex_source(from_date=None, to_date=None, synthetic=False)
+
+
+def test_select_flex_source_synthetic_when_no_token_and_unset(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """No token + unset env -> synthetic fallback (preserves CI behavior)."""
+
+    from app.worker.handlers import options_sync as mod
+
+    monkeypatch.delenv("OPTIONS_FLEX_SOURCE", raising=False)
+    monkeypatch.delenv("IBKR_FLEX_TOKEN", raising=False)
+    sentinel = ["sentinel"]
+    monkeypatch.setattr(mod, "_synthetic_files", lambda: sentinel)
+    paths = mod._select_flex_source(from_date=None, to_date=None, synthetic=False)
+    assert paths is sentinel

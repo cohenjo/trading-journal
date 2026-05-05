@@ -139,13 +139,26 @@ def flex_error(root: Element) -> tuple[str | None, str | None]:
     return child_text(root, "ErrorCode"), child_text(root, "ErrorMessage")
 
 
-def send_flex_request(config: QueryConfig, token: str, start: date | None, end: date | None) -> str:
+def send_flex_request(
+    config: QueryConfig,
+    token: str,
+    start: date | None,
+    end: date | None,
+    *,
+    max_retries: int = 3,
+    initial_backoff_seconds: float = 15.0,
+    sleep: Any = time.sleep,
+) -> str:
     """Call SendRequest and return the Flex reference code.
 
     When start/end are supplied we also send `period=CustomDate` so IBKR honors
     the override; otherwise the saved query period (e.g. Last365CalendarDays)
     silently overrides the dates and the response is the wrong window.
     See IBKR Flex Web Service Guide.
+
+    Retries with exponential backoff on transient `1001` (statement could not
+    be generated) errors, which IBKR returns when the same Query ID is fired
+    too frequently. Other Flex error codes fail fast.
     """
     params = {"t": token, "q": config.query_id, "v": "3"}
     if start and end:
@@ -154,14 +167,29 @@ def send_flex_request(config: QueryConfig, token: str, start: date | None, end: 
         params["startdate"] = start.strftime("%Y%m%d")
     if end:
         params["enddate"] = end.strftime("%Y%m%d")
-    root = request_xml(SEND_REQUEST_URL, params)
-    error_code, error_message = flex_error(root)
-    if error_code and error_code != "0":
-        raise FlexProbeError(f"SendRequest failed for {config.name}: {error_code} {error_message or ''}".strip())
-    reference_code = child_text(root, "ReferenceCode")
-    if not reference_code:
-        raise FlexProbeError(f"SendRequest for {config.name} did not return a ReferenceCode")
-    return reference_code
+    backoff = initial_backoff_seconds
+    last_message = ""
+    for attempt in range(1, max_retries + 1):
+        root = request_xml(SEND_REQUEST_URL, params)
+        error_code, error_message = flex_error(root)
+        if error_code == "1001" and attempt < max_retries:
+            print(
+                f"{config.name}: Flex 1001 throttle (attempt {attempt}/{max_retries}); "
+                f"sleeping {backoff:.0f}s before retry",
+                file=sys.stderr,
+            )
+            sleep(backoff)
+            backoff = min(backoff * 2, 480.0)
+            last_message = error_message or ""
+            continue
+        if error_code and error_code != "0":
+            detail = (error_message or last_message or "").strip()
+            raise FlexProbeError(f"SendRequest failed for {config.name}: {error_code} {detail}".strip())
+        reference_code = child_text(root, "ReferenceCode")
+        if not reference_code:
+            raise FlexProbeError(f"SendRequest for {config.name} did not return a ReferenceCode")
+        return reference_code
+    raise FlexProbeError(f"SendRequest failed for {config.name}: 1001 retries exhausted ({last_message})".strip())
 
 
 def get_statement(config: QueryConfig, token: str, reference_code: str, poll_seconds: int, max_polls: int) -> bytes:
@@ -189,11 +217,26 @@ def get_statement(config: QueryConfig, token: str, reference_code: str, poll_sec
 
 
 def fetch_live_xml(configs: list[QueryConfig], token: str, args: argparse.Namespace) -> list[Path]:
-    """Fetch configured live Flex queries and dump raw XML to tmp/flex."""
+    """Fetch configured live Flex queries and dump raw XML to tmp/flex.
+
+    Deduplicates by query_id: when multiple env vars (e.g. trades + cash +
+    positions) share a single Flex query, IBKR returns 1001/1018 throttle
+    errors on the back-to-back identical SendRequests. The downstream parser
+    walks each file's sections by tag name, so one XML covering many sections
+    is sufficient.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     paths: list[Path] = []
+    seen_query_ids: set[str] = set()
     for config in configs:
+        if config.query_id in seen_query_ids:
+            print(
+                f"Skipping Flex query {config.name} (query_id={config.query_id} already fetched this run)",
+                file=sys.stderr,
+            )
+            continue
+        seen_query_ids.add(config.query_id)
         print(f"Requesting Flex query {config.name}", file=sys.stderr)
         reference_code = send_flex_request(config, token, args.from_date, args.to_date)
         content = get_statement(config, token, reference_code, args.poll_seconds, args.max_polls)
