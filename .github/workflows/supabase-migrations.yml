@@ -77,10 +77,17 @@ jobs:
       # pushing schema changes. An explicit opt-in is required for push events.
       - name: Determine apply mode
         id: mode
+        # Security: user-controlled fields (commit message) and workflow inputs are
+        # passed via step-scoped env vars, never inlined into the run: body.
+        # Ref: https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-an-intermediate-environment-variable
+        env:
+          GH_EVENT_NAME: ${{ github.event_name }}
+          GH_INPUT_DRY_RUN: ${{ inputs.dry_run }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "${{ inputs.dry_run }}" = "true" ]; then
+          if [ "$GH_EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$GH_INPUT_DRY_RUN" = "true" ]; then
               echo "apply=false" >> "$GITHUB_OUTPUT"
               echo "reason=workflow_dispatch dry-run requested" >> "$GITHUB_OUTPUT"
             else
@@ -89,7 +96,6 @@ jobs:
             fi
           else
             # push event — check commit message for opt-in marker
-            COMMIT_MSG="${{ github.event.head_commit.message }}"
             if echo "$COMMIT_MSG" | grep -qF '[apply-migrations]'; then
               echo "apply=true"  >> "$GITHUB_OUTPUT"
               echo "reason=commit message contains [apply-migrations] marker" >> "$GITHUB_OUTPUT"
