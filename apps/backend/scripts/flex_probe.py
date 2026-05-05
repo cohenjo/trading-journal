@@ -217,11 +217,26 @@ def get_statement(config: QueryConfig, token: str, reference_code: str, poll_sec
 
 
 def fetch_live_xml(configs: list[QueryConfig], token: str, args: argparse.Namespace) -> list[Path]:
-    """Fetch configured live Flex queries and dump raw XML to tmp/flex."""
+    """Fetch configured live Flex queries and dump raw XML to tmp/flex.
+
+    Deduplicates by query_id: when multiple env vars (e.g. trades + cash +
+    positions) share a single Flex query, IBKR returns 1001/1018 throttle
+    errors on the back-to-back identical SendRequests. The downstream parser
+    walks each file's sections by tag name, so one XML covering many sections
+    is sufficient.
+    """
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     paths: list[Path] = []
+    seen_query_ids: set[str] = set()
     for config in configs:
+        if config.query_id in seen_query_ids:
+            print(
+                f"Skipping Flex query {config.name} (query_id={config.query_id} already fetched this run)",
+                file=sys.stderr,
+            )
+            continue
+        seen_query_ids.add(config.query_id)
         print(f"Requesting Flex query {config.name}", file=sys.stderr)
         reference_code = send_flex_request(config, token, args.from_date, args.to_date)
         content = get_statement(config, token, reference_code, args.poll_seconds, args.max_polls)

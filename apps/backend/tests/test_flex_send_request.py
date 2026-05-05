@@ -123,3 +123,36 @@ def test_send_flex_request_does_not_retry_other_errors(monkeypatch: pytest.Monke
     with pytest.raises(Exception, match="1003"):
         send_flex_request(config, "TOKEN", None, None, sleep=lambda _s: None)
     assert len(calls) == 1
+
+
+def test_fetch_live_xml_dedupes_by_query_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """When multiple QueryConfigs share a query_id, only one SendRequest fires."""
+
+    from scripts import flex_probe
+
+    monkeypatch.setattr(flex_probe, "OUTPUT_DIR", tmp_path)
+    send_calls: list[str] = []
+    get_calls: list[str] = []
+
+    def fake_send(config, token, start, end, **_kw):  # type: ignore[no-untyped-def]
+        send_calls.append(config.query_id)
+        return f"REF-{config.query_id}"
+
+    def fake_get(config, token, ref, poll, max_polls):  # type: ignore[no-untyped-def]
+        get_calls.append(ref)
+        return b"<FlexQueryResponse/>"
+
+    monkeypatch.setattr(flex_probe, "send_flex_request", fake_send)
+    monkeypatch.setattr(flex_probe, "get_statement", fake_get)
+
+    configs = [
+        flex_probe.QueryConfig(name="trades", query_id="1496910"),
+        flex_probe.QueryConfig(name="cash", query_id="1496910"),
+        flex_probe.QueryConfig(name="positions", query_id="1496910"),
+        flex_probe.QueryConfig(name="other", query_id="999999"),
+    ]
+    args = type("A", (), {"from_date": None, "to_date": None, "poll_seconds": 1, "max_polls": 1})()
+    paths = flex_probe.fetch_live_xml(configs, "TOKEN", args)
+    assert send_calls == ["1496910", "999999"]
+    assert get_calls == ["REF-1496910", "REF-999999"]
+    assert len(paths) == 2
