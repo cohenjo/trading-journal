@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import textwrap
 from decimal import Decimal
 from pathlib import Path
 
@@ -286,3 +287,148 @@ def test_live_nflx_assignment_fixture_emits_expected_synthetic_amount() -> None:
     assert nflx[0].amount == Decimal("-28460")
     assert nflx[0].raw_payload["eae_trade_id"] == "8869640563"
     assert nflx[0].raw_payload["option_trade_id"] == "8869640563"
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 validator — Issue #245
+# Asserts that all options-income-critical OPT fields are correctly extracted
+# from a single assignment XML stub (synthesised from IBKR Flex docs).
+# ---------------------------------------------------------------------------
+
+_ASSIGNMENT_STUB = textwrap.dedent("""\
+    <FlexQueryResponse queryName="Trades" type="AF">
+      <FlexStatements count="1">
+        <FlexStatement accountId="U9999999"
+                       fromDate="2026-01-17" toDate="2026-01-17">
+          <TradeConfirms>
+            <TradeConfirm
+              accountId="U9999999"
+              assetCategory="OPT"
+              currency="USD"
+              symbol="SPY  260117P00450000"
+              underlyingSymbol="SPY"
+              conid="123456789"
+              underlyingConid="756733"
+              putCall="P"
+              strike="450"
+              expiry="2026-01-17"
+              multiplier="100"
+              tradeID="T-PHASE0-OPT"
+              transactionID="TX-PHASE0-OPT"
+              ibExecID="exec-phase0"
+              dateTime="2026-01-17;090000"
+              tradeDate="2026-01-17"
+              buySell="BUY"
+              openCloseIndicator="C"
+              notes="A;C"
+              quantity="1"
+              tradePrice="0"
+              proceeds="0"
+              ibCommission="0"
+              taxes="0"
+              netCash="0"
+              fifoPnlRealized="400"
+              levelOfDetail="EXECUTION"
+            />
+            <TradeConfirm
+              accountId="U9999999"
+              assetCategory="STK"
+              currency="USD"
+              symbol="SPY"
+              underlyingSymbol="SPY"
+              conid="756733"
+              tradeID="T-PHASE0-STK"
+              transactionID="TX-PHASE0-STK"
+              dateTime="2026-01-17;090000"
+              tradeDate="2026-01-17"
+              buySell="BUY"
+              openCloseIndicator="O"
+              notes="A"
+              quantity="100"
+              tradePrice="450"
+              closePrice="442"
+              proceeds="-45000"
+              ibCommission="0"
+              netCash="-45000"
+              fifoPnlRealized="0"
+              mtmPnl="-800"
+              levelOfDetail="EXECUTION"
+            />
+          </TradeConfirms>
+          <OptionEAE>
+            <OptionEAE
+              accountId="U9999999"
+              currency="USD"
+              symbol="SPY  260117P00450000"
+              underlyingSymbol="SPY"
+              conid="123456789"
+              assetCategory="OPT"
+              putCall="P"
+              strike="450"
+              expiry="2026-01-17"
+              multiplier="100"
+              transactionType="Assignment"
+              tradeID="T-PHASE0-OPT"
+              transactionID="TX-PHASE0-OPT"
+              quantity="1"
+              tradePrice="0"
+              proceeds="0"
+              netCash="0"
+              fifoPnlRealized="400"
+              reportDate="2026-01-17"
+              dateTime="2026-01-17;090000"
+            />
+          </OptionEAE>
+        </FlexStatement>
+      </FlexStatements>
+    </FlexQueryResponse>
+""")
+
+
+def test_phase0_opt_fields_extracted_from_assignment_stub(tmp_path: Path) -> None:
+    """Phase 0 validator: all options-income-critical fields parse correctly.
+
+    Covers: assetCategory OPT filter, underlyingSymbol, strike, expiry, putCall,
+    multiplier, fifoPnlRealized, notes in raw_payload, OptionEAE transactionType,
+    and synthetic assignment cash event from mtmPnl.
+
+    See apps/backend/docs/ibkr-flex-options-mapping.md for full field mapping.
+    """
+    stub = tmp_path / "phase0_assignment.xml"
+    stub.write_text(_ASSIGNMENT_STUB)
+    result = parse_flex_files([stub], account_id="U9999999")
+
+    # --- OPT trade row ---
+    assert len(result.trades) == 1, "Expected exactly one OPT trade row"
+    trade = result.trades[0]
+    assert trade.account_id == "U9999999"
+    assert trade.leg.underlying_symbol == "SPY"
+    assert trade.leg.option_symbol == "SPY  260117P00450000"
+    assert trade.leg.right == "put"
+    assert trade.leg.strike == Decimal("450")
+    assert trade.leg.expiry.isoformat() == "2026-01-17"
+    assert trade.leg.multiplier == Decimal("100")
+    assert trade.leg.source_conid == 123456789
+    assert trade.source_trade_id == "T-PHASE0-OPT"
+    assert trade.source_exec_id == "exec-phase0"
+    assert trade.side == "buy"
+    assert trade.event_type == "close"
+    assert trade.realized_pnl == Decimal("400")
+    assert trade.currency == "USD"
+    # notes preserved in raw_payload even though not yet a typed field (Gap #2)
+    assert trade.raw_payload.get("notes") == "A;C", "notes attribute must be preserved in raw_payload"
+
+    # --- OptionEAE lifecycle row ---
+    assert len(result.option_eae) == 1, "Expected exactly one OptionEAE row"
+    eae = result.option_eae[0]
+    assert eae.event_type == "assign"
+    assert eae.source_trade_id == "T-PHASE0-OPT"
+
+    # --- Synthetic assignment cash event from STK mtmPnl ---
+    synthetics = [c for c in result.cash_transactions if c.event_category == "assignment_synthetic"]
+    assert len(synthetics) == 1, "Expected one synthetic assignment cash event"
+    synth = synthetics[0]
+    assert synth.amount == Decimal("-800")
+    assert synth.raw_payload["underlying"] == "SPY"
+    assert synth.raw_payload["strike"] == "450"
+    assert result.section_counts["assignment_synthetic_emitted"] == 1
