@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { runPlanSimulation } from '../actions';
-import type { PlanData, PlanItem } from '@/components/Plan/types';
+import type { PlanData, PlanItem, PlanMilestone } from '@/components/Plan/types';
 
 const CURRENT_YEAR = new Date().getFullYear();
 const SETTINGS = { primaryUser: { birthYear: 1990 }, mainCurrency: 'ILS' };
@@ -253,5 +253,78 @@ describe('runPlanSimulation', () => {
     });
 
     expect(result[0].net_worth).toBeCloseTo(1.2, 2);
+  });
+
+  it('detects a Date-type milestone and includes it in milestones_hit for the correct year', async () => {
+    const retireYear = CURRENT_YEAR + 5;
+    const milestone: PlanMilestone = {
+      id: 'ms-retire',
+      name: 'Retirement',
+      type: 'Custom',
+      date: `${retireYear}-01-01`,
+    };
+    const result = await simulate({ items: [], milestones: [milestone], settings: {} });
+    const retirePoint = result.find(p => p.year === retireYear);
+    expect(retirePoint).toBeDefined();
+    expect(retirePoint?.milestones_hit).toContain('ms-retire');
+    expect(result[0].milestones_hit).not.toContain('ms-retire');
+  });
+
+  it('starts milestone-conditioned income only from the referenced milestone year', async () => {
+    const startYear = CURRENT_YEAR + 3;
+    const milestone: PlanMilestone = {
+      id: 'ms-event',
+      name: 'Life Event',
+      type: 'Custom',
+      date: `${startYear}-01-01`,
+    };
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'conditional-income',
+          name: 'Post-Event Income',
+          category: 'Income',
+          value: 50_000,
+          start_condition: 'Milestone',
+          start_reference: 'ms-event',
+        }),
+      ],
+      milestones: [milestone],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    const beforePoint = result.find(p => p.year === startYear - 1);
+    expect(beforePoint?.income).toBe(0);
+    const atPoint = result.find(p => p.year === startYear);
+    expect(atPoint?.income).toBe(50_000);
+    expect(atPoint?.income_details).toContainEqual(
+      expect.objectContaining({ name: 'Post-Event Income', value: 50_000 }),
+    );
+  });
+
+  it('resolves an Age-conditioned item against the primary user birth year', async () => {
+    const targetAge = 40;
+    const targetYear = 1990 + targetAge; // birth year from SETTINGS = 1990
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'age-income',
+          name: 'Age Income',
+          category: 'Income',
+          value: 30_000,
+          start_condition: 'Age',
+          start_reference: String(targetAge),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    const beforePoint = result.find(p => p.year === targetYear - 1);
+    if (beforePoint) expect(beforePoint.income).toBe(0);
+    const atPoint = result.find(p => p.year === targetYear);
+    if (atPoint) expect(atPoint.income).toBe(30_000);
   });
 });
