@@ -5538,3 +5538,61 @@ This was not changed in #63 to avoid a disruptive migration. A follow-up PR must
 When a `table=True` model is used as a FastAPI request body, `datetime` fields may arrive
 as ISO strings (SQLite). Guard: `if isinstance(x, str): x = datetime.fromisoformat(x)`
 Apply before any `session.add()`.
+
+---
+
+## Round 11 — Keaton PR Sweep (2026-05-06)
+
+**Author**: Keaton (Lead/Architect)
+**PRs merged**: #303, #305, #306, #308 (+ #309 cherry-pick)
+
+### PR #306 — Google OAuth route rename (`/login` → `/signin`)
+
+**Decision: E2E tests must guard both `/login` and `/signin` URLs during any signin-redirect transition.**
+
+When a signin route is renamed, all E2E tests that check redirect URLs must be updated to accept
+both names (or the new name only) before the PR merges. Unit tests (Vitest) do not catch browser
+navigation; only the Playwright suite does. Checklist for future route renames:
+1. Search for the old route string in `apps/frontend/e2e/` as part of the PR.
+2. Update `waitForURL`, `toContain`, and skip-guard conditions in the same commit.
+3. All E2E checks must be green before squash-merge.
+
+Commits: `34b907b` (`household-bootstrap.spec.ts`), `ec2fc00` (`healthcheck.spec.ts`)
+
+### PR #308 — ManualTrade CRUD (`/api/trades`)
+
+See TJ-010 section for the five architectural decisions codified from this PR (Pydantic/SQLModel
+split, household_id injection, engine split, DailySummary PK gap, datetime guard). Filed #311
+for DailySummary composite PK migration.
+
+### PR #303 — pnl_daily compute pipeline (TJ-011)
+
+**1. Reconcile gate is the cooked-write guard**
+`cooked.daily_performance` rows are written only after `_reconcile()` passes. The gate checks
+`raw_events == sum(trade_counts)` and no negative counts. Any reconciliation failure marks the
+run as `failed` in `compute.pnl_runs` and aborts before any cooked write.
+
+**2. household_refresh_state tracks last clean run per household/job_type**
+Table: `public.household_refresh_state (household_id, job_type)` — composite PK.
+- Success upsert sets `last_succeeded_at`, `last_input_hash`; nulls `last_error`.
+- Failure upsert sets `last_failed_at`, `last_error`; leaves `last_succeeded_at` unchanged.
+- Workers can use `last_input_hash` for idempotency: skip re-run if hash matches.
+
+**3. compute schema naming convention**
+`*_runs` tables (e.g. `compute.pnl_runs`) = per-handler execution log, one row per invocation.
+`compute_jobs` = the global queue (cross-handler). Do not mix naming. Filed #315 for doc update.
+
+**4. FIFO P&L placeholder — not production-grade**
+`_aggregate_daily` in `pnl_daily.py` uses a simplified P&L model.
+Wash sales, splits, and corporate actions are out of scope for TJ-011; tracked in #314 (TJ-020 scope).
+
+**5. pnl_daily trigger vs cron — start with cron**
+Until Docker worker lifecycle is stable (#80), use a cron `JOB_SCHEDULES` entry (same pattern
+as `bonds_scanner_refresh`). Trigger-based auto-enqueue is a follow-up; tracked in #313.
+
+### #309 — Cherry-pick decision drop
+
+Hockney's decision drop branch was cut off a feature branch, not main. After squash-merge of
+#308, cherry-picked only the decision drop commit (`02aca04`) to avoid re-importing already-merged
+code. Pattern: when a decision drop branch has feature code in its history, cherry-pick the
+decision commit only; close the original PR with an explanation.
