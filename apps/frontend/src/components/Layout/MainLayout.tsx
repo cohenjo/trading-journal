@@ -16,7 +16,7 @@ function MainLayoutInner({ children }: { children: ReactNode }) {
     async function handleSignOut() {
         const { createClient } = await import("@/lib/supabase/browser");
         await createClient().auth.signOut();
-        router.replace("/login");
+        router.replace("/signin");
     }
 
     return (
