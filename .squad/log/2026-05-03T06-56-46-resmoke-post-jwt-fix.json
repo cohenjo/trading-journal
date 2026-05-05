@@ -1,0 +1,72 @@
+[
+  {
+    "name": "backtest",
+    "path": "/backtest",
+    "issue": 111,
+    "wave": 3,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 196,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "ladder",
+    "path": "/ladder",
+    "issue": 112,
+    "wave": 3,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 303,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "ladder-scanner",
+    "path": "/ladder/scanner",
+    "issue": 113,
+    "wave": 3,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 286,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "options",
+    "path": "/options",
+    "issue": 114,
+    "wave": 3,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 257,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "tax-condor",
+    "path": "/tax-condor",
+    "issue": 115,
+    "wave": 3,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 357,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  }
+]

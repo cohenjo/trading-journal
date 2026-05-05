@@ -103,3 +103,5 @@
 - **History rewrite decision:** NOT recommended. Service-role key is a rotatable JWT — rotation invalidates it. Rewrite only if forensic evidence of unauthorized use found in Supabase audit logs.
 - **Policy codified:** Secrets in `.env.local` only; `.env.example` placeholders only; pre-commit gitleaks; push protection enabled; service-role keys rotated on every leak.
 - **PR:** `squad/secret-scan-hardening` → `security: incident report + remediation tracker (Supabase service-role rotation)`
+
+📌 **Team update (2026-05-05T18:32:37Z):** Secret handling policy decision merged into shared decisions. Reskill pass extracted secret-handling-policy skill (high confidence) with defense-in-depth patterns, pre-commit scanning, push protection, and rotation response. — Scribe (wind-down)

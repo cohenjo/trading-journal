@@ -1,0 +1,30 @@
+[
+  {
+    "name": "login",
+    "path": "/login",
+    "issue": null,
+    "wave": 0,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 426,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "day-dynamic",
+    "path": "/day/2026-05-03",
+    "issue": 121,
+    "wave": 2,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 379,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  }
+]

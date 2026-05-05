@@ -1,0 +1,72 @@
+[
+  {
+    "name": "root",
+    "path": "/",
+    "issue": 101,
+    "wave": 1,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 389,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "summary",
+    "path": "/summary",
+    "issue": 102,
+    "wave": 1,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 588,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "cash-flow",
+    "path": "/cash-flow",
+    "issue": 103,
+    "wave": 1,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 484,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "current-finances",
+    "path": "/current-finances",
+    "issue": 104,
+    "wave": 1,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 474,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  },
+  {
+    "name": "settings",
+    "path": "/settings",
+    "issue": 105,
+    "wave": 1,
+    "status": "✅",
+    "httpStatus": 200,
+    "loadTimeMs": 528,
+    "consoleErrors": [],
+    "apiCalls": [],
+    "failedRequests": [],
+    "renderOk": true,
+    "notes": "No API calls"
+  }
+]
