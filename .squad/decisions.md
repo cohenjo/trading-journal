@@ -5499,3 +5499,42 @@ Wave-1 CRUD routes have moved to Supabase-backed frontend paths. The remaining F
 ## Owner
 
 Kujan owns the Docker/tunnel workflow. Rabin should review the CORS allow-list and JWT verification posture before merge.
+
+---
+
+## TJ-010: ManualTrade CRUD + Supabase household_id scoping patterns
+
+**Author**: Hockney | **Date**: 2025-07-31 | **Issue**: #63 | **PR**: #308
+
+### Decisions
+
+**1. Pydantic schemas for API bodies, SQLModel table=True for ORM only**
+`ManualTradeCreate` and `ManualTradeUpdate` are plain Pydantic `BaseModel` subclasses.
+`SQLModel, table=True` models with `sa_column=Column(...)` produce empty `{}` JSON responses
+in FastAPI in some environments. Request/response schemas should be pure Pydantic; DB models
+stay `SQLModel, table=True` for ORM use only.
+
+**2. household_id is always server-side — never client-provided**
+`household_id` is injected from `get_current_user_id` → `get_user_household_id`. Clients
+cannot supply or override it. This pattern (from `household_service.py`) must be followed
+for all future household-scoped endpoints.
+
+**3. DATABASE_URL priority: web pooler vs direct engine**
+Two engines exist in `database.py`:
+- `engine` / `get_session()` → `DATABASE_URL` first (transaction pooler — for FastAPI endpoints)
+- `direct_engine` / `get_direct_session()` → `DIRECT_DATABASE_URL` first (session mode — for migrations/batch jobs)
+
+All FastAPI endpoint dependencies must use `get_session()`. Never use `get_direct_session()`
+in web request handlers.
+
+**4. DailySummary PK gap — follow-up migration required**
+`DailySummary` has a single-column PK on `date`. The correct design is `(household_id, date)`.
+This was not changed in #63 to avoid a disruptive migration. A follow-up PR must:
+1. Drop the single-column PK
+2. Add composite PK `(household_id, date)`
+3. Add `NOT NULL` on `household_id`
+
+**5. SQLModel table=True datetime guard**
+When a `table=True` model is used as a FastAPI request body, `datetime` fields may arrive
+as ISO strings (SQLite). Guard: `if isinstance(x, str): x = datetime.fromisoformat(x)`
+Apply before any `session.add()`.
