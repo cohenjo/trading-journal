@@ -50,6 +50,32 @@ services:
       retries: 3
       start_period: 40s
 
+  worker:
+    container_name: trading_journal_worker
+    build:
+      context: ./apps/backend
+      dockerfile: Dockerfile
+    command: ["uv", "run", "python", "-m", "app.worker.runtime"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://user:password@db:5432/trading_journal}
+      WORKER_HEARTBEAT_FILE: /app/worker_heartbeat
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
+      OTEL_SERVICE_NAME: "trading-journal-worker"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - trading-journal-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
   frontend:
     container_name: trading_journal_frontend
     build:

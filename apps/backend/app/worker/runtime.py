@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import pathlib
 import signal
 import time
 
@@ -12,10 +13,27 @@ from app.worker import ndx_daily_sync  # noqa: F401 - imports schedule registrat
 from app.worker import price_cache as _price_cache  # noqa: F401 - registers scheduled jobs
 from app.worker.job_queue import poll_compute_jobs
 from app.worker.registry import JOB_SCHEDULES
+from app.worker.retry import with_db_retry
 from app.worker.scheduler import get_scheduler, register_cron, register_interval
 
 logger = logging.getLogger(__name__)
 DEFAULT_POLL_INTERVAL_SECONDS = 5
+_HEARTBEAT_INTERVAL_SECONDS = 30
+_HEARTBEAT_FILE = pathlib.Path(os.getenv("WORKER_HEARTBEAT_FILE", "/app/worker_heartbeat"))
+
+
+def _touch_heartbeat() -> None:
+    """Update the heartbeat file modification time so healthchecks can verify liveness."""
+    try:
+        _HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _HEARTBEAT_FILE.touch()
+    except OSError:
+        logger.warning("Failed to update heartbeat file %s", _HEARTBEAT_FILE)
+
+
+def _safe_poll_compute_jobs() -> int:
+    """Poll compute jobs with DB-reconnect retry."""
+    return with_db_retry(poll_compute_jobs)()
 
 
 def _poll_interval_seconds() -> int:
@@ -51,7 +69,7 @@ def start_worker() -> None:
     register_interval(
         "compute_jobs_poller",
         _poll_interval_seconds(),
-        poll_compute_jobs,
+        _safe_poll_compute_jobs,
     )
 
     analyze_schedules.run_startup_analyze_refreshes()
@@ -60,6 +78,7 @@ def start_worker() -> None:
     logger.info("Worker scheduler started with %d job(s)", len(scheduler.get_jobs()))
 
     should_stop = False
+    last_heartbeat = 0.0
 
     def _request_shutdown(_signum: int, _frame: object) -> None:
         nonlocal should_stop
@@ -70,6 +89,10 @@ def start_worker() -> None:
 
     try:
         while not should_stop:
+            now = time.monotonic()
+            if now - last_heartbeat >= _HEARTBEAT_INTERVAL_SECONDS:
+                _touch_heartbeat()
+                last_heartbeat = now
             time.sleep(1)
     finally:
         scheduler.shutdown(wait=False)

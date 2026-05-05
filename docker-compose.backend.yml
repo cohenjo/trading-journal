@@ -16,4 +16,11 @@ services:
       WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS:-5}
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-trading-journal-backend-worker-local-docker}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://127.0.0.1:4317}
+      WORKER_HEARTBEAT_FILE: /app/worker_heartbeat
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker.healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
