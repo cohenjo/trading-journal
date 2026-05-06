@@ -39,6 +39,37 @@ server is on port 3000 or `BASE_URL` points to a deployed Vercel URL.
 
 **Merge order:** #163 (Fenster) → #164 (Hockney) → this PR.
 
+## 2026-05-06: Phase A Regression Tests — Options Backfill Resilience
+
+**Context:** IBKR Flex 1001 throttle storm exposed two bugs in `backfill_options.py`: (1) SQLAlchemy Session held open during slow Flex fetch → Supabase pooler kills idle connections → SSL socket errors mask original FlexProbeError; (2) One chunk failure aborts entire multi-month run. Hockney implementing Phase A fixes in parallel. My job: write regression tests AHEAD of implementation to lock in the spec.
+
+**Added:** 9 new tests in `apps/backend/tests/test_backfill_options.py` (lines 356-489):
+1. **test_app_max_retries_default_is_8** — Locks in Phase A.4 (FLEX_APP_MAX_RETRIES default 5→8). Currently FAILS (5 != 8); will pass once Hockney bumps constant.
+2. **test_session_not_held_during_flex_fetch** — Verifies Session NOT open during Flex network roundtrip (SKIPPED; TODO pending Hockney's refactor).
+3. **test_continue_on_error_skips_failed_chunk** — `--continue-on-error` catches Exception, logs failure, continues (SKIPPED).
+4. **test_default_aborts_on_first_failure** — Default behavior aborts on first chunk failure (SKIPPED).
+5. **test_continue_on_error_does_not_swallow_keyboard_interrupt** — KeyboardInterrupt/SystemExit re-raised even with flag (SKIPPED).
+6. **test_resume_from_chunk_skips_n_pending_chunks** — `--resume-from-chunk N` skips first N pending chunks (SKIPPED).
+7. **test_resume_from_chunk_combines_with_no_resume** — Flag combo: `--no-resume --resume-from-chunk` (SKIPPED).
+8. **test_resume_from_chunk_overshoots** — Overshoot (N > len(pending)) prints warning, exit 0 (SKIPPED).
+9. **test_failed_chunk_does_not_mark_complete** — Belt-and-suspenders: failed chunks NOT in checkpoint (SKIPPED).
+
+**Test Strategy:** All 8 feature tests (2-9) marked SKIPPED with detailed TODO comments. They'll be un-skipped once Hockney's implementation lands. Test #1 (retry default) runs immediately and FAILS as expected — this locks in the requirement before code changes.
+
+**Test Suite Results (2026-05-06T19:37):**
+- `test_backfill_options.py`: 12 passed, 1 failed, 8 skipped
+- Full suite (`apps/backend/tests/`): 111 passed, 1 failed (expected)
+- Failure: `test_app_max_retries_default_is_8` (APP_MAX_RETRIES is 5, expected 8)
+
+**Learnings:**
+- **Write-ahead testing pattern:** Writing tests BEFORE implementation forces clarity on spec and catches ambiguity early. The SKIPPED tests with detailed TODOs serve as executable documentation.
+- **Assert on module constants:** Testing env-var defaults by importing and asserting on module-level constants (e.g., `flex_probe.APP_MAX_RETRIES`) is clean and direct — no monkeypatching needed.
+- **pytest.skip with reason strings:** Using `pytest.skip("reason")` inline (not decorator) keeps test code visible and allows conditional skips. Reason strings document WHY skipped and WHEN to un-skip.
+- **Approach-agnostic test design:** Phase A.1 (Session decouple) has two possible implementations (split-function vs in-function-Session). Documented TODO for approach-agnostic test design — mock at engine level, not function level.
+- **Checkpoint integrity tests:** Testing that failed chunks DON'T appear in `.flex_backfill_state.json` is a belt-and-suspenders approach — locks in the resume contract at the file level.
+
+**Decision Note:** See `.squad/decisions/inbox/redfoot-phase-a-tests.md` for test coverage matrix and spec gaps identified.
+
 ## 2026-05-03: E2E Telemetry Fix + Comprehensive Coverage — PR #166
 
 **Bug:** `/settings` and `/holdings` smoke tests failed with 405 console errors. Root cause: `PageLoadMetrics` component POSTs to `/api/metrics/page-load` after unauthenticated redirect, but redirect preserved POST verb → request hit `/login` GET-only endpoint → 405.

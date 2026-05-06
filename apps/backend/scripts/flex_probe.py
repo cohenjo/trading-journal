@@ -1,4 +1,11 @@
-"""Probe IBKR Flex Query XML fields for the options income dashboard."""
+"""Probe IBKR Flex Query XML fields for the options income dashboard.
+
+Transport-level retries (5 attempts, exponential backoff 5s→80s) handle TCP/SSL
+resets and HTTP 5xx errors at the network layer. Application-level retries (1001
+throttle) remain separate at 60s+ scale for IBKR's statement generation queue.
+These two layers exist because IBKR has two distinct failure classes: transient
+transport/edge issues vs. backend statement generation capacity.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import urlencode
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element, ParseError
@@ -24,6 +31,11 @@ SEND_REQUEST_URL = f"{FLEX_BASE_URL}/FlexStatementService.SendRequest"
 GET_STATEMENT_URL = f"{FLEX_BASE_URL}/FlexStatementService.GetStatement"
 OUTPUT_DIR = Path("tmp/flex")
 MONEY_DISPLAY = Decimal("0.01")
+
+TRANSPORT_MAX_ATTEMPTS = int(os.environ.get("FLEX_TRANSPORT_MAX_ATTEMPTS", "5"))
+TRANSPORT_INITIAL_BACKOFF = float(os.environ.get("FLEX_TRANSPORT_INITIAL_BACKOFF", "5.0"))
+APP_MAX_RETRIES = int(os.environ.get("FLEX_APP_MAX_RETRIES", "8"))
+APP_INITIAL_BACKOFF = float(os.environ.get("FLEX_APP_INITIAL_BACKOFF", "60.0"))
 
 QUERY_ENV_VARS = {
     "trades": ("IBKR_FLEX_QUERY_ID_TRADES",),
@@ -55,6 +67,62 @@ class QueryConfig:
 
     name: str
     query_id: str
+
+
+def _get_with_retries(
+    url: str,
+    params: dict[str, str],
+    timeout: int,
+    *,
+    max_attempts: int = TRANSPORT_MAX_ATTEMPTS,
+    initial_backoff: float = TRANSPORT_INITIAL_BACKOFF,
+    sleep: Callable[[float], None] = time.sleep,
+) -> requests.Response:
+    """GET with exponential backoff on transport errors and 5xx.
+
+    Retries on:
+    - requests.ConnectionError (TCP reset, DNS fail, connection refused)
+    - requests.Timeout (slow handshake, slow response)
+    - requests.exceptions.SSLError (TLS negotiation failure)
+    - HTTP 500/502/503/504 (IBKR edge/WAF issues)
+
+    Does NOT retry on:
+    - HTTP 4xx (auth/client errors — retrying makes it worse)
+    - Other HTTP errors
+    """
+    backoff = initial_backoff
+    last_exception: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.get(url, params=params, timeout=timeout)
+            # Check for 5xx errors before returning
+            if response.status_code in {500, 502, 503, 504} and attempt < max_attempts:
+                raise requests.HTTPError(f"HTTP {response.status_code}", response=response)
+            response.raise_for_status()
+            return response
+        except (requests.ConnectionError, requests.Timeout, requests.exceptions.SSLError, requests.HTTPError) as exc:
+            # Don't retry on 4xx or other non-5xx HTTPErrors
+            if isinstance(exc, requests.HTTPError):
+                if hasattr(exc, "response") and exc.response is not None:
+                    status = exc.response.status_code
+                    if status < 500 or status >= 600:
+                        # Not a 5xx — fail immediately
+                        raise FlexProbeError(f"HTTP {status} from IBKR Flex: {exc}") from exc
+            last_exception = exc
+            if attempt < max_attempts:
+                jitter = random.uniform(0.8, 1.2)
+                sleep_time = backoff * jitter
+                exc_class = type(exc).__name__
+                print(
+                    f"Transport error ({exc_class}) on attempt {attempt}/{max_attempts}; "
+                    f"sleeping {sleep_time:.1f}s before retry",
+                    file=sys.stderr,
+                )
+                sleep(sleep_time)
+                backoff = min(backoff * 2, 80.0)
+    # Exhausted retries
+    exc_class = type(last_exception).__name__ if last_exception else "Unknown"
+    raise FlexProbeError(f"Transport retries exhausted after {max_attempts} attempts: {exc_class}") from last_exception
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -107,15 +175,17 @@ def ensure_synthetic_fixtures() -> list[Path]:
     return sorted(write_synthetic_files(OUTPUT_DIR))
 
 
-def request_xml(url: str, params: dict[str, str], timeout_seconds: int = 30) -> Element:
+def request_xml(
+    url: str,
+    params: dict[str, str],
+    timeout_seconds: int = 30,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Element:
     """GET a Flex endpoint and return the XML root, raising clear errors."""
     safe_params = {key: ("***" if key == "t" else value) for key, value in params.items()}
     print(f"GET {url}?{urlencode(safe_params)}", file=sys.stderr)
-    response = requests.get(url, params=params, timeout=timeout_seconds)
-    try:
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        raise FlexProbeError(f"HTTP error from IBKR Flex: {exc}") from exc
+    response = _get_with_retries(url, params, timeout_seconds, sleep=sleep)
     return parse_xml_bytes(response.content, source=url)
 
 
@@ -146,8 +216,8 @@ def send_flex_request(
     start: date | None,
     end: date | None,
     *,
-    max_retries: int = 3,
-    initial_backoff_seconds: float = 60.0,
+    max_retries: int = APP_MAX_RETRIES,
+    initial_backoff_seconds: float = APP_INITIAL_BACKOFF,
     sleep: Any = time.sleep,
 ) -> str:
     """Call SendRequest and return the Flex reference code.
@@ -172,21 +242,26 @@ def send_flex_request(
         params["enddate"] = end.strftime("%Y%m%d")
     backoff = initial_backoff_seconds
     last_message = ""
+    elapsed_total = 0.0
     for attempt in range(1, max_retries + 1):
-        root = request_xml(SEND_REQUEST_URL, params)
+        root = request_xml(SEND_REQUEST_URL, params, sleep=sleep)
         error_code, error_message = flex_error(root)
-        if error_code == "1001" and attempt < max_retries:
-            jitter = random.uniform(0.8, 1.2)
-            sleep_time = min(backoff * jitter, 600.0)
-            print(
-                f"{config.name}: Flex 1001 throttle (attempt {attempt}/{max_retries}); "
-                f"sleeping {sleep_time:.0f}s before retry",
-                file=sys.stderr,
-            )
-            sleep(sleep_time)
-            backoff = min(backoff * 2, 600.0)
+        if error_code == "1001":
             last_message = error_message or ""
-            continue
+            if attempt < max_retries:
+                jitter = random.uniform(0.8, 1.2)
+                sleep_time = min(backoff * jitter, 600.0)
+                print(
+                    f"{config.name}: Flex 1001 throttle (attempt {attempt}/{max_retries}); "
+                    f"sleeping {sleep_time:.0f}s before retry (total wait so far: {elapsed_total:.0f}s)",
+                    file=sys.stderr,
+                )
+                sleep(sleep_time)
+                elapsed_total += sleep_time
+                backoff = min(backoff * 2, 600.0)
+                continue
+            # Last attempt with 1001 - break out to raise detailed exhaustion error
+            break
         if error_code and error_code != "0":
             detail = (error_message or last_message or "").strip()
             raise FlexProbeError(f"SendRequest failed for {config.name}: {error_code} {detail}".strip())
@@ -194,18 +269,20 @@ def send_flex_request(
         if not reference_code:
             raise FlexProbeError(f"SendRequest for {config.name} did not return a ReferenceCode")
         return reference_code
-    raise FlexProbeError(f"SendRequest failed for {config.name}: 1001 retries exhausted ({last_message})".strip())
+    raise FlexProbeError(
+        f"SendRequest failed for {config.name}: 1001 throttle persists after {max_retries} retries "
+        f"({elapsed_total:.0f}s elapsed). IBKR's Flex backend appears unhealthy for query_id={config.query_id}. "
+        f"Recommended: wait ~30 minutes and retry, OR re-save the Flex query in IBKR Account Management "
+        f"(Settings → Account Settings → Flex Web Service Configuration → edit the query and save). "
+        f"Persistent 1001 typically clears overnight. Last IBKR message: {last_message or 'none'}".strip()
+    )
 
 
 def get_statement(config: QueryConfig, token: str, reference_code: str, poll_seconds: int, max_polls: int) -> bytes:
     """Poll GetStatement until the Flex XML statement is ready."""
     params = {"t": token, "q": reference_code, "v": "3"}
     for attempt in range(1, max_polls + 1):
-        response = requests.get(GET_STATEMENT_URL, params=params, timeout=60)
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            raise FlexProbeError(f"HTTP error from GetStatement for {config.name}: {exc}") from exc
+        response = _get_with_retries(GET_STATEMENT_URL, params, 60)
         root = parse_xml_bytes(response.content, source=f"GetStatement {config.name}")
         error_code, error_message = flex_error(root)
         if error_code == "1019":

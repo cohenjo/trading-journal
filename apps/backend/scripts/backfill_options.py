@@ -20,7 +20,7 @@ from app.dal.database import engine
 from app.worker.handlers.options_grouping import compute_options_strategy_groups
 from app.worker.handlers.options_margin_sync import run_options_margin_sync
 from app.worker.handlers.options_metrics import compute_options_monthly_metrics
-from app.worker.handlers.options_sync import run_flex_options_sync
+from app.worker.handlers.options_sync import _fetch_flex_options_paths, run_flex_options_sync
 
 DEFAULT_FROM = date(2025, 1, 1)
 DEFAULT_CHUNK_MONTHS = 1
@@ -109,6 +109,22 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--no-resume",
         action="store_true",
         help=f"Ignore existing checkpoint file ({STATE_FILE}) and re-process all chunks.",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue processing remaining chunks when one chunk fails. "
+        "Failed chunks are NOT marked complete (so resume picks them up later). "
+        "Script exits with code 1 if any chunk failed, 0 only if all succeeded.",
+    )
+    parser.add_argument(
+        "--resume-from-chunk",
+        type=int,
+        metavar="N",
+        help="Skip the first N pending chunks (1-indexed). "
+        "Useful for manual recovery when checkpoint state is missing or corrupt. "
+        "Compatible with --no-resume: '--no-resume --resume-from-chunk 3' means "
+        "ignore checkpoint AND skip first 3 chunks of all chunks.",
     )
     return parser.parse_args(argv)
 
@@ -240,6 +256,25 @@ def main(argv: Iterable[str] | None = None) -> int:
             )
 
     pending = [w for w in windows if w.chunk_key not in completed]
+
+    # Apply --resume-from-chunk flag (1-indexed for human readability)
+    if args.resume_from_chunk:
+        resume_from = args.resume_from_chunk
+        if resume_from >= len(pending):
+            print(
+                f"[resume] --resume-from-chunk={resume_from} >= {len(pending)} pending chunks; nothing to do",
+                file=sys.stderr,
+            )
+            return 0
+        if resume_from > 0:
+            skipped_windows = pending[:resume_from]
+            pending = pending[resume_from:]
+            print(
+                f"[resume] --resume-from-chunk={resume_from} → skipping first {resume_from} pending chunk(s) "
+                f"(windows {skipped_windows[0].chunk_key}..{skipped_windows[-1].chunk_key})",
+                file=sys.stderr,
+            )
+
     skipped = len(windows) - len(pending)
     print(
         f"Backfilling options income from {start} to {end} "
@@ -250,51 +285,91 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     combined_sync: dict[str, int] = {"trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
     last_metrics: dict[str, object] = {"accounts": [], "row_count": 0}
+    failed_chunks: list[tuple[BackfillWindow, Exception]] = []
+
     for idx, window in enumerate(pending):
-        with Session(engine) as session:
-            sync_result = run_flex_options_sync(
-                session,
+        try:
+            # Phase A.1: Fetch Flex XML first (slow network roundtrip, no Session needed)
+            # This prevents SQLAlchemy Session idle timeout during long Flex API waits
+            flex_paths = _fetch_flex_options_paths(
                 from_date=window.start,
                 to_date=window.end,
-                account_id=args.account_id,
                 synthetic=args.synthetic,
                 poll_seconds=args.poll_seconds,
                 max_polls=args.max_polls,
             )
-            grouping_result = compute_options_strategy_groups(
-                session,
-                account_id=args.account_id,
-                from_date=window.start,
-                to_date=window.end,
+
+            # Now open Session for DB writes only (fast, no idle risk)
+            with Session(engine) as session:
+                sync_result = run_flex_options_sync(
+                    session,
+                    from_date=window.start,
+                    to_date=window.end,
+                    account_id=args.account_id,
+                    synthetic=args.synthetic,
+                    poll_seconds=args.poll_seconds,
+                    max_polls=args.max_polls,
+                    pre_fetched_paths=flex_paths,
+                )
+                grouping_result = compute_options_strategy_groups(
+                    session,
+                    account_id=args.account_id,
+                    from_date=window.start,
+                    to_date=window.end,
+                )
+                margin_result = run_options_margin_sync(session, account_id=args.account_id)
+                metrics_result = compute_options_monthly_metrics(
+                    session,
+                    account_id=args.account_id,
+                    from_date=window.start,
+                    to_date=window.end,
+                )
+                if args.dry_run:
+                    session.rollback()
+                else:
+                    session.commit()
+                    # Checkpoint only after a chunk fully succeeds. Transport-level
+                    # retries in flex_probe.py self-heal brief network blips within
+                    # a chunk, so resume picks up only when a chunk fails completely.
+                    mark_chunk_complete(account_key, window, STATE_FILE)
+
+            # Success path: accumulate stats
+            for key in combined_sync:
+                combined_sync[key] += int(sync_result.get(key, 0))
+            last_metrics = metrics_result
+            parsed = (
+                int(sync_result.get("trade_count", 0))
+                + int(sync_result.get("cash_event_count", 0))
+                + int(sync_result.get("position_count", 0))
             )
-            margin_result = run_options_margin_sync(session, account_id=args.account_id)
-            metrics_result = compute_options_monthly_metrics(
-                session,
-                account_id=args.account_id,
-                from_date=window.start,
-                to_date=window.end,
+            print(
+                f"[backfill {window.label}] parsed={parsed}, "
+                f"upserted_legs={int(sync_result.get('leg_count', 0))}, "
+                f"groups={int(grouping_result.get('group_count', 0))}, "
+                f"monthly_rows={int(metrics_result.get('row_count', 0))}"
             )
-            if args.dry_run:
-                session.rollback()
-            else:
-                session.commit()
-                mark_chunk_complete(account_key, window, STATE_FILE)
-        for key in combined_sync:
-            combined_sync[key] += int(sync_result.get(key, 0))
-        last_metrics = metrics_result
-        parsed = (
-            int(sync_result.get("trade_count", 0))
-            + int(sync_result.get("cash_event_count", 0))
-            + int(sync_result.get("position_count", 0))
-        )
-        print(
-            f"[backfill {window.label}] parsed={parsed}, "
-            f"upserted_legs={int(sync_result.get('leg_count', 0))}, "
-            f"groups={int(grouping_result.get('group_count', 0))}, "
-            f"monthly_rows={int(metrics_result.get('row_count', 0))}"
-        )
-        if margin_result.get("status") != "succeeded":
-            print(f"[backfill {window.label}] margin={margin_result}")
+            if margin_result.get("status") != "succeeded":
+                print(f"[backfill {window.label}] margin={margin_result}")
+
+        except (KeyboardInterrupt, SystemExit):
+            # Always re-raise user interrupts
+            raise
+        except Exception as exc:
+            # Phase A.2: --continue-on-error handling
+            print(
+                f"[backfill {window.label}] ❌ FAILED: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            failed_chunks.append((window, exc))
+            if not args.continue_on_error:
+                # Default behavior: abort on first failure
+                raise
+            # Continue to next chunk (failed chunk NOT marked complete, so resume picks it up)
+            print(
+                f"[backfill {window.label}] --continue-on-error: skipping to next chunk",
+                file=sys.stderr,
+            )
+
         # Sleep between live IBKR requests to avoid consecutive 1001 throttles.
         if not args.synthetic and idx < len(pending) - 1:
             sleep_secs = args.chunk_sleep
@@ -330,6 +405,20 @@ def main(argv: Iterable[str] | None = None) -> int:
         f"cash_flow={totals['cash_flow']} realized_pnl={totals['realized_pnl']} "
         f"variance_gap={totals['variance_gap']}"
     )
+
+    # Phase A.2: Report failed chunks and exit with proper code
+    if failed_chunks:
+        print("\n" + "=" * 80, file=sys.stderr)
+        print(f"❌ {len(failed_chunks)} chunk(s) FAILED:", file=sys.stderr)
+        for window, exc in failed_chunks:
+            print(f"  • {window.chunk_key}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print("=" * 80, file=sys.stderr)
+        print(
+            "\nRun with --no-resume to retry failed chunks, or manually fix issues and resume.",
+            file=sys.stderr,
+        )
+        return 1  # Exit code 1 to keep CI honest
+
     return 0
 
 

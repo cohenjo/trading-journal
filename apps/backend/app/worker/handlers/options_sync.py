@@ -104,6 +104,25 @@ def run_scheduled_flex_options_sync() -> None:
     logger.info("Scheduled flex_options_sync completed: %s", result)
 
 
+def _fetch_flex_options_paths(
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    synthetic: bool | None = None,
+    poll_seconds: int = 10,
+    max_polls: int = 60,
+) -> list[Path]:
+    """Fetch Flex XML paths from live API or synthetic fixtures.
+
+    This function performs the network roundtrip (if live) and does NOT require
+    a database session. Use this to decouple slow Flex API calls from SQLAlchemy
+    session lifetimes, preventing idle connection timeouts.
+    """
+    return _select_flex_source(
+        from_date=from_date, to_date=to_date, synthetic=synthetic, poll_seconds=poll_seconds, max_polls=max_polls
+    )
+
+
 def run_flex_options_sync(
     session: Session,
     *,
@@ -113,16 +132,36 @@ def run_flex_options_sync(
     synthetic: bool | None = None,
     poll_seconds: int = 10,
     max_polls: int = 60,
+    pre_fetched_paths: list[Path] | None = None,
 ) -> JobResult:
-    """Parse selected Flex source files and upsert normalized option facts."""
+    """Parse selected Flex source files and upsert normalized option facts.
+
+    Args:
+        session: SQLAlchemy session for database writes
+        from_date: Inclusive start date for Flex query window
+        to_date: Inclusive end date for Flex query window
+        account_id: Optional account filter
+        synthetic: If True, use synthetic fixtures instead of live API
+        poll_seconds: Seconds between GetStatement polls (live mode)
+        max_polls: Maximum GetStatement polls before timeout (live mode)
+        pre_fetched_paths: Optional pre-fetched XML paths. If provided, skips the
+            slow network fetch. Use _fetch_flex_options_paths() to pre-fetch paths
+            before opening a database session, then pass them here.
+
+    Returns:
+        Job result dict with trade/cash/position counts
+    """
 
     accounts = _load_accounts(session, account_id=account_id)
     if not accounts:
         return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
-    paths = _select_flex_source(
-        from_date=from_date, to_date=to_date, synthetic=synthetic, poll_seconds=poll_seconds, max_polls=max_polls
-    )
+    if pre_fetched_paths is not None:
+        paths = pre_fetched_paths
+    else:
+        paths = _select_flex_source(
+            from_date=from_date, to_date=to_date, synthetic=synthetic, poll_seconds=poll_seconds, max_polls=max_polls
+        )
     total_trades = 0
     total_cash = 0
     total_positions = 0
