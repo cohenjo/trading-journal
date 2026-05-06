@@ -403,3 +403,29 @@ To inspect: cat .flex_backfill_failures.json | jq .
 ```
 
 **Tests:** `test_failures_file_written_on_continue_on_error` (3-chunk run, chunk 2 fails, JSON schema verified), `test_failures_file_deleted_when_all_succeed` (seed file from prior run, all succeed, file deleted).
+
+### 2026-05-06: --xml-dir mode for manual Flex backfills
+
+Added third input mode to `backfill_options.py`: read Activity Flex XMLs from a local directory instead of fetching from the live IBKR API. This sidesteps 1001 throttle errors entirely for one-time historical backfills (multi-year date ranges). Daily incremental sync continues to use the live API (small windows, low throttle risk).
+
+**Mechanism:** New `--xml-dir DIR` flag (mutually exclusive with `--synthetic` and `--live`). Script discovers XMLs matching IBKR filename pattern `{accountId}_{accountId}_{YYYYMMDD}_{YYYYMMDD}_AF_{queryId}_{hash}.xml`, parses embedded date ranges from filenames, filters by overlap with the requested backfill window, and feeds them through the existing `parse_flex_files` → upsert pipeline. No network calls, no 1001 throttle, instant processing.
+
+**Implementation:**
+- `backfill_options.py`: Added `--xml-dir` CLI argument, validation (directory exists, contains matching XMLs), mutual-exclusion check extended to cover all three modes, conditional sleep skip (no API = no inter-chunk delay), updated docstring with usage examples.
+- `options_sync.py`: Threaded `xml_dir` parameter through `_fetch_flex_options_paths` → `_select_flex_source`. Added `_xml_dir_files()` helper: filename pattern regex, date range parsing (strptime), overlap filter (inclusive), sorted deterministic output. Non-matching files logged as warnings (graceful degradation if user drops non-Flex files in directory).
+
+**Verified with manual 2024 Activity Flex export** (full year, 983KB, from IBKR Account Management UI):
+- File discovery: 1 file matched window [2024-01-01, 2024-12-31]
+- Parse counts: trade_count=827, cash_event_count=1061, position_count=29, leg_count=827
+- Test suite: 433 passed (no regressions)
+
+**Redfoot test coverage** (landed in parallel, commits 3f0a678 + ef85440): 4 tests added covering file discovery, date filtering, pattern mismatch handling, and end-to-end dry-run. All pass.
+
+**Operational shape:** Jony places manual XML exports in `reports/activity/` (already gitignored) and runs:
+```bash
+uv run python scripts/backfill_options.py \
+  --start 2022-01-01 --end 2024-12-31 \
+  --xml-dir reports/activity \
+  --chunk-months 12 --account U2515365
+```
+No IBKR_FLEX_TOKEN required, no network calls, no throttle risk, idempotent upserts.
