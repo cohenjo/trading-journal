@@ -16,11 +16,11 @@
 **Finding:** `public.users` not yet in any migration — `raw.broker_statements.uploaded_by` references `auth.users(id)` directly until a future public.users migration lands.
 
 
-**Requested by:** Jony Vesterman Cohen (YOLO mode)  
-**Work:** Classified all 24 existing DB tables into household / owner-private / global-reference / system-infra buckets. Produced `docs/design-hosting/data/table-ownership.md` and decision draft.  
-**Finding:** `trading_account_config` is the only split-ownership table — it mixes household metadata with owner-private broker secrets; must be resolved before TJ-005 RLS migration can proceed.  
-**Finding:** `owner` string fields in `FinanceItem`, `PlanItem`, `InsurancePolicy`, `DividendPosition` are display-only — NOT auth boundaries; confirmed explicitly to prevent future RLS confusion.  
-**Finding:** `backtesttrade` inherits visibility from `backtestrun` via JOIN, so it needs no direct `owner_user_id` FK.  
+**Requested by:** Jony Vesterman Cohen (YOLO mode)
+**Work:** Classified all 24 existing DB tables into household / owner-private / global-reference / system-infra buckets. Produced `docs/design-hosting/data/table-ownership.md` and decision draft.
+**Finding:** `trading_account_config` is the only split-ownership table — it mixes household metadata with owner-private broker secrets; must be resolved before TJ-005 RLS migration can proceed.
+**Finding:** `owner` string fields in `FinanceItem`, `PlanItem`, `InsurancePolicy`, `DividendPosition` are display-only — NOT auth boundaries; confirmed explicitly to prevent future RLS confusion.
+**Finding:** `backtesttrade` inherits visibility from `backtestrun` via JOIN, so it needs no direct `owner_user_id` FK.
 
 - Team initialized with shared focus on financial data integrity, security, and maintainable AI-assisted workflows.
 - Created `app/services/analysis/` package for Company Analysis page financial models (DCF, Scorecard, Valuation Multiples, Technical Indicators, Options Analytics). All functions are pure, testable, and use `decimal.Decimal` for monetary precision per team decision. 48 tests passing in `tests/test_analysis.py`.
@@ -30,7 +30,7 @@
 
 ## 2026-04-30 — Data architecture section for Supabase households
 
-**Requested by:** Jony Vesterman Cohen  
+**Requested by:** Jony Vesterman Cohen
 **Work:** Drafted `docs/design-hosting/sections/06-data-architecture.md` and `docs/design-hosting/diagrams/06-data-model.excalidraw`.
 
 **Summary:** Surveyed the existing SQLModel schema and documented that major finance/trading tables lack a real `user_id`/tenant FK today. Proposed Supabase `auth.users` mapping, `households`, `household_members`, per-table household/private/global scoping, a single-user backfill path, and raw/compute/cooked schemas for local-heavy jobs with UI-readable cooked tables.
@@ -52,7 +52,7 @@ Closed GH #56 (TJ-003). PR #85 comment posted at https://github.com/cohenjo/trad
 
 ## 2026-04-30 — Baseline legacy schema migration (PR #90, TJ-005 followup)
 
-**Requested by:** Jony Vesterman Cohen  
+**Requested by:** Jony Vesterman Cohen
 **Work:** Created `20260430115000_baseline_legacy_schema.sql` migration establishing all 21 legacy public schema tables for trading journal. This migration consolidates the baseline schema from 22 Alembic migrations (8250ff809a39 through 4d9a58ecd93b), creating tables in their final form after all schema evolutions.
 
 **Problem:** Supabase migrations 130000, 130100, 130200, 130300 were failing because they reference legacy tables (manualtrade, trade, execution, etc.) that don't exist on fresh Supabase instances. The Alembic migrations were designed for local development databases, not cloud deployments.
@@ -69,9 +69,11 @@ PR #90 opened and ready for review.
 
 ### 2026-04-30 — YOLO Direct-Apply Round: Baseline + Keaton Review
 
-**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
 **Work (Round 1):** Consolidated 22 Alembic migrations into single idempotent baseline migration (20260430115000_baseline_legacy_schema.sql) for fresh Supabase instances. Reconstructed missing trade table creation from d869bcf363dc logic. Fixed SQL reserved word quoting (`right` column). Applied baseline successfully to both DEV+PROD.
 
 **Work (Round 2):** Addressed all 3 code review findings from Keaton on PR #90: added `tradingaccounttype` enum, filled missing column additions, ensured FK constraint coverage. Commit 5a8367e merged.
 
 **Key Insight:** Alembic migrations cannot be replayed directly on fresh Supabase instances; baseline consolidation + idempotent CREATE TABLE IF NOT EXISTS pattern is the right approach for cloud deployment.
+
+📌 Team update (2026-05-06): FLEX backfill chunking pattern (monthly chunks) + checkpoint resume now in backfill_options.py — useful precedent for #65 (Postgres backfill) and multi-chunk import work — decided by Hockney
