@@ -362,3 +362,44 @@ This pattern applies to any DB-backed service that calls slow external APIs (e.g
 - OR: `--no-resume --resume-from-chunk 4` ignores checkpoint, treats all 10 as pending, skips first 4 (1-4), processes 5-10.
 
 **Why 1-indexed:** Humans count from 1, not 0. CLI flags should be human-readable.
+
+### 2026-05-06: Persistent Failure Log — McManus Data Integrity Mitigation
+
+**Context:** Phase A landed with stderr summary of failed chunks (per `--continue-on-error`), but that's transient — once Jony closes his terminal, the failure list is gone. McManus's data-integrity review (verdict: ⚠️ Safe-with-mitigations) called for a **persistent record** so a future operator (or cron job) can detect and act on gaps without scrolling logs.
+
+**Implementation:**
+- Added `FAILURES_FILE = Path(".flex_backfill_failures.json")` alongside `STATE_FILE`
+- Write JSON file at end of run IF `--continue-on-error` AND `failed_chunks` non-empty
+- **Overwrite behavior:** each run produces a fresh failure list (file represents "last run's failures")
+- Delete file if all chunks succeed (so file existence = "last run had failures" signal)
+- Don't write on dry-run (consistent with checkpoint gating)
+
+**Schema (JSON):**
+```json
+{
+  "account_key": "U2515365",
+  "run_started_at": "2026-05-06T16:37:12Z",
+  "run_finished_at": "2026-05-06T17:42:08Z",
+  "command_args": ["--start", "2024-06-01", "--end", "2024-12-31", "--chunk-months", "1", "--continue-on-error"],
+  "failed_chunks": [
+    {
+      "chunk_key": "2024-09-01:2024-09-30",
+      "window_start": "2024-09-01",
+      "window_end": "2024-09-30",
+      "error_type": "FlexProbeError",
+      "error_message": "SendRequest failed for trades: 1001 throttle persists after 8 retries...",
+      "failed_at": "2026-05-06T17:08:42Z"
+    }
+  ]
+}
+```
+
+**Operational guidance added to stderr summary:**
+```
+Failure detail written to .flex_backfill_failures.json
+
+To retry failed chunks: re-run the same command (resume will skip succeeded chunks and retry only the failures).
+To inspect: cat .flex_backfill_failures.json | jq .
+```
+
+**Tests:** `test_failures_file_written_on_continue_on_error` (3-chunk run, chunk 2 fails, JSON schema verified), `test_failures_file_deleted_when_all_succeed` (seed file from prior run, all succeed, file deleted).
