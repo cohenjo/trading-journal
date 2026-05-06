@@ -7,7 +7,12 @@ import textwrap
 from decimal import Decimal
 from pathlib import Path
 
-from app.services.options.flex_parser import parse_flex_files, parse_open_position, parse_trade_confirm
+from app.services.options.flex_parser import (
+    parse_flex_files,
+    parse_open_position,
+    parse_trade_confirm,
+    _event_type_from_trade_attrs,
+)
 from scripts.flex_synthetic import write_synthetic_files
 
 
@@ -88,7 +93,82 @@ def test_parse_live_flex_trade_and_open_position_aliases() -> None:
     assert position.open_cash_flow == Decimal("-198.95")
 
 
-def test_assignment_synthetic_cash_events_cover_all_sign_cases() -> None:
+# ---------------------------------------------------------------------------
+# event_type inference from notes + fifoPnlRealized
+# ---------------------------------------------------------------------------
+
+_BASE_TRADE_ATTRS: dict[str, str] = {
+    "accountId": "U2515365",
+    "assetCategory": "OPT",
+    "conid": "462456687",
+    "currency": "USD",
+    "dateTime": "20220104;132957",
+    "expiry": "20220121",
+    "multiplier": "100",
+    "putCall": "P",
+    "quantity": "-1",
+    "strike": "315",
+    "symbol": "MSFT  220121P00315000",
+    "tradeID": "4368718712",
+    "tradePrice": "2.48",
+    "underlyingSymbol": "MSFT",
+    "netCash": "-248.65135",
+    "proceeds": "-248",
+    "ibCommission": "-0.65135",
+}
+
+
+def _attrs(**overrides: str) -> dict[str, str]:
+    return {**_BASE_TRADE_ATTRS, **overrides}
+
+
+def test_event_type_open_when_no_oci_no_notes_zero_pnl() -> None:
+    """Backfill rows without openCloseIndicator default to 'open' when fifoPnlRealized is zero."""
+    result = _event_type_from_trade_attrs(_attrs(fifoPnlRealized="0"))
+    assert result == "open"
+
+
+def test_event_type_close_when_no_oci_nonzero_pnl() -> None:
+    """Backfill rows without openCloseIndicator become 'close' when fifoPnlRealized != 0."""
+    result = _event_type_from_trade_attrs(_attrs(fifoPnlRealized="150.00"))
+    assert result == "close"
+
+
+def test_event_type_expire_from_ep_notes() -> None:
+    """IBKR Ep notes code maps to 'expire' regardless of PnL."""
+    result = _event_type_from_trade_attrs(_attrs(notes="Ep", fifoPnlRealized="200.00"))
+    assert result == "expire"
+
+
+def test_event_type_exercise_from_ex_notes() -> None:
+    """IBKR Ex notes code maps to 'exercise'."""
+    result = _event_type_from_trade_attrs(_attrs(notes="Ex", fifoPnlRealized="0"))
+    assert result == "exercise"
+
+
+def test_event_type_assign_from_a_notes() -> None:
+    """IBKR A notes code maps to 'assign' even when fifoPnlRealized is zero."""
+    result = _event_type_from_trade_attrs(_attrs(notes="A", fifoPnlRealized="0"))
+    assert result == "assign"
+
+
+def test_event_type_oci_takes_priority_over_notes() -> None:
+    """Explicit openCloseIndicator=O overrides any notes code."""
+    result = _event_type_from_trade_attrs(_attrs(openCloseIndicator="O", notes="Ep", fifoPnlRealized="200"))
+    assert result == "open"
+
+
+def test_parse_trade_confirm_backfill_row_gets_correct_event_type() -> None:
+    """parse_trade_confirm produces 'close' for a backfill row with non-zero realized PnL."""
+    trade = parse_trade_confirm(_attrs(fifoPnlRealized="150.00"))
+    assert trade.event_type == "close"
+
+
+def test_parse_trade_confirm_backfill_open_row_gets_open_event_type() -> None:
+    """parse_trade_confirm produces 'open' for a backfill row with zero realized PnL."""
+    trade = parse_trade_confirm(_attrs(fifoPnlRealized="0"))
+    assert trade.event_type == "open"
+
     """Assigned/exercised stock legs create correctly signed synthetic cash flow."""
 
     output_dir = Path("tmp/test-options-assignment-synthetic")

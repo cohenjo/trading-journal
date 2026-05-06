@@ -109,13 +109,29 @@ def _load_strategy_trades(
                    t.account_id,
                    t.trade_time,
                    t.trade_date,
-                   t.event_type::text as event_type,
+                   case
+                     when t.event_type not in ('adjustment')
+                       then t.event_type::text
+                     when t.raw_payload->>'notes' = 'Ep' then 'expire'
+                     when t.raw_payload->>'notes' = 'Ex' then 'exercise'
+                     when t.raw_payload->>'notes' = 'A' then 'assign'
+                     when t.realized_pnl != 0 then 'close'
+                     else 'open'
+                   end as event_type,
                    t.side::text as side,
                    t.quantity,
                    t.net_cash_flow,
                    t.realized_pnl,
                    t.currency,
-                   t.raw_payload ->> 'openCloseIndicator' as open_close_indicator,
+                   case
+                     when t.raw_payload->>'openCloseIndicator' is not null
+                       then t.raw_payload->>'openCloseIndicator'
+                     when t.raw_payload->>'notes' in ('Ep', 'Ex', 'A')
+                       then 'C'
+                     when t.realized_pnl != 0
+                       then 'C'
+                     else 'O'
+                   end as open_close_indicator,
                    l.underlying_symbol,
                    l."right"::text as right,
                    l.strike,
