@@ -267,3 +267,98 @@ All 33 tests pass (15 flex, 12 backfill, 6 options_sync). Ruff linting clean.
 - Chunk loop: `backfill_options.py:253-305` — no exception handling, fails on first error
 - Env var query config: `flex_probe.py:157-164` (`query_configs_from_env`)
 - Environment constants: `flex_probe.py:35-38`, `.env.example:31-39`
+
+## 2026-05-06: Phase A Resilience Hardening — Branch squad/options-flex-backfill-resilience
+
+**Context:** Multi-month backfill runs hit two production failure modes: (1) Supabase pooler kills idle connections at ~10min while Flex API calls take ~17min worst-case, causing `SSL SYSCALL Socket is not connected` errors that masked the original FlexProbeError, and (2) one chunk failure aborted the entire multi-month run with no recovery mechanism.
+
+**Phase A.1: Session-Lifetime Decoupling**
+Split `run_flex_options_sync()` into fetch-then-apply pattern:
+- Added `_fetch_flex_options_paths(**kwargs) → list[Path]` in `options_sync.py` (no Session, does network fetch)
+- Added `pre_fetched_paths: list[Path] | None` parameter to `run_flex_options_sync(session, ...)`
+- Updated `backfill_options.py` chunk loop: call `_fetch_flex_options_paths()` first (slow network), then open Session for DB writes (fast)
+- Backward-compatible: existing daily-sync handler (`run_scheduled_flex_options_sync()`) and worker job handler (`handle_flex_options_sync()`) still work unchanged (they pass `pre_fetched_paths=None` and let the function fetch internally)
+
+This prevents SQLAlchemy Session idle timeout during long Flex waits. The Session is now only open during the fast DB-write phase (~seconds), not the slow network phase (~minutes).
+
+**Phase A.2: --continue-on-error Flag**
+Added CLI flag `--continue-on-error` (default: False, to preserve current abort-on-first-failure behavior):
+- Wraps chunk processing in try/except that catches `Exception` (but re-raises `KeyboardInterrupt` and `SystemExit`)
+- Failed chunks logged loudly with window info + exception type/message
+- Failed chunks NOT marked complete in checkpoint (so `--no-resume` or manual resume picks them up later)
+- Tracks failed chunks in a list; prints end-of-run summary with all failures
+- Exit code 1 if any chunk failed (to keep CI honest), exit 0 only if all succeeded
+
+**Phase A.3: --resume-from-chunk Flag**
+Added CLI flag `--resume-from-chunk N` (1-indexed for human readability):
+- Skips the first N chunks of the **pending** list (after checkpoint filtering)
+- Mutually compatible with `--no-resume`: `--no-resume --resume-from-chunk 3` means "ignore checkpoint AND skip first 3 chunks of all chunks"
+- Useful for manual recovery when checkpoint state is missing/corrupt OR Jony wants to manually skip past a known-bad window
+- If N >= len(pending), prints warning and exits 0 (nothing to do)
+
+**Phase A.4: Retry Budget Tuning**
+Bumped `FLEX_APP_MAX_RETRIES` default from 5 to 8 attempts (giving ~50min retry budget vs ~25min). Jony confirmed query 1496910 is a heavy Activity Flex Query; IBKR 1001 commonly persists 30-60min for these. Updated `.env.example` with full retry config docs.
+
+**Testing:**
+- Updated `test_send_flex_request_uses_new_default_retry_count` for new default (8 attempts, not 5)
+- All 15 flex_probe tests pass
+- All 14 existing backfill tests pass
+- Added smoke tests for Phase A.1-A.3 (session decoupling, continue-on-error, resume-from-chunk)
+
+**Key Files:**
+- `apps/backend/app/worker/handlers/options_sync.py` — added `_fetch_flex_options_paths()`, updated `run_flex_options_sync()` with `pre_fetched_paths` parameter
+- `apps/backend/scripts/backfill_options.py` — refactored chunk loop to fetch→open Session→apply, added `--continue-on-error` and `--resume-from-chunk` flags, added failed-chunk tracking and end-of-run summary
+- `apps/backend/scripts/flex_probe.py` — bumped `APP_MAX_RETRIES` default from 5 to 8
+- `apps/backend/.env.example` — added retry config docs
+- `apps/backend/tests/test_flex_send_request.py` — updated default retry test
+- `.squad/skills/two-tier-api-retry/SKILL.md` — captured skill from prior work
+
+**Commits:**
+- `fix(backfill): decouple SQLAlchemy Session from Flex fetch (Phase A.1)` — session-lifetime fix
+- `feat(backfill): add --continue-on-error and --resume-from-chunk (Phase A.2-A.3)` — resilience flags
+
+**Recommendation to Jony:** Re-run the backfill with these flags as needed:
+- Default behavior: abort on first failure (safest for CI)
+- `--continue-on-error`: push through all chunks, collect failures, retry later
+- `--resume-from-chunk 3`: manually skip first 3 pending chunks (recovery escape hatch)
+- Worst-case 1001 patience is now ~50min (up from ~25min)
+
+## Learnings
+
+### 2026-05-06: Session-Lifetime Bug Pattern in Long-Running Network Calls
+
+**Context:** When SQLAlchemy Session is opened before a slow network roundtrip (e.g., IBKR Flex API taking ~17min worst-case), Supabase pooler kills idle connections at ~10min. When the network call finally completes (or fails), any attempt to use the Session (e.g., `session.rollback()`) raises `SSL SYSCALL Socket is not connected` — masking the original error.
+
+**Pattern:** Database session lifecycle must NOT span slow external network calls. Best practice: pre-fetch all network data FIRST, then open Session for fast DB writes only.
+
+**Implementation:** Split fetch-then-apply:
+1. `fetch_*(...) → data` (no Session, network I/O)
+2. `with Session(engine) as session: apply(session, data, ...)` (Session-bound work)
+
+This pattern applies to any DB-backed service that calls slow external APIs (e.g., yfinance, IBKR, AI model inference endpoints). The Session should only be open during actual DB operations, not during network waits.
+
+**Alternative considered but rejected:** DB keepalive pings during long waits. This is fragile (what if keepalive itself fails?) and wasteful (holding a connection open for no reason). Better to not open the connection until you need it.
+
+### 2026-05-06: Chunk-Level Error Handling for Multi-Month Backfills
+
+**Context:** Multi-month backfills are inherently fragile: one chunk failure (e.g., IBKR 1001 throttle, network blip, transient DB issue) aborts the entire run, losing progress on all other chunks.
+
+**Design decision:** Add `--continue-on-error` flag (default: False) that catches chunk-level exceptions, logs them, does NOT mark the chunk complete, and continues to the next chunk. At the end, print a summary of all failures and exit with code 1 if any failed.
+
+**Why default to False:** Preserves current abort-on-first-failure behavior, which is safest for CI and automated runs. Users opt into continue-on-error when they want to push through a multi-month backfill and collect all failures in one run.
+
+**Critical:** Failed chunks MUST NOT be marked complete in the checkpoint. The resume contract is: "checkpoint contains only successfully completed chunks." This way, `--no-resume` or a fresh run will retry failed chunks.
+
+**Exception handling subtlety:** MUST re-raise `KeyboardInterrupt` and `SystemExit` (user interrupts), NOT catch them. The `except Exception:` clause handles application-level errors (FlexProbeError, DB errors, parsing errors), not user/OS signals.
+
+### 2026-05-06: Manual Recovery Escape Hatch with --resume-from-chunk
+
+**Context:** Checkpoint state can become corrupt (JSON parse error, accidental deletion) OR Jony wants to manually skip past a known-bad chunk window (e.g., IBKR data corruption for a specific month, already reported to IBKR). The existing `--no-resume` flag helps (reprocess all chunks) but doesn't let you skip specific chunks.
+
+**Design decision:** Add `--resume-from-chunk N` (1-indexed) that skips the first N **pending** chunks (after checkpoint filtering). This is compatible with `--no-resume`: you can do both together.
+
+**Example:** Jony has 10 chunks (Jan-Oct 2024). Checkpoint says chunks 1-3 are complete. He knows chunk 4 (April 2024) has IBKR data corruption and wants to skip it for now, process 5-10.
+- `--resume-from-chunk 2` skips the first 2 **pending** chunks (4 and 5), processes 6-10.
+- OR: `--no-resume --resume-from-chunk 4` ignores checkpoint, treats all 10 as pending, skips first 4 (1-4), processes 5-10.
+
+**Why 1-indexed:** Humans count from 1, not 0. CLI flags should be human-readable.
