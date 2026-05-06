@@ -115,3 +115,38 @@ completed = list(state.get("_all", []))  # List, not dict
 **Comprehensive E2E Coverage (PR #166):** Extended household bootstrap tests from 172 lines (PR #163) to 191 lines with deeper assertions and data validation. Merged after rebase conflict resolution (took #166's longer spec).
 
 **Result:** CI green on #166. Merged (commit 5eeb34d).
+
+### 2026-05-06: tests for --xml-dir manual Flex backfill mode
+
+**Context:** Hockney implemented `--xml-dir DIR` flag for `backfill_options.py` to support manual Activity Flex XML backfills (sidestepping IBKR's live API throttle issues). Implemented in parallel; code landed while I wrote tests. Feature includes `_xml_dir_files` helper for filename parsing/filtering and CLI mutual exclusion enforcement.
+
+**Test coverage (11 tests in `test_xml_dir_mode.py`):**
+1. **Date range filtering** — Single file overlap within requested window
+2. **Cross-year overlap** — Multiple files spanning Dec 2022 → Feb 2023
+3. **Non-matching filenames** — README.md and random.xml skipped with warnings; only IBKR-pattern files returned
+4. **No overlap raises** — FileNotFoundError with descriptive message including directory and window
+5. **Unbounded window** — `from_date=None, to_date=None` returns all matching files
+6. **Sorted return** — Files returned in alphabetical order regardless of creation order
+7. **Source routing** — `_select_flex_source` correctly routes to `_xml_dir_files` (not live/synthetic) when `xml_dir` is set, regardless of `IBKR_FLEX_TOKEN` presence
+8. **CLI mutual exclusion (synthetic)** — `--xml-dir + --synthetic` exits with code 2 and stderr contains "mutually exclusive"
+9. **CLI mutual exclusion (live)** — `--xml-dir + --live` exits with code 2 and stderr contains "mutually exclusive"
+10. **Real fixture smoke test** — Parse real 2022 Activity Flex XML from `reports/activity/`; assert `trades`, `cash_transactions`, and (`account_information` OR `open_positions`) are populated. Proves parser handles Activity Flex XML (with `<Trades>` elements).
+11. **Edge cases** — `.xml.bak` (ignored by glob), `missing_AF_` token, malformed dates (`2022XXXX`), long account IDs (valid!). Regex gracefully skips malformed files with warnings; doesn't crash.
+
+**Edge case discovered:** Long account IDs (>8 chars like `U123456789012345`) are VALID and parse correctly. The regex pattern `_(\d{8})_(\d{8})_AF_` anchors on date tokens, not account ID length. Test initially expected this to fail but discovered it's a feature, not a bug.
+
+**Real fixture integration:** Test #10 uses committed XML at `reports/activity/U2515365_U2515365_20220103_20221230_AF_1496910_ce0b54d8b0db812b5dc98314703e2aaf.xml` (983 KB). Parser returned 550 trades, 1464 cash transactions, 76 open positions. This proves the existing `flex_parser.py` correctly handles Activity Flex XML (not just Trade Confirmation Flex).
+
+**Test suite results (2026-05-06T20:15):**
+- `test_xml_dir_mode.py`: 11 passed
+- Full suite (`apps/backend/tests/`): **444 passed** (433 baseline + 11 new)
+- No failures
+
+**Learnings:**
+- **Write tests against spec, not code order:** I started tests while Hockney's code was still landing. Polling for imports (60s intervals) worked but added latency. Next time: if parallel work, write tests to spec immediately and let them fail naturally until implementation lands.
+- **Real fixture tests are integration gold:** Test #10 caught a data model mismatch (`trade_confirms` vs `trades`) that wouldn't surface in unit tests. Always include one real-data smoke test when testing parsers.
+- **Edge case assumptions bite:** I assumed long account IDs would break the regex. They don't — the pattern anchors on `_YYYYMMDD_YYYYMMDD_AF_`, not account length. The test stayed in the suite as a positive case proving robustness.
+- **subprocess.run for CLI tests:** Testing mutual exclusion at the CLI layer (not just argparse) caught exit code and stderr formatting. Use `subprocess.run(capture_output=True, text=True)` for end-to-end CLI validation.
+- **caplog for warning assertions:** `caplog.at_level(logging.WARNING)` + iterate `caplog.records` is the clean pattern for asserting log warnings. Better than mocking logger calls.
+
+**Commit:** 3f0a678
