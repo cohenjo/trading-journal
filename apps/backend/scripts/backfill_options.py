@@ -1,4 +1,26 @@
-"""Backfill options-income facts and monthly metrics from IBKR Flex XML."""
+"""Backfill options-income facts and monthly metrics from IBKR Flex XML.
+
+This script supports three input modes for Flex data:
+
+1. **Live API (default or --live):** Fetches data from IBKR Flex Web Service.
+   Requires IBKR_FLEX_TOKEN environment variable.
+   Example:
+     uv run python scripts/backfill_options.py --start 2024-01-01 --end 2024-12-31 --live
+
+2. **Synthetic fixtures (--synthetic):** Uses local test fixtures from tmp/flex/.
+   No IBKR credentials required. For development and testing.
+   Example:
+     uv run python scripts/backfill_options.py --start 2021-01-01 --end 2024-12-31 --synthetic
+
+3. **Manual XML drop (--xml-dir DIR):** Reads Activity Flex XML files exported from
+   IBKR Account Management UI. Sidesteps API throttling for large backfills.
+   Files must follow pattern: {acct}_{acct}_{YYYYMMDD}_{YYYYMMDD}_AF_{qid}_{hash}.xml
+   Example:
+     uv run python scripts/backfill_options.py --start 2022-01-01 --end 2024-12-31 \\
+       --xml-dir /path/to/reports/activity --chunk-months 12
+
+The three modes are mutually exclusive.
+"""
 
 from __future__ import annotations
 
@@ -74,6 +96,15 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--live",
         action="store_true",
         help="Force live IBKR Flex fetch (sets OPTIONS_FLEX_SOURCE=live; requires IBKR_FLEX_TOKEN)",
+    )
+    parser.add_argument(
+        "--xml-dir",
+        dest="xml_dir",
+        type=Path,
+        metavar="DIR",
+        help="Read Activity Flex XML files from DIR (manual exports from IBKR Account Management) "
+        "instead of fetching from the live API. Mutually exclusive with --synthetic and --live. "
+        "Filenames must follow IBKR's pattern: {acct}_{acct}_{YYYYMMDD}_{YYYYMMDD}_AF_{qid}_{hash}.xml",
     )
     parser.add_argument("--dry-run", action="store_true", help="Run parsing/workers and roll back database writes")
     parser.add_argument(
@@ -233,17 +264,40 @@ def main(argv: Iterable[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if args.synthetic and args.live:
-        print("error: --synthetic and --live are mutually exclusive", file=sys.stderr)
+
+    # Validate mutual exclusion of source modes
+    source_modes = [args.synthetic, args.live, args.xml_dir is not None]
+    if sum(source_modes) > 1:
+        print("error: --synthetic, --live, and --xml-dir are mutually exclusive", file=sys.stderr)
         return 2
+
     if args.synthetic:
         os.environ["OPTIONS_FLEX_SOURCE"] = "synthetic"
     elif args.live:
         os.environ["OPTIONS_FLEX_SOURCE"] = "live"
+    elif args.xml_dir is not None:
+        os.environ["OPTIONS_FLEX_SOURCE"] = "xml_dir"
+        # Validate xml_dir exists, is a directory, and contains at least one matching XML file
+        if not args.xml_dir.exists():
+            print(f"error: --xml-dir path does not exist: {args.xml_dir}", file=sys.stderr)
+            return 2
+        if not args.xml_dir.is_dir():
+            print(f"error: --xml-dir path is not a directory: {args.xml_dir}", file=sys.stderr)
+            return 2
+        matching_files = list(args.xml_dir.glob("*_*_????????_????????_AF_*.xml"))
+        if not matching_files:
+            print(
+                f"error: --xml-dir contains no Activity Flex XML files matching pattern "
+                f"{{acct}}_{{acct}}_{{YYYYMMDD}}_{{YYYYMMDD}}_AF_{{qid}}_{{hash}}.xml: {args.xml_dir}",
+                file=sys.stderr,
+            )
+            return 2
 
     source_label = os.getenv("OPTIONS_FLEX_SOURCE")
     if not source_label:
         source_label = "live (auto: IBKR_FLEX_TOKEN set)" if os.getenv("IBKR_FLEX_TOKEN") else "synthetic (no token)"
+    elif source_label == "xml_dir":
+        source_label = f"manual XML drop ({args.xml_dir})"
 
     chunk_months: int = args.chunk_months
     windows = build_windows(start, end, chunk_months)
@@ -299,6 +353,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 synthetic=args.synthetic,
                 poll_seconds=args.poll_seconds,
                 max_polls=args.max_polls,
+                xml_dir=args.xml_dir,
             )
 
             # Now open Session for DB writes only (fast, no idle risk)
@@ -373,7 +428,8 @@ def main(argv: Iterable[str] | None = None) -> int:
             )
 
         # Sleep between live IBKR requests to avoid consecutive 1001 throttles.
-        if not args.synthetic and idx < len(pending) - 1:
+        # Skip sleep for synthetic or xml-dir sources (no API calls).
+        if not args.synthetic and not args.xml_dir and idx < len(pending) - 1:
             sleep_secs = args.chunk_sleep
             print(f"[backfill] sleeping {sleep_secs}s before next chunk...", file=sys.stderr)
             time.sleep(sleep_secs)
