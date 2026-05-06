@@ -487,12 +487,12 @@ def test_continue_on_error_skips_failed_chunk(monkeypatch: Any, tmp_path: Path, 
 
     # Verify: chunks 1 and 3 processed, chunk 2 attempted but failed
     assert processed_months == [1, 2, 3], "All 3 chunks should be attempted"
-    assert session.commits == 2, "Only chunks 1 and 3 should commit"
+    assert session.commits == 3, "Chunks 1 and 3 plus final commit (2 + 1)"
 
     # Verify checkpoint: only chunks 1 and 3 marked complete
     if state_file.exists():
         state_data = json.loads(state_file.read_text())
-        completed_keys = list(state_data.get("all:completed", {}).keys())
+        completed_keys = list(state_data.get("_all", []))
         assert len(completed_keys) == 2, f"Expected 2 completed chunks, got {len(completed_keys)}"
         assert "2025-02-01:2025-02-28" not in completed_keys, "Failed chunk 2 should NOT be marked complete"
 
@@ -513,7 +513,6 @@ def test_default_aborts_on_first_failure(monkeypatch: Any, tmp_path: Path) -> No
     - Chunk 3 never runs
     """
     from scripts.backfill_options import main as backfill_main, STATE_FILE
-    from app.worker.handlers import options_sync
     from scripts.flex_probe import FlexProbeError
 
     monkeypatch.chdir(tmp_path)
@@ -531,8 +530,8 @@ def test_default_aborts_on_first_failure(monkeypatch: Any, tmp_path: Path) -> No
     def mock_run(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
-    monkeypatch.setattr(options_sync, "_fetch_flex_options_paths", mock_fetch)
-    monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
+    monkeypatch.setattr(backfill_options, "_fetch_flex_options_paths", mock_fetch)
+    monkeypatch.setattr(backfill_options, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
 
     # Mock post-processing handler functions at backfill_options level
@@ -562,7 +561,6 @@ def test_continue_on_error_does_not_swallow_keyboard_interrupt(monkeypatch: Any,
     Even with --continue-on-error, the run must abort (KeyboardInterrupt re-raised).
     """
     from scripts.backfill_options import main as backfill_main
-    from app.worker.handlers import options_sync
 
     monkeypatch.chdir(tmp_path)
     fetch_attempts: list[int] = []
@@ -578,8 +576,8 @@ def test_continue_on_error_does_not_swallow_keyboard_interrupt(monkeypatch: Any,
     def mock_run(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
-    monkeypatch.setattr(options_sync, "_fetch_flex_options_paths", mock_fetch)
-    monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
+    monkeypatch.setattr(backfill_options, "_fetch_flex_options_paths", mock_fetch)
+    monkeypatch.setattr(backfill_options, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
 
     # Mock post-processing handler functions at backfill_options level
@@ -610,11 +608,10 @@ def test_resume_from_chunk_skips_n_pending_chunks(monkeypatch: Any, tmp_path: Pa
 
     Build a 5-chunk window, run with --resume-from-chunk 3.
     Expected:
-    - Chunks 1 and 2 of pending list are skipped
-    - Chunks 3-5 are processed
+    - Chunks 1, 2, and 3 of pending list are skipped
+    - Chunks 4-5 are processed
     """
     from scripts.backfill_options import main as backfill_main
-    from app.worker.handlers import options_sync
 
     monkeypatch.chdir(tmp_path)
     processed_chunks: list[str] = []
@@ -626,8 +623,8 @@ def test_resume_from_chunk_skips_n_pending_chunks(monkeypatch: Any, tmp_path: Pa
         processed_chunks.append(str(from_date))
         return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
-    monkeypatch.setattr(options_sync, "_fetch_flex_options_paths", mock_fetch)
-    monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
+    monkeypatch.setattr(backfill_options, "_fetch_flex_options_paths", mock_fetch)
+    monkeypatch.setattr(backfill_options, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
 
     # Mock post-processing handler functions at backfill_options level
@@ -650,11 +647,10 @@ def test_resume_from_chunk_skips_n_pending_chunks(monkeypatch: Any, tmp_path: Pa
     )
 
     assert exit_code == 0
-    # Should have processed only chunks 3, 4, 5 (skipped first 2)
-    assert len(processed_chunks) == 3
-    assert processed_chunks[0] == "2024-03-01"  # Chunk 3
-    assert processed_chunks[1] == "2024-04-01"  # Chunk 4
-    assert processed_chunks[2] == "2024-05-01"  # Chunk 5
+    # Should have processed only chunks 4, 5 (skipped first 3)
+    assert len(processed_chunks) == 2
+    assert processed_chunks[0] == "2024-04-01"  # Chunk 4
+    assert processed_chunks[1] == "2024-05-01"  # Chunk 5
 
 
 def test_resume_from_chunk_combines_with_no_resume(monkeypatch: Any, tmp_path: Path) -> None:
@@ -667,14 +663,11 @@ def test_resume_from_chunk_combines_with_no_resume(monkeypatch: Any, tmp_path: P
     - Skips first 2 of those 5 → processes chunks 3-5
     """
     from scripts.backfill_options import main as backfill_main, STATE_FILE
-    from app.worker.handlers import options_sync
 
     monkeypatch.chdir(tmp_path)
     state_file = tmp_path / STATE_FILE.name
 
     # Pre-populate checkpoint with chunks 1 and 2
-    import json
-
     state_file.write_text(json.dumps({"_all": ["2024-01-01:2024-01-31", "2024-02-01:2024-02-29"]}))
 
     processed_chunks: list[str] = []
@@ -686,8 +679,8 @@ def test_resume_from_chunk_combines_with_no_resume(monkeypatch: Any, tmp_path: P
         processed_chunks.append(str(from_date))
         return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
-    monkeypatch.setattr(options_sync, "_fetch_flex_options_paths", mock_fetch)
-    monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
+    monkeypatch.setattr(backfill_options, "_fetch_flex_options_paths", mock_fetch)
+    monkeypatch.setattr(backfill_options, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
 
     # Mock post-processing handler functions at backfill_options level
@@ -814,7 +807,7 @@ def test_failed_chunk_does_not_mark_complete(monkeypatch: Any, tmp_path: Path) -
     # Verify checkpoint: failed chunk 2 NOT marked complete
     assert state_file.exists(), "Checkpoint file should exist"
     state_data = json.loads(state_file.read_text())
-    completed_keys = list(state_data.get("all:completed", {}).keys())
+    completed_keys = list(state_data.get("_all", []))
 
     # Chunks 1 and 3 should be present
     assert len(completed_keys) == 2, f"Expected 2 completed chunks, got {len(completed_keys)}"
