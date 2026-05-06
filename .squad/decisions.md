@@ -7123,3 +7123,42 @@ blockers (backend not running, seed data not available).
 - `auth-cookie.ts` uses a hardcoded internal password (`E2eTestPass!1`) — not exposed in fixture shape.
 - `auth-cookie.ts` does not have a `householdOwner` fixture. Use `test-user.ts` for tests that need a household.
 - Teardown: `auth-cookie.ts` calls `deleteE2eUser()` (best-effort); `test-user.ts` calls `teardownTestUser()` which handles FK cascade. Use `test-user.ts` for tests involving household data.
+
+---
+
+## 2026-05-06: Flex API 1001 Retry Budget Tuned for Application-Level Persistence (hockney)
+
+**Date:** 2026-05-06
+**Author:** Hockney (Backend Dev)
+**Context:** Options backfill re-run encountered IBKR error 1001 ("Statement could not be generated") persisting across all 3 retries (~7 min total wait), halting backfill. Real-world IBKR 1001 persists 15+ minutes.
+
+### Decision
+
+- Bumped `send_flex_request()` max_retries default: 3 → 5 attempts
+- Added env-tunable: `FLEX_APP_MAX_RETRIES` (default 5), `FLEX_APP_INITIAL_BACKOFF` (default 60.0s)
+- New exponential backoff: 60 + 120 + 240 + 480 + 600 = **1500s ≈ 25 min worst-case**
+- Enhanced exhaustion error message with elapsed time, query ID, and actionable guidance ("wait 30 min OR re-save Flex query in Account Management")
+
+### Rationale
+
+Two-tier retry strategy separates failure classes:
+- **Transport-level** (5s → 80s): TCP/TLS resets recover in seconds
+- **Application-level** (60s → 600s): IBKR backend generation queue clears in minutes
+
+25-minute patience window gives IBKR backend realistic time to clear stuck jobs without forcing daily manual retries. Existing code calling `send_flex_request(max_retries=3)` explicitly remains unaffected (no breaking change).
+
+### Files Changed
+- `apps/backend/scripts/flex_probe.py` (+~100 lines): retry loop tracking, constants, improved error messages
+- `apps/backend/tests/test_flex_send_request.py` (+~285 lines): 4 new tests for defaults, env override, message guidance, elapsed accumulation
+
+### Outcomes
+- ✅ All 15 flex tests pass
+- ✅ Ruff clean
+- ✅ Worst-case wait now ~25 min (was ~7 min)
+- Extracted reusable pattern: `.squad/skills/two-tier-api-retry/SKILL.md`
+
+### Follow-ups
+- Keaton: two-tier retry pattern available as reusable skill for other API tiers
+- Jony: re-run options backfill when IBKR backend recovers (likely tomorrow)
+
+---
