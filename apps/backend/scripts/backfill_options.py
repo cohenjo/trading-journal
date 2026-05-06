@@ -1,14 +1,40 @@
-"""Backfill options-income facts and monthly metrics from IBKR Flex XML."""
+"""Backfill options-income facts and monthly metrics from IBKR Flex XML.
+
+This script supports three input modes for Flex data:
+
+1. **Live API (default or --live):** Fetches data from IBKR Flex Web Service.
+   Requires IBKR_FLEX_TOKEN environment variable.
+   Example:
+     uv run python scripts/backfill_options.py --start 2024-01-01 --end 2024-12-31 --live
+
+2. **Synthetic fixtures (--synthetic):** Uses local test fixtures from tmp/flex/.
+   No IBKR credentials required. For development and testing.
+   Example:
+     uv run python scripts/backfill_options.py --start 2021-01-01 --end 2024-12-31 --synthetic
+
+3. **Manual XML drop (--xml-dir DIR):** Reads Activity Flex XML files exported from
+   IBKR Account Management UI. Sidesteps API throttling for large backfills.
+   Files must follow pattern: {acct}_{acct}_{YYYYMMDD}_{YYYYMMDD}_AF_{qid}_{hash}.xml
+   Example:
+     uv run python scripts/backfill_options.py --start 2022-01-01 --end 2024-12-31 \\
+       --xml-dir /path/to/reports/activity --chunk-months 12
+
+The three modes are mutually exclusive.
+"""
 
 from __future__ import annotations
 
 import argparse
+import calendar
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import json
 import os
+from pathlib import Path
 import sys
+import time
 
 from sqlmodel import Session
 
@@ -16,14 +42,18 @@ from app.dal.database import engine
 from app.worker.handlers.options_grouping import compute_options_strategy_groups
 from app.worker.handlers.options_margin_sync import run_options_margin_sync
 from app.worker.handlers.options_metrics import compute_options_monthly_metrics
-from app.worker.handlers.options_sync import run_flex_options_sync
+from app.worker.handlers.options_sync import _fetch_flex_options_paths, run_flex_options_sync
 
 DEFAULT_FROM = date(2025, 1, 1)
+DEFAULT_CHUNK_MONTHS = 1
+DEFAULT_CHUNK_SLEEP_SECONDS = 45
+STATE_FILE = Path(".flex_backfill_state.json")
+FAILURES_FILE = Path(".flex_backfill_failures.json")
 
 
 @dataclass(frozen=True)
 class BackfillWindow:
-    """Inclusive date window that stays within one calendar year."""
+    """Inclusive date window used for a single IBKR Flex request."""
 
     start: date
     end: date
@@ -33,6 +63,12 @@ class BackfillWindow:
         """Return the progress label used in CLI logs."""
 
         return str(self.start.year) if self.start.year == self.end.year else f"{self.start}:{self.end}"
+
+    @property
+    def chunk_key(self) -> str:
+        """Stable string key for checkpoint state."""
+
+        return f"{self.start}:{self.end}"
 
 
 def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -61,7 +97,67 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Force live IBKR Flex fetch (sets OPTIONS_FLEX_SOURCE=live; requires IBKR_FLEX_TOKEN)",
     )
+    parser.add_argument(
+        "--xml-dir",
+        dest="xml_dir",
+        type=Path,
+        metavar="DIR",
+        help="Read Activity Flex XML files from DIR (manual exports from IBKR Account Management) "
+        "instead of fetching from the live API. Mutually exclusive with --synthetic and --live. "
+        "Filenames must follow IBKR's pattern: {acct}_{acct}_{YYYYMMDD}_{YYYYMMDD}_AF_{qid}_{hash}.xml",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Run parsing/workers and roll back database writes")
+    parser.add_argument(
+        "--chunk-months",
+        type=int,
+        default=DEFAULT_CHUNK_MONTHS,
+        metavar="N",
+        help=f"Split range into N-month windows per IBKR request (default: {DEFAULT_CHUNK_MONTHS}). "
+        "Use 1 for monthly (safest for large accounts), 3 for quarterly, 12 for yearly.",
+    )
+    parser.add_argument(
+        "--chunk-sleep",
+        type=int,
+        default=DEFAULT_CHUNK_SLEEP_SECONDS,
+        metavar="SECONDS",
+        help=f"Seconds to sleep between IBKR Flex requests (default: {DEFAULT_CHUNK_SLEEP_SECONDS}). "
+        "Prevents consecutive 1001 throttle errors.",
+    )
+    parser.add_argument(
+        "--poll-seconds",
+        type=int,
+        default=10,
+        metavar="SECONDS",
+        help="Seconds between GetStatement polls while IBKR generates the statement (default: 10).",
+    )
+    parser.add_argument(
+        "--max-polls",
+        type=int,
+        default=60,
+        metavar="N",
+        help="Maximum GetStatement polls before giving up on a chunk (default: 60 → 10 min timeout).",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help=f"Ignore existing checkpoint file ({STATE_FILE}) and re-process all chunks.",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue processing remaining chunks when one chunk fails. "
+        "Failed chunks are NOT marked complete (so resume picks them up later). "
+        "Script exits with code 1 if any chunk failed, 0 only if all succeeded.",
+    )
+    parser.add_argument(
+        "--resume-from-chunk",
+        type=int,
+        metavar="N",
+        help="Skip the first N pending chunks (1-indexed). "
+        "Useful for manual recovery when checkpoint state is missing or corrupt. "
+        "Compatible with --no-resume: '--no-resume --resume-from-chunk 3' means "
+        "ignore checkpoint AND skip first 3 chunks of all chunks.",
+    )
     return parser.parse_args(argv)
 
 
@@ -80,6 +176,44 @@ def yearly_windows(start: date, end: date) -> list[BackfillWindow]:
     return windows
 
 
+def monthly_windows(start: date, end: date, chunk_months: int = 1) -> list[BackfillWindow]:
+    """Split an inclusive date range into N-month windows.
+
+    Each window spans at most ``chunk_months`` calendar months.  The final
+    window is clipped to ``end``.  Use ``chunk_months=1`` (the default) for
+    the safest IBKR FLEX window size — single-month requests rarely time out
+    even on trade-heavy accounts.
+    """
+
+    if start > end:
+        raise ValueError("start date must be on or before end date")
+    if chunk_months < 1:
+        raise ValueError("chunk_months must be >= 1")
+    windows: list[BackfillWindow] = []
+    current = start
+    while current <= end:
+        # Compute the last month of this chunk (0-indexed from January = 0).
+        target_month_0 = (current.month - 1) + (chunk_months - 1)
+        chunk_year = current.year + target_month_0 // 12
+        chunk_month = (target_month_0 % 12) + 1
+        _, last_day = calendar.monthrange(chunk_year, chunk_month)
+        chunk_end = min(end, date(chunk_year, chunk_month, last_day))
+        windows.append(BackfillWindow(current, chunk_end))
+        next_start = chunk_end + timedelta(days=1)
+        if next_start > end:
+            break
+        current = next_start
+    return windows
+
+
+def build_windows(start: date, end: date, chunk_months: int) -> list[BackfillWindow]:
+    """Return the appropriate window list for the given chunk size."""
+
+    if chunk_months >= 12:
+        return yearly_windows(start, end)
+    return monthly_windows(start, end, chunk_months)
+
+
 def requested_range(args: argparse.Namespace) -> tuple[date, date]:
     """Resolve CLI date flags into one inclusive range."""
 
@@ -94,78 +228,214 @@ def requested_range(args: argparse.Namespace) -> tuple[date, date]:
     return start, end
 
 
+def load_completed_chunks(account_key: str, state_file: Path) -> set[str]:
+    """Return chunk keys already committed in a previous run."""
+
+    if not state_file.exists():
+        return set()
+    try:
+        data: dict[str, list[str]] = json.loads(state_file.read_text())
+        return set(data.get(account_key, []))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def mark_chunk_complete(account_key: str, window: BackfillWindow, state_file: Path) -> None:
+    """Persist a successfully committed chunk to the checkpoint file."""
+
+    try:
+        data: dict[str, list[str]] = json.loads(state_file.read_text()) if state_file.exists() else {}
+    except (json.JSONDecodeError, OSError):
+        data = {}
+    chunks = data.setdefault(account_key, [])
+    key = window.chunk_key
+    if key not in chunks:
+        chunks.append(key)
+    state_file.write_text(json.dumps(data, indent=2))
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     """Run a synchronous Flex options backfill and print reconciliation totals."""
 
+    run_started_at = datetime.now(timezone.utc)
     args = parse_args(argv)
     try:
         start, end = requested_range(args)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    if args.synthetic and args.live:
-        print("error: --synthetic and --live are mutually exclusive", file=sys.stderr)
+
+    # Validate mutual exclusion of source modes
+    source_modes = [args.synthetic, args.live, args.xml_dir is not None]
+    if sum(source_modes) > 1:
+        print("error: --synthetic, --live, and --xml-dir are mutually exclusive", file=sys.stderr)
         return 2
+
     if args.synthetic:
         os.environ["OPTIONS_FLEX_SOURCE"] = "synthetic"
     elif args.live:
         os.environ["OPTIONS_FLEX_SOURCE"] = "live"
+    elif args.xml_dir is not None:
+        os.environ["OPTIONS_FLEX_SOURCE"] = "xml_dir"
+        # Validate xml_dir exists, is a directory, and contains at least one matching XML file
+        if not args.xml_dir.exists():
+            print(f"error: --xml-dir path does not exist: {args.xml_dir}", file=sys.stderr)
+            return 2
+        if not args.xml_dir.is_dir():
+            print(f"error: --xml-dir path is not a directory: {args.xml_dir}", file=sys.stderr)
+            return 2
+        matching_files = list(args.xml_dir.glob("*_*_????????_????????_AF_*.xml"))
+        if not matching_files:
+            print(
+                f"error: --xml-dir contains no Activity Flex XML files matching pattern "
+                f"{{acct}}_{{acct}}_{{YYYYMMDD}}_{{YYYYMMDD}}_AF_{{qid}}_{{hash}}.xml: {args.xml_dir}",
+                file=sys.stderr,
+            )
+            return 2
 
     source_label = os.getenv("OPTIONS_FLEX_SOURCE")
     if not source_label:
         source_label = "live (auto: IBKR_FLEX_TOKEN set)" if os.getenv("IBKR_FLEX_TOKEN") else "synthetic (no token)"
-    windows = yearly_windows(start, end)
+    elif source_label == "xml_dir":
+        source_label = f"manual XML drop ({args.xml_dir})"
+
+    chunk_months: int = args.chunk_months
+    windows = build_windows(start, end, chunk_months)
+    account_key = args.account_id or "_all"
+    completed: set[str] = set()
+    if not args.no_resume and not args.dry_run:
+        completed = load_completed_chunks(account_key, STATE_FILE)
+        if completed:
+            print(
+                f"[resume] found {len(completed)} previously completed chunk(s) in {STATE_FILE}; "
+                "skipping them. Pass --no-resume to reprocess.",
+            )
+
+    pending = [w for w in windows if w.chunk_key not in completed]
+
+    # Apply --resume-from-chunk flag (1-indexed for human readability)
+    if args.resume_from_chunk:
+        resume_from = args.resume_from_chunk
+        if resume_from >= len(pending):
+            print(
+                f"[resume] --resume-from-chunk={resume_from} >= {len(pending)} pending chunks; nothing to do",
+                file=sys.stderr,
+            )
+            return 0
+        if resume_from > 0:
+            skipped_windows = pending[:resume_from]
+            pending = pending[resume_from:]
+            print(
+                f"[resume] --resume-from-chunk={resume_from} → skipping first {resume_from} pending chunk(s) "
+                f"(windows {skipped_windows[0].chunk_key}..{skipped_windows[-1].chunk_key})",
+                file=sys.stderr,
+            )
+
+    skipped = len(windows) - len(pending)
     print(
         f"Backfilling options income from {start} to {end} "
-        f"in {len(windows)} yearly chunk(s) [source={source_label}]"
+        f"in {len(pending)} of {len(windows)} chunk(s) "
+        f"(chunk_months={chunk_months}, skipped={skipped}) "
+        f"[source={source_label}]"
         f"{' (dry run)' if args.dry_run else ''}"
     )
     combined_sync: dict[str, int] = {"trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
     last_metrics: dict[str, object] = {"accounts": [], "row_count": 0}
-    for window in windows:
-        with Session(engine) as session:
-            sync_result = run_flex_options_sync(
-                session,
-                from_date=window.start,
-                to_date=window.end,
-                account_id=args.account_id,
-                synthetic=args.synthetic,
-            )
-            grouping_result = compute_options_strategy_groups(
-                session,
-                account_id=args.account_id,
-                from_date=window.start,
-                to_date=window.end,
-            )
-            margin_result = run_options_margin_sync(session, account_id=args.account_id)
-            metrics_result = compute_options_monthly_metrics(
-                session,
-                account_id=args.account_id,
-                from_date=window.start,
-                to_date=window.end,
-            )
-            if args.dry_run:
-                session.rollback()
-            else:
-                session.commit()
-        for key in combined_sync:
-            combined_sync[key] += int(sync_result.get(key, 0))
-        last_metrics = metrics_result
-        parsed = (
-            int(sync_result.get("trade_count", 0))
-            + int(sync_result.get("cash_event_count", 0))
-            + int(sync_result.get("position_count", 0))
-        )
-        print(
-            f"[backfill {window.label}] parsed={parsed}, "
-            f"upserted_legs={int(sync_result.get('leg_count', 0))}, "
-            f"groups={int(grouping_result.get('group_count', 0))}, "
-            f"monthly_rows={int(metrics_result.get('row_count', 0))}"
-        )
-        if margin_result.get("status") != "succeeded":
-            print(f"[backfill {window.label}] margin={margin_result}")
+    failed_chunks: list[tuple[BackfillWindow, Exception, datetime]] = []
 
-    if len(windows) > 1 and not args.dry_run:
+    for idx, window in enumerate(pending):
+        try:
+            # Phase A.1: Fetch Flex XML first (slow network roundtrip, no Session needed)
+            # This prevents SQLAlchemy Session idle timeout during long Flex API waits
+            flex_paths = _fetch_flex_options_paths(
+                from_date=window.start,
+                to_date=window.end,
+                synthetic=args.synthetic,
+                poll_seconds=args.poll_seconds,
+                max_polls=args.max_polls,
+                xml_dir=args.xml_dir,
+            )
+
+            # Now open Session for DB writes only (fast, no idle risk)
+            with Session(engine) as session:
+                sync_result = run_flex_options_sync(
+                    session,
+                    from_date=window.start,
+                    to_date=window.end,
+                    account_id=args.account_id,
+                    synthetic=args.synthetic,
+                    poll_seconds=args.poll_seconds,
+                    max_polls=args.max_polls,
+                    pre_fetched_paths=flex_paths,
+                )
+                grouping_result = compute_options_strategy_groups(
+                    session,
+                    account_id=args.account_id,
+                    from_date=window.start,
+                    to_date=window.end,
+                )
+                margin_result = run_options_margin_sync(session, account_id=args.account_id)
+                metrics_result = compute_options_monthly_metrics(
+                    session,
+                    account_id=args.account_id,
+                    from_date=window.start,
+                    to_date=window.end,
+                )
+                if args.dry_run:
+                    session.rollback()
+                else:
+                    session.commit()
+                    # Checkpoint only after a chunk fully succeeds. Transport-level
+                    # retries in flex_probe.py self-heal brief network blips within
+                    # a chunk, so resume picks up only when a chunk fails completely.
+                    mark_chunk_complete(account_key, window, STATE_FILE)
+
+            # Success path: accumulate stats
+            for key in combined_sync:
+                combined_sync[key] += int(sync_result.get(key, 0))
+            last_metrics = metrics_result
+            parsed = (
+                int(sync_result.get("trade_count", 0))
+                + int(sync_result.get("cash_event_count", 0))
+                + int(sync_result.get("position_count", 0))
+            )
+            print(
+                f"[backfill {window.label}] parsed={parsed}, "
+                f"upserted_legs={int(sync_result.get('leg_count', 0))}, "
+                f"groups={int(grouping_result.get('group_count', 0))}, "
+                f"monthly_rows={int(metrics_result.get('row_count', 0))}"
+            )
+            if margin_result.get("status") != "succeeded":
+                print(f"[backfill {window.label}] margin={margin_result}")
+
+        except (KeyboardInterrupt, SystemExit):
+            # Always re-raise user interrupts
+            raise
+        except Exception as exc:
+            # Phase A.2: --continue-on-error handling
+            print(
+                f"[backfill {window.label}] ❌ FAILED: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            failed_chunks.append((window, exc, datetime.now(timezone.utc)))
+            if not args.continue_on_error:
+                # Default behavior: abort on first failure
+                raise
+            # Continue to next chunk (failed chunk NOT marked complete, so resume picks it up)
+            print(
+                f"[backfill {window.label}] --continue-on-error: skipping to next chunk",
+                file=sys.stderr,
+            )
+
+        # Sleep between live IBKR requests to avoid consecutive 1001 throttles.
+        # Skip sleep for synthetic or xml-dir sources (no API calls).
+        if not args.synthetic and not args.xml_dir and idx < len(pending) - 1:
+            sleep_secs = args.chunk_sleep
+            print(f"[backfill] sleeping {sleep_secs}s before next chunk...", file=sys.stderr)
+            time.sleep(sleep_secs)
+
+    all_windows = windows
+    if len(all_windows) > 1 and pending and not args.dry_run:
         with Session(engine) as session:
             final_grouping = compute_options_strategy_groups(
                 session,
@@ -193,6 +463,60 @@ def main(argv: Iterable[str] | None = None) -> int:
         f"cash_flow={totals['cash_flow']} realized_pnl={totals['realized_pnl']} "
         f"variance_gap={totals['variance_gap']}"
     )
+
+    # Phase A.2: Report failed chunks and exit with proper code
+    run_finished_at = datetime.now(timezone.utc)
+
+    # Write or delete the persistent failure log
+    if not args.dry_run:
+        if args.continue_on_error and failed_chunks:
+            # Write failure log
+            command_args = list(argv) if argv else sys.argv[1:]
+            failure_data = {
+                "account_key": account_key,
+                "run_started_at": run_started_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "run_finished_at": run_finished_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "command_args": command_args,
+                "failed_chunks": [
+                    {
+                        "chunk_key": window.chunk_key,
+                        "window_start": window.start.isoformat(),
+                        "window_end": window.end.isoformat(),
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "failed_at": failed_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                    }
+                    for window, exc, failed_at in failed_chunks
+                ],
+            }
+            FAILURES_FILE.write_text(json.dumps(failure_data, indent=2))
+        elif FAILURES_FILE.exists():
+            # Clean up old failure log if this run succeeded
+            FAILURES_FILE.unlink()
+
+    if failed_chunks:
+        print("\n" + "=" * 80, file=sys.stderr)
+        print(f"❌ {len(failed_chunks)} chunk(s) FAILED:", file=sys.stderr)
+        for window, exc, _ in failed_chunks:
+            print(f"  • {window.chunk_key}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print("=" * 80, file=sys.stderr)
+        if not args.dry_run:
+            print(f"Failure detail written to {FAILURES_FILE}", file=sys.stderr)
+            print("", file=sys.stderr)
+            print(
+                "To retry failed chunks: re-run the same command "
+                "(resume will skip succeeded chunks and retry only the failures).",
+                file=sys.stderr,
+            )
+            print(f"To inspect: cat {FAILURES_FILE} | jq .", file=sys.stderr)
+        else:
+            print(
+                "\nRun with --no-resume to retry failed chunks, or manually fix issues and resume.",
+                file=sys.stderr,
+            )
+        print("=" * 80, file=sys.stderr)
+        return 1  # Exit code 1 to keep CI honest
+
     return 0
 
 

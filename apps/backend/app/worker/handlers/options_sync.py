@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 from sqlalchemy import text
@@ -104,6 +105,40 @@ def run_scheduled_flex_options_sync() -> None:
     logger.info("Scheduled flex_options_sync completed: %s", result)
 
 
+def _fetch_flex_options_paths(
+    *,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    synthetic: bool | None = None,
+    poll_seconds: int = 10,
+    max_polls: int = 60,
+    xml_dir: Path | None = None,
+) -> list[Path]:
+    """Fetch Flex XML paths from live API, synthetic fixtures, or manual XML drop.
+
+    This function performs the network roundtrip (if live) and does NOT require
+    a database session. Use this to decouple slow Flex API calls from SQLAlchemy
+    session lifetimes, preventing idle connection timeouts.
+
+    Args:
+        from_date: Inclusive start date for filtering
+        to_date: Inclusive end date for filtering
+        synthetic: If True, use synthetic fixtures
+        poll_seconds: Seconds between GetStatement polls (live mode)
+        max_polls: Maximum GetStatement polls before timeout (live mode)
+        xml_dir: Directory containing manual Activity Flex XML exports. If set,
+            reads files from this directory instead of fetching from live API.
+    """
+    return _select_flex_source(
+        from_date=from_date,
+        to_date=to_date,
+        synthetic=synthetic,
+        poll_seconds=poll_seconds,
+        max_polls=max_polls,
+        xml_dir=xml_dir,
+    )
+
+
 def run_flex_options_sync(
     session: Session,
     *,
@@ -111,14 +146,38 @@ def run_flex_options_sync(
     to_date: date | None = None,
     account_id: str | None = None,
     synthetic: bool | None = None,
+    poll_seconds: int = 10,
+    max_polls: int = 60,
+    pre_fetched_paths: list[Path] | None = None,
 ) -> JobResult:
-    """Parse selected Flex source files and upsert normalized option facts."""
+    """Parse selected Flex source files and upsert normalized option facts.
+
+    Args:
+        session: SQLAlchemy session for database writes
+        from_date: Inclusive start date for Flex query window
+        to_date: Inclusive end date for Flex query window
+        account_id: Optional account filter
+        synthetic: If True, use synthetic fixtures instead of live API
+        poll_seconds: Seconds between GetStatement polls (live mode)
+        max_polls: Maximum GetStatement polls before timeout (live mode)
+        pre_fetched_paths: Optional pre-fetched XML paths. If provided, skips the
+            slow network fetch. Use _fetch_flex_options_paths() to pre-fetch paths
+            before opening a database session, then pass them here.
+
+    Returns:
+        Job result dict with trade/cash/position counts
+    """
 
     accounts = _load_accounts(session, account_id=account_id)
     if not accounts:
         return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
-    paths = _select_flex_source(from_date=from_date, to_date=to_date, synthetic=synthetic)
+    if pre_fetched_paths is not None:
+        paths = pre_fetched_paths
+    else:
+        paths = _select_flex_source(
+            from_date=from_date, to_date=to_date, synthetic=synthetic, poll_seconds=poll_seconds, max_polls=max_polls
+        )
     total_trades = 0
     total_cash = 0
     total_positions = 0
@@ -175,7 +234,23 @@ def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsA
     ]
 
 
-def _select_flex_source(*, from_date: date | None, to_date: date | None, synthetic: bool | None) -> list[Path]:
+def _select_flex_source(
+    *,
+    from_date: date | None,
+    to_date: date | None,
+    synthetic: bool | None,
+    poll_seconds: int = 10,
+    max_polls: int = 60,
+    xml_dir: Path | None = None,
+) -> list[Path]:
+    """Select Flex XML source: manual XML dir, live API, or synthetic fixtures."""
+    # Check xml_dir mode first (explicit kwarg or env)
+    if xml_dir is not None or os.getenv("OPTIONS_FLEX_SOURCE") == "xml_dir":
+        directory = xml_dir or Path(os.environ.get("OPTIONS_FLEX_XML_DIR", ""))
+        if not directory:
+            raise ValueError("xml_dir mode enabled but no directory provided")
+        return _xml_dir_files(directory, from_date=from_date, to_date=to_date)
+
     token = os.getenv("IBKR_FLEX_TOKEN")
     source_env = os.getenv("OPTIONS_FLEX_SOURCE")
     source = source_env.lower() if source_env else None
@@ -194,9 +269,71 @@ def _select_flex_source(*, from_date: date | None, to_date: date | None, synthet
     args = parse_args([])
     args.from_date = from_date
     args.to_date = to_date
+    args.poll_seconds = poll_seconds
+    args.max_polls = max_polls
     configs = query_configs_from_env()
     token = os.environ["IBKR_FLEX_TOKEN"]
     return fetch_live_xml(configs, token, args)
+
+
+def _xml_dir_files(directory: Path, *, from_date: date | None, to_date: date | None) -> list[Path]:
+    """List Activity Flex XML files in directory, filtered by date range.
+
+    Files must follow IBKR naming pattern:
+        {accountId}_{accountId}_{YYYYMMDD}_{YYYYMMDD}_AF_{queryId}_{hash}.xml
+
+    Files that don't match the pattern are skipped with a warning.
+    Returns files whose date range overlaps with [from_date, to_date].
+
+    Args:
+        directory: Path to directory containing Activity Flex XML files
+        from_date: Optional inclusive start date filter
+        to_date: Optional inclusive end date filter
+
+    Returns:
+        Sorted list of matching XML file paths
+
+    Raises:
+        FileNotFoundError: If no matching files found in directory
+    """
+    xml_files = sorted(directory.glob("*.xml"))
+    if not xml_files:
+        raise FileNotFoundError(f"No XML files found in directory: {directory}")
+
+    # Pattern: {acct}_{acct}_{YYYYMMDD}_{YYYYMMDD}_AF_{qid}_{hash}.xml
+    pattern = re.compile(r"_(\d{8})_(\d{8})_AF_")
+    matching_files: list[Path] = []
+
+    for path in xml_files:
+        match = pattern.search(path.name)
+        if not match:
+            logger.warning("Skipping XML file with non-matching filename pattern: %s", path.name)
+            continue
+
+        # Parse date range from filename
+        try:
+            file_start = datetime.strptime(match.group(1), "%Y%m%d").date()
+            file_end = datetime.strptime(match.group(2), "%Y%m%d").date()
+        except ValueError as exc:
+            logger.warning("Skipping XML file with invalid date in filename %s: %s", path.name, exc)
+            continue
+
+        # Filter by date overlap (inclusive)
+        if from_date and file_end < from_date:
+            continue
+        if to_date and file_start > to_date:
+            continue
+
+        matching_files.append(path)
+
+    if not matching_files:
+        window = f"[{from_date or 'any'} to {to_date or 'any'}]"
+        raise FileNotFoundError(
+            f"No Activity Flex XML files found in {directory} for window {window}. "
+            f"Files must match pattern: {{acct}}_{{acct}}_{{YYYYMMDD}}_{{YYYYMMDD}}_AF_{{qid}}_{{hash}}.xml"
+        )
+
+    return sorted(matching_files)
 
 
 def _synthetic_files() -> list[Path]:
