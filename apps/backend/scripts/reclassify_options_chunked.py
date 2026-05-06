@@ -104,9 +104,7 @@ def main() -> None:
 
     for account in accounts:
         with Session(engine) as session:
-            trades = _load_strategy_trades(
-                session, account.household_id, account.account_id, from_date, to_date
-            )
+            trades = _load_strategy_trades(session, account.household_id, account.account_id, from_date, to_date)
         logger.info(
             "Account %s — loaded %d trades; running in-memory grouper…",
             account.account_id,
