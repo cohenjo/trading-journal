@@ -6,7 +6,7 @@ import argparse
 import calendar
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import json
 import os
@@ -26,6 +26,7 @@ DEFAULT_FROM = date(2025, 1, 1)
 DEFAULT_CHUNK_MONTHS = 1
 DEFAULT_CHUNK_SLEEP_SECONDS = 45
 STATE_FILE = Path(".flex_backfill_state.json")
+FAILURES_FILE = Path(".flex_backfill_failures.json")
 
 
 @dataclass(frozen=True)
@@ -225,6 +226,7 @@ def mark_chunk_complete(account_key: str, window: BackfillWindow, state_file: Pa
 def main(argv: Iterable[str] | None = None) -> int:
     """Run a synchronous Flex options backfill and print reconciliation totals."""
 
+    run_started_at = datetime.now(timezone.utc)
     args = parse_args(argv)
     try:
         start, end = requested_range(args)
@@ -285,7 +287,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     combined_sync: dict[str, int] = {"trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
     last_metrics: dict[str, object] = {"accounts": [], "row_count": 0}
-    failed_chunks: list[tuple[BackfillWindow, Exception]] = []
+    failed_chunks: list[tuple[BackfillWindow, Exception, datetime]] = []
 
     for idx, window in enumerate(pending):
         try:
@@ -360,7 +362,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 f"[backfill {window.label}] ❌ FAILED: {type(exc).__name__}: {exc}",
                 file=sys.stderr,
             )
-            failed_chunks.append((window, exc))
+            failed_chunks.append((window, exc, datetime.now(timezone.utc)))
             if not args.continue_on_error:
                 # Default behavior: abort on first failure
                 raise
@@ -407,16 +409,56 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
 
     # Phase A.2: Report failed chunks and exit with proper code
+    run_finished_at = datetime.now(timezone.utc)
+
+    # Write or delete the persistent failure log
+    if not args.dry_run:
+        if args.continue_on_error and failed_chunks:
+            # Write failure log
+            command_args = list(argv) if argv else sys.argv[1:]
+            failure_data = {
+                "account_key": account_key,
+                "run_started_at": run_started_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "run_finished_at": run_finished_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                "command_args": command_args,
+                "failed_chunks": [
+                    {
+                        "chunk_key": window.chunk_key,
+                        "window_start": window.start.isoformat(),
+                        "window_end": window.end.isoformat(),
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "failed_at": failed_at.isoformat(timespec="seconds").replace("+00:00", "Z"),
+                    }
+                    for window, exc, failed_at in failed_chunks
+                ],
+            }
+            FAILURES_FILE.write_text(json.dumps(failure_data, indent=2))
+        elif FAILURES_FILE.exists():
+            # Clean up old failure log if this run succeeded
+            FAILURES_FILE.unlink()
+
     if failed_chunks:
         print("\n" + "=" * 80, file=sys.stderr)
         print(f"❌ {len(failed_chunks)} chunk(s) FAILED:", file=sys.stderr)
-        for window, exc in failed_chunks:
+        for window, exc, _ in failed_chunks:
             print(f"  • {window.chunk_key}: {type(exc).__name__}: {exc}", file=sys.stderr)
         print("=" * 80, file=sys.stderr)
-        print(
-            "\nRun with --no-resume to retry failed chunks, or manually fix issues and resume.",
-            file=sys.stderr,
-        )
+        if not args.dry_run:
+            print(f"Failure detail written to {FAILURES_FILE}", file=sys.stderr)
+            print("", file=sys.stderr)
+            print(
+                "To retry failed chunks: re-run the same command "
+                "(resume will skip succeeded chunks and retry only the failures).",
+                file=sys.stderr,
+            )
+            print(f"To inspect: cat {FAILURES_FILE} | jq .", file=sys.stderr)
+        else:
+            print(
+                "\nRun with --no-resume to retry failed chunks, or manually fix issues and resume.",
+                file=sys.stderr,
+            )
+        print("=" * 80, file=sys.stderr)
         return 1  # Exit code 1 to keep CI honest
 
     return 0

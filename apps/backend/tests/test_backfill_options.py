@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from scripts import backfill_options
 from app.worker.handlers.options_sync import run_flex_options_sync
@@ -471,6 +474,11 @@ def test_continue_on_error_skips_failed_chunk(monkeypatch: Any, tmp_path: Path, 
     session = InMemoryOptionsSession()
     monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
 
+    # Mock handler functions that would otherwise call DB operations
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
     # Run 3-month backfill with --continue-on-error
     argv = ["--start", "2025-01-01", "--end", "2025-03-31", "--chunk-months", "1", "--continue-on-error", "--synthetic"]
 
@@ -527,6 +535,11 @@ def test_default_aborts_on_first_failure(monkeypatch: Any, tmp_path: Path) -> No
     monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
 
+    # Mock post-processing handler functions at backfill_options level
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
     # Run WITHOUT --continue-on-error
     with pytest.raises(FlexProbeError):
         backfill_main(["--start", "2024-01-01", "--end", "2024-03-31", "--chunk-months", "1", "--synthetic"])
@@ -568,6 +581,11 @@ def test_continue_on_error_does_not_swallow_keyboard_interrupt(monkeypatch: Any,
     monkeypatch.setattr(options_sync, "_fetch_flex_options_paths", mock_fetch)
     monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
+
+    # Mock post-processing handler functions at backfill_options level
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
 
     # Run with --continue-on-error
     with pytest.raises(KeyboardInterrupt):
@@ -611,6 +629,11 @@ def test_resume_from_chunk_skips_n_pending_chunks(monkeypatch: Any, tmp_path: Pa
     monkeypatch.setattr(options_sync, "_fetch_flex_options_paths", mock_fetch)
     monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
+
+    # Mock post-processing handler functions at backfill_options level
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
 
     exit_code = backfill_main(
         [
@@ -667,6 +690,11 @@ def test_resume_from_chunk_combines_with_no_resume(monkeypatch: Any, tmp_path: P
     monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
 
+    # Mock post-processing handler functions at backfill_options level
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
     exit_code = backfill_main(
         [
             "--start",
@@ -715,6 +743,11 @@ def test_resume_from_chunk_overshoots(monkeypatch: Any, tmp_path: Path, capsys: 
     monkeypatch.setattr(options_sync, "_fetch_flex_options_paths", mock_fetch)
     monkeypatch.setattr(options_sync, "run_flex_options_sync", mock_run)
     monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
+
+    # Mock post-processing handler functions at backfill_options level
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
 
     exit_code = backfill_main(
         [
@@ -768,6 +801,11 @@ def test_failed_chunk_does_not_mark_complete(monkeypatch: Any, tmp_path: Path) -
     session = InMemoryOptionsSession()
     monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
 
+    # Mock handler functions that would otherwise call DB operations
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
     # Run 3-month backfill with --continue-on-error
     argv = ["--start", "2025-01-01", "--end", "2025-03-31", "--chunk-months", "1", "--continue-on-error", "--synthetic"]
 
@@ -785,3 +823,126 @@ def test_failed_chunk_does_not_mark_complete(monkeypatch: Any, tmp_path: Path) -
 
     # Chunk 2 must NOT be present
     assert "2025-02-01:2025-02-28" not in completed_keys, "Failed chunk 2 MUST NOT be marked complete (resume contract)"
+
+
+def test_failures_file_written_on_continue_on_error(monkeypatch: Any, tmp_path: Path) -> None:
+    """Persistent failure log: --continue-on-error writes .flex_backfill_failures.json."""
+    from scripts.flex_probe import FlexProbeError
+
+    call_count = [0]
+
+    def mock_fetch(**kwargs: Any) -> list[Path]:
+        call_count[0] += 1
+        month = kwargs["from_date"].month
+
+        if call_count[0] == 2:  # Second chunk (February) fails
+            raise FlexProbeError("SendRequest failed for trades: 1001 throttle persists after 8 retries")
+
+        # Success: return synthetic XML
+        xml_path = tmp_path / f"synthetic_{month}.xml"
+        xml_path.write_text(
+            '<?xml version="1.0"?><FlexQueryResponse><FlexStatements>'
+            '<FlexStatement accountId="U1234567"><TradeConfirms /><CashTransactions />'
+            "<OpenPositions /><OptionEAE /></FlexStatement></FlexStatements></FlexQueryResponse>"
+        )
+        return [xml_path]
+
+    monkeypatch.setattr(backfill_options, "_fetch_flex_options_paths", mock_fetch)
+    state_file = tmp_path / "state.json"
+    failures_file = tmp_path / "failures.json"
+    monkeypatch.setattr(backfill_options, "STATE_FILE", state_file)
+    monkeypatch.setattr(backfill_options, "FAILURES_FILE", failures_file)
+
+    # Mock Session and handlers
+    session = InMemoryOptionsSession()
+    monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
+    # Run 3-month backfill with --continue-on-error
+    argv = ["--start", "2025-01-01", "--end", "2025-03-31", "--chunk-months", "1", "--continue-on-error", "--synthetic"]
+    exit_code = backfill_options.main(argv)
+
+    # Verify exit code is 1 (failures occurred)
+    assert exit_code == 1
+
+    # Verify failures file exists
+    assert failures_file.exists(), "Failures file should exist after run with failures"
+
+    # Verify JSON schema
+    failures_data = json.loads(failures_file.read_text())
+    assert failures_data["account_key"] == "_all"
+    assert "run_started_at" in failures_data
+    assert "run_finished_at" in failures_data
+    assert failures_data["command_args"] == argv
+    assert len(failures_data["failed_chunks"]) == 1
+
+    # Verify failed chunk detail
+    failed_chunk = failures_data["failed_chunks"][0]
+    assert failed_chunk["chunk_key"] == "2025-02-01:2025-02-28"
+    assert failed_chunk["window_start"] == "2025-02-01"
+    assert failed_chunk["window_end"] == "2025-02-28"
+    assert failed_chunk["error_type"] == "FlexProbeError"
+    assert "1001 throttle" in failed_chunk["error_message"]
+    assert "failed_at" in failed_chunk
+
+
+def test_failures_file_deleted_when_all_succeed(monkeypatch: Any, tmp_path: Path) -> None:
+    """Persistent failure log: file deleted when all chunks succeed."""
+
+    def mock_fetch(**kwargs: Any) -> list[Path]:
+        # All chunks succeed
+        month = kwargs["from_date"].month
+        xml_path = tmp_path / f"synthetic_{month}.xml"
+        xml_path.write_text(
+            '<?xml version="1.0"?><FlexQueryResponse><FlexStatements>'
+            '<FlexStatement accountId="U1234567"><TradeConfirms /><CashTransactions />'
+            "<OpenPositions /><OptionEAE /></FlexStatement></FlexStatements></FlexQueryResponse>"
+        )
+        return [xml_path]
+
+    monkeypatch.setattr(backfill_options, "_fetch_flex_options_paths", mock_fetch)
+    state_file = tmp_path / "state.json"
+    failures_file = tmp_path / "failures.json"
+    monkeypatch.setattr(backfill_options, "STATE_FILE", state_file)
+    monkeypatch.setattr(backfill_options, "FAILURES_FILE", failures_file)
+
+    # Seed the failures file from a prior run
+    failures_file.write_text(
+        json.dumps(
+            {
+                "account_key": "_all",
+                "run_started_at": "2026-05-05T12:00:00Z",
+                "run_finished_at": "2026-05-05T12:30:00Z",
+                "command_args": ["--start", "2025-01-01", "--end", "2025-01-31"],
+                "failed_chunks": [
+                    {
+                        "chunk_key": "2025-01-01:2025-01-31",
+                        "window_start": "2025-01-01",
+                        "window_end": "2025-01-31",
+                        "error_type": "FlexProbeError",
+                        "error_message": "Previous failure",
+                        "failed_at": "2026-05-05T12:15:00Z",
+                    }
+                ],
+            }
+        )
+    )
+
+    # Mock Session and handlers
+    session = InMemoryOptionsSession()
+    monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
+    # Run backfill - all chunks succeed
+    argv = ["--start", "2025-01-01", "--end", "2025-02-28", "--chunk-months", "1", "--synthetic"]
+    exit_code = backfill_options.main(argv)
+
+    # Verify exit code is 0 (all succeeded)
+    assert exit_code == 0
+
+    # Verify failures file is deleted
+    assert not failures_file.exists(), "Failures file should be deleted when all chunks succeed"
