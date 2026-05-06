@@ -48,3 +48,35 @@
 **Merge:** PR #164 rebased on #165 (E2E fixes), CI green, merged (commit 0ab20ec). First in the household bootstrap merge stack.
 
 **Operational Blocker:** Stale Vercel env vars post key-rotation remain Jony's responsibility; backend contract is solid.
+
+## 2026-05-06: Transport-Level Retry for IBKR Flex API — Branch squad/options-flex-backfill-resilience
+
+**Context:** 7-month options backfill crashed on the FIRST chunk during SSL handshake before application-level retry could engage. `ConnectionResetError: [Errno 54] Connection reset by peer` at `requests.get` in `flex_probe.py:114` — existing code handled IBKR app error 1001 (throttle) but had no transport-layer resilience.
+
+**Implementation:** Added `_get_with_retries()` helper that wraps `requests.get` with exponential backoff (5s→80s, ±20% jitter) across 5 attempts. Retries on:
+- `requests.ConnectionError` (TCP reset, DNS fail, connection refused)
+- `requests.Timeout` (slow handshake/response)
+- `requests.exceptions.SSLError` (TLS negotiation failure)
+- HTTP 500/502/503/504 (IBKR edge/WAF issues)
+
+Does NOT retry on HTTP 4xx (auth/client errors — retrying makes it worse). Applied to both `request_xml()` and `get_statement()`. Made retry parameters tunable via env vars: `FLEX_TRANSPORT_MAX_ATTEMPTS` (default 5), `FLEX_TRANSPORT_INITIAL_BACKOFF` (default 5.0s).
+
+**Testing:** Added 5 tests to `tests/test_flex_send_request.py`:
+1. Transport retry succeeds after transient failures (2 ConnectionErrors → success)
+2. Transport retry exhaustion (persistent ConnectionError → FlexProbeError)
+3. 5xx retry (2x 503 → success)
+4. 4xx no-retry (401 → immediate fail)
+5. SSL error retry (SSLError → success)
+
+All 11 tests pass. All 12 backfill tests pass. Ruff linting clean.
+
+**Architecture Decision:** Two-layer retry model — transport-level (5s→80s, TCP/TLS/5xx) + application-level (60s→600s, IBKR 1001 throttle). Separate layers because failure classes are orthogonal: edge/network blips vs. IBKR backend statement generation queue. Transport retries make chunk self-healing; existing checkpoint resume logic unchanged.
+
+**Key Files:**
+- `apps/backend/scripts/flex_probe.py` — `_get_with_retries()` helper, updated `request_xml()` and `get_statement()`
+- `apps/backend/tests/test_flex_send_request.py` — 5 new transport retry tests
+- `apps/backend/scripts/backfill_options.py` — added comment near `mark_chunk_complete()` clarifying checkpoint contract
+
+**Sleep Injection Pattern:** Sleep parameter threaded through `send_flex_request()` → `request_xml()` → `_get_with_retries()` so tests can mock time.sleep and assert backoff sequences. Existing tests updated to accept `**kwargs` on mock `request_xml()`.
+
+**Next Steps for Jony:** Re-run the backfill: `uv run python scripts/backfill_options.py --start 2024-06-01 --end 2024-12-31 ...`

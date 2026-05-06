@@ -58,7 +58,7 @@
 
 ### 2026-04-30 — YOLO Direct-Apply Round: PR #90 Review + TJ-005 Migration Strategy Verdict
 
-**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)  
+**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
 **Work:** Conducted detailed code review of McManus baseline schema work (PR #90). Identified 3 findings: tradingaccounttype enum, missing columns, FK coverage. Submitted APPROVE verdict. All findings addressed in subsequent commit 5a8367e.
 
 **TJ-005 verdict:** Documented that Phase 1 schema work must use Supabase SQL migrations, not Alembic versions, per design §4.3. Blocking verdict recorded; dependency chain clarified (TJ-003→TJ-005→TJ-006→TJ-007).
@@ -118,7 +118,7 @@
 
 ### 2026-05-02 — E2E Testing Strategy Design
 
-**Requested by:** Jony Vesterman Cohen  
+**Requested by:** Jony Vesterman Cohen
 **Work:** Designed end-to-end automated testing strategy for the trading-journal app. Evaluated 3 test environment options; recommended hybrid (dev Supabase for CI + local for dev iteration). Production gets read-only smoke only.
 
 **Key Decisions:**
@@ -137,3 +137,5 @@
 **Decision file:** `.squad/decisions/inbox/keaton-e2e-testing-strategy.md`
 
 📌 **Team update (2026-05-05T18:32:37Z):** E2E testing strategy and TJ-019/TJ-020 frontend Supabase-only compute architecture decisions merged into shared decisions. Reskill pass extracted e2e-walkthrough-patterns skill from walkthrough assertions pattern. — Scribe (wind-down)
+
+📌 Team update (2026-05-06): Transport retry pattern for external HTTP APIs — two-tier strategy (short backoff for network hiccups, long backoff for app throttle). Useful for any external API integration. See decisions.md entry from 2026-05-06. — decided by Hockney

@@ -2632,6 +2632,89 @@ When migrating a feature from in-memory mock or file storage (CSV/XLSX) to a rea
 
 
 
+
+---
+
+# Decision: Two-Tier Retry for External HTTP APIs
+
+**Date:** 2026-05-06
+**Author:** Hockney (Backend Dev)
+**Context:** IBKR Flex API transport failures
+
+## Summary
+
+IBKR Flex API calls now use a two-tier retry strategy:
+1. **Transport-level retries** — fast exponential backoff (5s→80s) for TCP/TLS/5xx errors
+2. **Application-level retries** — slow exponential backoff (60s→600s) for IBKR 1001 throttle
+
+These layers are separate because the failure classes are orthogonal.
+
+## Rationale
+
+A 7-month options backfill crashed on the FIRST chunk when `requests.get` raised `ConnectionResetError` during SSL handshake. Existing retry logic handled IBKR's 1001 "statement could not be generated" error (60s+ backoff) but had no protection against transport-layer failures.
+
+Transport issues (TCP reset, DNS, TLS handshake, edge 5xx) are brief network/WAF hiccups that resolve in seconds. IBKR 1001 errors are backend statement generation queue capacity issues that require minutes of backoff. Mixing these in one retry loop would either waste time waiting too long for network blips or retry too aggressively on 1001 and get throttled harder.
+
+## Implementation
+
+Added `_get_with_retries()` helper in `scripts/flex_probe.py`:
+- Wraps `requests.get` with 5 attempts, exponential backoff (5s base, 2x multiplier, ±20% jitter)
+- Retries on `ConnectionError`, `Timeout`, `SSLError`, HTTP 500/502/503/504
+- Does NOT retry on 4xx (auth/client errors)
+- Applied to both `request_xml()` (SendRequest endpoint) and `get_statement()` (GetStatement polling)
+
+Existing `send_flex_request()` logic for 1001 retries remains unchanged at 60s+ scale.
+
+## Impact on Team
+
+- **Frontend:** None — this is backend-only plumbing
+- **Other backend code:** Any script calling IBKR Flex API benefits automatically
+- **Testing:** New transport tests added to `test_flex_send_request.py` — 11/11 passing
+- **Observability:** Every retry logs to stderr with attempt number, exception class, and wait time
+
+## Configuration
+
+Tunable via environment variables:
+```bash
+FLEX_TRANSPORT_MAX_ATTEMPTS=5          # default: 5
+FLEX_TRANSPORT_INITIAL_BACKOFF=5.0     # default: 5.0 seconds
+```
+
+Conservative defaults protect against brief edge hiccups without burning excessive time.
+
+## Pattern for Reuse
+
+When calling any external HTTP API that might have both transport issues (network/edge) and application-level throttling:
+1. Wrap `requests.get` with short-backoff retry on transport errors (ConnectionError, Timeout, SSLError, 5xx)
+2. Wrap the HTTP call with long-backoff retry on app-specific throttle/rate-limit errors
+3. Keep the layers separate and observable
+
+Do NOT mix transport and app retries in one loop — the backoff scales are fundamentally different.
+
+## Testing Pattern
+
+Sleep injection: thread a `sleep` parameter through the call stack so tests can mock `time.sleep` and assert backoff sequences. Existing application-level tests already used this pattern — extended to transport layer.
+
+## Files Modified
+
+- `apps/backend/scripts/flex_probe.py` — `_get_with_retries()` helper, `request_xml()`, `get_statement()`
+- `apps/backend/tests/test_flex_send_request.py` — 5 new transport retry tests
+- `apps/backend/scripts/backfill_options.py` — comment clarifying checkpoint contract
+
+## Next Steps
+
+If we add other external APIs (e.g., broker sync for Schwab, E*TRADE), apply the same two-tier pattern.
+
+---
+
+### 2026-05-06T11:14:41+03:00: User directive — work account takes priority
+**By:** Yossi (via Copilot)
+**What:** Work account (`jocohe_microsoft` / jocohe@microsoft.com) is the default GitHub identity on this machine. Personal account (`cohenjo` / jony.cohenjo@gmail.com) is the exception — used only for `cohenjo/*` repos like this one. Never globally default to personal.
+**Why:** User explicitly stated "work is more important than personal repos" — preserving work-first auth ergonomics matters more than convenience on personal repos.
+**Implication for tooling advice:** Recommend per-repo overrides (local `git config user.email`, SSH host aliases like `github.com-personal`) rather than `gh auth switch` as a global default. Personal repos opt-in via clone URL or local config; work flows are never disrupted.
+
+---
+
 ## 2026-04-30: YOLO Round 2 — Supabase Branching vs 2-Project Model
 
 **By:** Keaton (Lead)
