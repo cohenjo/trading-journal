@@ -228,7 +228,7 @@ def parse_trade_confirm(attrs: dict[str, str], fallback_date: date | None = None
         source_trade_id=_required_any(attrs, ("tradeID", "transactionID")),
         source_transaction_id=_optional_text(attrs.get("transactionID")),
         source_exec_id=_optional_text(attrs.get("ibExecID")),
-        event_type=_event_type_from_open_close(attrs.get("openCloseIndicator")),
+        event_type=_event_type_from_trade_attrs(attrs),
         side=side,
         trade_time=trade_time,
         trade_date=_date_attr(attrs, ("tradeDate", "dateTime"), fallback=trade_time.date()),
@@ -747,6 +747,34 @@ def _event_type_from_open_close(value: str | None) -> str:
     if normalized in {"c", "close"}:
         return "close"
     return "adjustment"
+
+
+def _event_type_from_trade_attrs(attrs: dict[str, str]) -> str:
+    """Derive event_type from trade attributes with notes/PnL fallback.
+
+    When ``openCloseIndicator`` is absent (common in Activity Statement ``Trades``
+    sections that omit that field), falls back to IBKR lifecycle note codes and
+    then to realized-PnL sign:
+
+    1. ``openCloseIndicator`` O/C → "open" / "close"
+    2. notes ``Ep`` → "expire", ``Ex`` → "exercise", ``A`` → "assign"
+    3. ``fifoPnlRealized`` != 0 → "close"  (PnL can only be realized on a close)
+    4. default → "open"
+    """
+    oci = _event_type_from_open_close(attrs.get("openCloseIndicator"))
+    if oci != "adjustment":
+        return oci
+    notes = _notes_codes(attrs.get("notes"))
+    if "ep" in notes:
+        return "expire"
+    if "ex" in notes:
+        return "exercise"
+    if "a" in notes:
+        return "assign"
+    realized_pnl = _optional_decimal(attrs, "fifoPnlRealized")
+    if realized_pnl is not None and realized_pnl != Decimal("0"):
+        return "close"
+    return "open"
 
 
 def _event_type_from_lifecycle(value: str | None) -> str:

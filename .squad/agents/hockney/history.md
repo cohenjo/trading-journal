@@ -450,3 +450,18 @@ Ran the actual production backfill using 4 manually-exported Activity Flex XML f
 **Key insight:** Python stdout buffering delayed log output during the run, but DB monitoring confirmed steady data ingestion. No failures file generated — all 4 yearly chunks parsed and committed successfully. The database now has complete options history 2022–2025, ready for daily incremental sync to handle 2026-01-01 onward.
 
 📌 Team update (2026-05-06): Flex backfill resilience shipped — 4 rounds completed (Phase A session/CLI flags + failure log + --xml-dir mode + production run 2022–2025). Keaton's pre-merge review in flight.
+
+📌 Team update (2026-07-02): Lifecycle classifier fix shipped — Trade Lifecycle Timeline and Roll Efficiency Donut charts were broken because the 2022–2025 IBKR backfill omitted `openCloseIndicator` from the Flex report template. This caused `_event_type_from_open_close(None)` to return `"adjustment"` for all trades, making the strategy grouper classify every trade as an ungrouped singleton with status "open" (3,562/3,562), and leaving `options_roll_events` completely empty.
+
+**Root cause:** IBKR Flex `Trades` section in backfill XML lacked `openCloseIndicator` attribute → "adjustment" event_type fallback → both `_is_open()` / `_is_close()` fail → no groups form → no rolls detected.
+
+**Fix:**
+1. `flex_parser.py`: New `_event_type_from_trade_attrs()` function infers event_type via: OCI → notes codes (Ep/Ex/A) → fifoPnlRealized != 0 → default "open"
+2. `options_grouping.py`: SQL CASE expressions in `_load_strategy_trades()` apply same inference to existing DB rows at reclassification time
+3. `scripts/reclassify_options.py`: One-shot runner for existing backfill data
+
+**Key learnings:**
+- IBKR `notes` field codes: `Ep` = Expired, `Ex` = Exercised, `A` = Assignment — use these before PnL inference
+- `realized_pnl != 0` is a reliable proxy for "closing trade" in standard FIFO accounting
+- `"P"` notes code was found ~50/50 buy/sell split — meaning unconfirmed, NOT used in inference
+- Reclassification needs both `compute_options_strategy_groups` AND `compute_options_monthly_metrics` re-run to fix donut chart counts
