@@ -47,6 +47,10 @@ htmlcov/
 # Logs
 *.log
 
+# Backfill operational state
+.flex_backfill_state.json
+.flex_backfill_failures.json
+
 # OS
 .DS_Store
 Thumbs.db
