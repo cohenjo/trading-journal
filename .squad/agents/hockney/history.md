@@ -465,3 +465,5 @@ Ran the actual production backfill using 4 manually-exported Activity Flex XML f
 - `realized_pnl != 0` is a reliable proxy for "closing trade" in standard FIFO accounting
 - `"P"` notes code was found ~50/50 buy/sell split — meaning unconfirmed, NOT used in inference
 - Reclassification needs both `compute_options_strategy_groups` AND `compute_options_monthly_metrics` re-run to fix donut chart counts
+
+📌 Team update (2026-05-07): McManus's lifecycle/roll canonical spec now authoritative. Two latent bugs identified: (1) `_status()` misclassifies rolls as "open" — needs net-quantity fix; (2) `classify_roll()` uses wrong field (`realized_pnl` vs. `net_cash_flow`). Fixes documented in `.squad/decisions.md`.

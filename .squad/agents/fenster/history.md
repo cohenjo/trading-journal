@@ -92,3 +92,5 @@ chart.addSeries(LineSeries,      { priceScaleId: 'right', priceFormat: { type: '
 **Testing dual axes:** The lightweight-charts mock (in `src/test/setup.ts`) exposes `vi.mocked(createChart).mock.calls` — assert `calls[n][1].leftPriceScale.visible === true` to verify dual-axis config without needing DOM introspection.
 
 Reusable pattern documented in `.squad/skills/dual-axis-chart/SKILL.md`.
+
+📌 Team update (2026-05-07): Dual-axis chart skill now in `.squad/skills/dual-axis-chart/SKILL.md`. Reusable pattern for any two-metric charts (cash flow vs. P&L, volume vs. price, etc.). FE charts now rendering both metrics independently.

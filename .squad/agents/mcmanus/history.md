@@ -8,6 +8,21 @@
 
 ## Learnings
 
+## 2026-05-06 — Options Lifecycle & Roll Classification Spec
+
+**Requested by:** Jony Vesterman Cohen  
+**Work:** Authored canonical spec for options position lifecycle states and roll classification rules, filed at `.squad/decisions/inbox/mcmanus-lifecycle-roll-spec.md`.
+
+**Root cause of "all positions show open" bug:** `_status()` in `strategy_grouper.py` checks whether every open leg has a corresponding close trade in the group. In a `roll_chain`, both the original open AND the rolled-to open are in `opens`; the rolled-to leg is still live, so `all(has_close)` fails → always returns `"open"`. Fix: compute net quantity per contract key and return `"open"` only if net quantity > 0.
+
+**Root cause of empty donut:** `classify_roll()` in `roll_detector.py` uses `realized_pnl` (FIFO accounting P&L) not `net_cash_flow` (cash collected from the roll pair). These differ — `realized_pnl` reflects cost basis math, not roll credit/debit. The spec mandates using `net_cash_flow` of the (close + open) pair for roll classification.
+
+**Key domain decisions in spec:**
+- "rolled" is NOT a lifecycle state; it is a property (group has roll_events). State is still open/closed/assigned/expired/exercised.
+- Roll categories for donut: `positive/negative/neutral` (maps to credit > $25 / debit < -$25 / within ±$25) based on `net_cash_flow` of pair, not realized P&L.
+- Secondary roll tags (strike_improvement, extension_only, defensive_roll) go into `options_roll_events.metadata` — no schema change.
+- `StrategyStatus` Literal needs `"exercised"` and `"mixed"` added to match FE types.
+
 ## 2026-04-30 — TJ-006: Schema layering and initial tables
 
 **Requested by:** Jony Vesterman Cohen (Ralph YOLO mode)
@@ -107,3 +122,5 @@ PR #90 opened and ready for review.
 **Citations:** `.squad/decisions/inbox/mcmanus-continue-on-error-data-integrity.md`
 
 📌 Team update (2026-05-06): Data-integrity review for --continue-on-error completed. Findings: ⚠️ Safe-with-mitigations. Gaps create visible holes in metrics but no cascading corruption. Full review documented in decisions.md.
+
+📌 Team update (2026-05-07): Lifecycle/roll canonical spec merged to `.squad/decisions.md` and is now the authoritative guide for Hockney's backend implementation. Spec identified two critical bugs in current code; fixes are gated on Hockney's availability.
