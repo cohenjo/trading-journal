@@ -150,3 +150,5 @@ completed = list(state.get("_all", []))  # List, not dict
 - **caplog for warning assertions:** `caplog.at_level(logging.WARNING)` + iterate `caplog.records` is the clean pattern for asserting log warnings. Better than mocking logger calls.
 
 **Commit:** 3f0a678
+
+📌 Team update (2026-05-06): Phase A regression tests written + fixed (9/9 passing). --xml-dir tests shipped (11/11 passing). 444 total tests now passing (+40 net). All test work for backfill resilience initiative complete.

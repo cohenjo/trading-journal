@@ -105,3 +105,5 @@ PR #90 opened and ready for review.
 - Documented operational checklist (5 steps: detect, retry, recompute, validate, cleanup).
 
 **Citations:** `.squad/decisions/inbox/mcmanus-continue-on-error-data-integrity.md`
+
+📌 Team update (2026-05-06): Data-integrity review for --continue-on-error completed. Findings: ⚠️ Safe-with-mitigations. Gaps create visible holes in metrics but no cascading corruption. Full review documented in decisions.md.

@@ -56,6 +56,26 @@
 - Updated issue #58 title, posted blocking verdict, documented TJ-003→TJ-005→TJ-006→TJ-007 dependency chain
 - Hockney stays assigned; must pair with McManus post TJ-003; decision filed to inbox
 
+### 2026-05-06 — Merge Review: IBKR Flex Backfill Resilience Branch
+
+**Requested by:** Jony Vesterman Cohen
+**Branch:** `squad/options-flex-backfill-resilience` (12 commits, HEAD 3ccca71)
+**Verdict:** 🔍 APPROVE WITH FOLLOW-UPS
+
+**Work:** Final pre-merge architectural gate review of the entire IBKR Flex backfill resilience initiative. Reviewed two-tier API retry (`flex_probe.py`), session-lifetime decoupling (critical bug fix), `--continue-on-error`/`--resume-from-chunk` flags, persistent failure log, and `--xml-dir` mode. Verified 49 tests pass, 9 decision inbox notes consistent, env vars documented.
+
+**Findings:**
+1. ✅ Architecture sound — three-mode dispatch clean, session decoupling correct, failure semantics preserve fail-loud for daily sync
+2. ⚠️ Committed test artifact `.flex_backfill_failures.json` (tracked in git despite gitignore) — cosmetic, needs `git rm --cached`
+3. ⚠️ Final metrics recompute runs unconditionally even with failed chunks — known limitation per McManus review, not a blocker
+4. ⚠️ `datetime.utcnow()` deprecation warning in `flex_probe.py:311` — pre-existing, low priority
+
+**Key Insight:** When decoupling session lifetimes from network I/O in pooler-managed DB environments, the cleanest pattern is: fetch → open session → write → close. Never hold a session across slow external calls.
+
+**Decision filed:** `.squad/decisions/inbox/keaton-merge-review.md`
+
+---
+
 ### 2026-04-30 — YOLO Direct-Apply Round: PR #90 Review + TJ-005 Migration Strategy Verdict
 
 **Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
@@ -174,3 +194,5 @@ See `.squad/decisions/inbox/keaton-flex-backfill-strategy.md` for full 3-tier an
 📌 Team update (2026-05-06): Transport retry pattern for external HTTP APIs — two-tier strategy (short backoff for network hiccups, long backoff for app throttle). Useful for any external API integration. See decisions.md entry from 2026-05-06. — decided by Hockney
 
 📌 **Team update (2026-05-06T11:35:28Z):** Two-tier API retry pattern extracted as reusable skill in `.squad/skills/two-tier-api-retry/SKILL.md`. Implements transport-tier short backoff (5s–80s for TCP/TLS) + application-tier long backoff (60s–600s for backend throttle). First applied to IBKR Flex 1001 error. Available for adoption by other teams. — Hockney
+
+📌 Team update (2026-05-06): Architectural review gate for Flex backfill resilience PRs active. Phase A, failure log, --xml-dir, and test coverage awaiting review before main merge. ~12–15 commits staged.

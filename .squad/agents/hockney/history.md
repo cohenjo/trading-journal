@@ -1,9 +1,4 @@
-- Runtime dependency on PR #85 (auth.users table), not build-time
-
-**Branch:** `squad/70-backend-jwt-validation`
-**PR:** Closes #70
-
-## Learnings
+## LearningsLearnings
 
 ### 2026-05-01: Backend Endpoint Disposition Audit (TJ-006)
 
@@ -41,15 +36,8 @@
 
 📌 Team update (2026-05-02T09:03:04Z): Household provisioning (PR #142) — trigger chain caveat. trg_households_add_creator (existing) already inserts household_members owner row; don't re-insert in upstream `handle_new_user_household()` or backfill (causes constraint violations). Document trigger ownership: each trigger owns one side effect, never duplicate. — Coordinator
 
-## 2026-05-03: Household Bootstrap RPC + View + Backfill Landed — PR #164
 
-**Deliverables from 2026-05-03 morning:** Migration `20260503090000_household_bootstrap_rpc.sql` added `account_type` column, `ensure_household(p_account_type)` RPC (SECURITY DEFINER, idempotent), and `v_my_active_household` view (SECURITY INVOKER). Backfill ran cleanly (0 rows affected — all users already had households post-trigger).
-
-**Merge:** PR #164 rebased on #165 (E2E fixes), CI green, merged (commit 0ab20ec). First in the household bootstrap merge stack.
-
-**Operational Blocker:** Stale Vercel env vars post key-rotation remain Jony's responsibility; backend contract is solid.
-
-## 2026-05-06: Transport-Level Retry for IBKR Flex API — Branch squad/options-flex-backfill-resilience
+## 2026-05-06: Transport-Level Retry for IBKR Flex API — Branch squad/options-flex-backfill-resilience2026-05-06: Transport-Level Retry for IBKR Flex API — Branch squad/options-flex-backfill-resilience
 
 **Context:** 7-month options backfill crashed on the FIRST chunk during SSL handshake before application-level retry could engage. `ConnectionResetError: [Errno 54] Connection reset by peer` at `requests.get` in `flex_probe.py:114` — existing code handled IBKR app error 1001 (throttle) but had no transport-layer resilience.
 
@@ -81,7 +69,8 @@ All 11 tests pass. All 12 backfill tests pass. Ruff linting clean.
 
 **Next Steps for Jony:** Re-run the backfill: `uv run python scripts/backfill_options.py --start 2024-06-01 --end 2024-12-31 ...`
 
-## 2026-05-06: Application-Level Retry Budget Expansion — Branch squad/options-flex-backfill-resilience
+
+## 2026-05-06: Application-Level Retry Budget Expansion — Branch squad/options-flex-backfill-resilience2026-05-06: Application-Level Retry Budget Expansion — Branch squad/options-flex-backfill-resilience
 
 **Context:** Transport-layer retry fix (earlier today) succeeded — SSL reset no longer kills backfills. But application-level 1001 ("statement could not be generated") persisted across all 3 attempts (total ~3.5 min) for query_id `1496910`. IBKR's real-world 1001 behavior: commonly persists 15 minutes to several hours, typically clears overnight. Previous budget (3 attempts, 60→120→240s, ~7 min worst-case) was too tight for stuck backend jobs.
 
@@ -111,7 +100,8 @@ All 33 tests pass (15 flex, 12 backfill, 6 options_sync). Ruff linting clean.
 
 **Recommendation to Jony:** Try the backfill again. Worst-case 1001 patience is now 25 min (up from 7 min). If 1001 still persists, wait overnight (IBKR backend reset) or re-save the Flex query in Account Management as documented in the error message.
 
-## Learnings
+
+## LearningsLearnings
 
 ### 2026-05-06: IBKR 1001 Real-World Behavior and Two-Tier Retry Timescales
 
@@ -123,7 +113,8 @@ All 33 tests pass (15 flex, 12 backfill, 6 options_sync). Ruff linting clean.
 
 **Key insight:** When a backfill crashes mid-run (e.g., SSL reset before transport-layer retry existed), IBKR's backend often has a stuck in-flight request for that query_id. Subsequent runs hit persistent 1001 until the stuck job times out or overnight reset clears it. Retry budget must account for this — a 7-minute window is too short for real-world backend recovery.
 
-## 2026-05-06: Flex Query Backfill Architecture Investigation
+
+## 2026-05-06: Flex Query Backfill Architecture Investigation2026-05-06: Flex Query Backfill Architecture Investigation
 
 **Context:** 7-month backfill crashed on chunk 1 (2024-06-01..2024-06-30) with 1001 throttle persisting through 5 retries (57s→136s→254s→572s, 1019s total). Postgres SSL socket also disconnected during long wait. Investigated code architecture to understand query shape, retry math, resumability, Session lifetime, and splitting options.
 
@@ -268,7 +259,8 @@ All 33 tests pass (15 flex, 12 backfill, 6 options_sync). Ruff linting clean.
 - Env var query config: `flex_probe.py:157-164` (`query_configs_from_env`)
 - Environment constants: `flex_probe.py:35-38`, `.env.example:31-39`
 
-## 2026-05-06: Phase A Resilience Hardening — Branch squad/options-flex-backfill-resilience
+
+## 2026-05-06: Phase A Resilience Hardening — Branch squad/options-flex-backfill-resilience2026-05-06: Phase A Resilience Hardening — Branch squad/options-flex-backfill-resilience
 
 **Context:** Multi-month backfill runs hit two production failure modes: (1) Supabase pooler kills idle connections at ~10min while Flex API calls take ~17min worst-case, causing `SSL SYSCALL Socket is not connected` errors that masked the original FlexProbeError, and (2) one chunk failure aborted the entire multi-month run with no recovery mechanism.
 
@@ -323,7 +315,8 @@ Bumped `FLEX_APP_MAX_RETRIES` default from 5 to 8 attempts (giving ~50min retry 
 - `--resume-from-chunk 3`: manually skip first 3 pending chunks (recovery escape hatch)
 - Worst-case 1001 patience is now ~50min (up from ~25min)
 
-## Learnings
+
+## LearningsLearnings
 
 ### 2026-05-06: Session-Lifetime Bug Pattern in Long-Running Network Calls
 
@@ -429,3 +422,31 @@ uv run python scripts/backfill_options.py \
   --chunk-months 12 --account U2515365
 ```
 No IBKR_FLEX_TOKEN required, no network calls, no throttle risk, idempotent upserts.
+
+### 2026-05-06: Production backfill 2022–2025 (manual XML mode)
+
+Ran the actual production backfill using 4 manually-exported Activity Flex XML files (2022, 2023, 2024, 2025) covering full history for account U2515365. Backfill completed successfully in ~13 minutes with no failures.
+
+**Ingestion results:**
+- **3,249 options trades** (460 in 2022, 836 in 2023, 827 in 2024, 1,126 in 2025)
+- **5,246 cash events**
+- **147 positions** (113 new)
+- **3,562 strategy groups** (includes 313 existing 2026 trades)
+- **1,262 legs** (849 new)
+- **48 monthly metrics** (12 per year × 4 years)
+
+**Row count deltas:**
+- options_trades: 994 → 3,562 (+2,568 from backfill)
+- options_cash_events: 1,321 → 6,007 (+4,686)
+- options_positions: 34 → 147 (+113)
+- options_strategy_groups: 994 → 3,562 (+2,568)
+- options_legs: 413 → 1,262 (+849)
+- options_dashboard_monthly: 13 → 53 (+40)
+
+**Date coverage:** 2022-01-04 → 2026-05-01 (full historical backfill plus existing 2026 YTD data)
+
+**Reconciliation:** cash_flow=$373,826.26, realized_pnl=$218,955.64, variance_gap=$154,870.62
+
+**Key insight:** Python stdout buffering delayed log output during the run, but DB monitoring confirmed steady data ingestion. No failures file generated — all 4 yearly chunks parsed and committed successfully. The database now has complete options history 2022–2025, ready for daily incremental sync to handle 2026-01-01 onward.
+
+📌 Team update (2026-05-06): Flex backfill resilience shipped — 4 rounds completed (Phase A session/CLI flags + failure log + --xml-dir mode + production run 2022–2025). Keaton's pre-merge review in flight.

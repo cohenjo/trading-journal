@@ -1,3 +1,13 @@
+## 2026-05-03: Household Bootstrap RPC + View + Backfill Landed — PR #1642026-05-03: Household Bootstrap RPC + View + Backfill Landed — PR #164
+
+**Deliverables from 2026-05-03 morning:** Migration `20260503090000_household_bootstrap_rpc.sql` added `account_type` column, `ensure_household(p_account_type)` RPC (SECURITY DEFINER, idempotent), and `v_my_active_household` view (SECURITY INVOKER). Backfill ran cleanly (0 rows affected — all users already had households post-trigger).
+
+**Merge:** PR #164 rebased on #165 (E2E fixes), CI green, merged (commit 0ab20ec). First in the household bootstrap merge stack.
+
+**Operational Blocker:** Stale Vercel env vars post key-rotation remain Jony's responsibility; backend contract is solid.
+
+---
+
 
 
 ## Core Context Summary (Feb-Mar 2026)
