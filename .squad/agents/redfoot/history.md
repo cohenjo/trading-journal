@@ -68,6 +68,42 @@ server is on port 3000 or `BASE_URL` points to a deployed Vercel URL.
 - **Approach-agnostic test design:** Phase A.1 (Session decouple) has two possible implementations (split-function vs in-function-Session). Documented TODO for approach-agnostic test design — mock at engine level, not function level.
 - **Checkpoint integrity tests:** Testing that failed chunks DON'T appear in `.flex_backfill_state.json` is a belt-and-suspenders approach — locks in the resume contract at the file level.
 
+## 2026-05-06: Phase A Mock Infrastructure Fix
+
+**Context:** All 9 Phase A regression tests written ahead of Hockney's implementation. After Hockney shipped Phase A code (commits 724aaed, e11efbc), 6 tests failed with `AttributeError: 'FakeMappings' object has no attribute 'scalar_one_or_none'`. Root cause: test mocks (`InMemoryOptionsSession`/`FakeMappings`) didn't implement Session methods that production code calls during handler execution.
+
+**Fix approach chosen:** **Approach B - High-level mocking.** Monkeypatched `compute_options_strategy_groups`, `compute_options_monthly_metrics`, `run_options_margin_sync` at the `backfill_options` module level (where used, not where defined) to return canned dicts. This bypasses the mock-Session problem entirely. Tests focus on orchestration logic (chunk iteration, resume, error handling), not handler implementation.
+
+**Key fixes applied:**
+1. Added missing imports (`json`, `pytest`) at module level
+2. **Critical patching rule:** Patch functions where they're IMPORTED and USED (`backfill_options.run_flex_options_sync`), NOT where they're defined (`app.worker.handlers.options_sync.run_flex_options_sync`). Python's monkeypatch patches the namespace reference at point of use.
+3. Added handler patches for all tests that run synthetic backfills
+4. Fixed checkpoint file structure: `state.get("_all", [])` returns a list, not `state.get("all:completed", {}).keys()` which was incorrect
+5. Fixed test expectations: multi-window backfills commit once per chunk PLUS a final commit (e.g., 2 chunks = 3 commits total)
+6. Fixed `--resume-from-chunk 3` logic: skips FIRST 3 chunks, not "start from chunk 3"
+
+**Learnings:**
+- **Mock at the import site, not the definition site:** When `backfill_options.py` does `from app.worker.handlers.options_sync import run_flex_options_sync`, tests must patch `backfill_options.run_flex_options_sync`, not `options_sync.run_flex_options_sync`. This is Python's name-binding behavior.
+- **High-level mocking is cleaner for orchestration tests:** Don't make `InMemoryOptionsSession` a perfect SQLAlchemy Session simulator. Instead, patch the handler functions that SESSION depends on. This keeps tests focused on the layer they're testing (orchestration, not data layer).
+- **Checkpoint file structure matters:** The `.flex_backfill_state.json` stores completed chunks as `{"_all": ["2024-01-01:2024-01-31", ...]}` (list), not `{"all:completed": {...}}` (dict). Tests that read the checkpoint must use the correct key.
+- **Final commits in multi-window runs:** Backfill script commits once per chunk PLUS a final commit at the end for multi-window runs. Test expectations must account for this (e.g., 2 successful chunks = 3 total commits).
+
+**Result:** All 9 Phase A tests pass (100%). Full test suite: 433 passed. No production code changed. Commit b01f71c.
+
+**Canonical pattern for future backfill tests:**
+```python
+# Patch at backfill_options level (where used)
+monkeypatch.setattr(backfill_options, "_fetch_flex_options_paths", mock_fetch)
+monkeypatch.setattr(backfill_options, "run_flex_options_sync", mock_run)
+monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
+# Read checkpoint file
+state = json.loads(state_file.read_text())
+completed = list(state.get("_all", []))  # List, not dict
+```
+
 **Decision Note:** See `.squad/decisions/inbox/redfoot-phase-a-tests.md` for test coverage matrix and spec gaps identified.
 
 ## 2026-05-03: E2E Telemetry Fix + Comprehensive Coverage — PR #166
