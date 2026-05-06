@@ -153,3 +153,6 @@ yarn-error.log*
 .squad/decisions/inbox/
 .squad/sessions/
 .squad-workstream
+
+# worker runtime heartbeat (local artifact)
+apps/backend/worker_heartbeat
