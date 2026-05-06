@@ -111,6 +111,8 @@ def run_flex_options_sync(
     to_date: date | None = None,
     account_id: str | None = None,
     synthetic: bool | None = None,
+    poll_seconds: int = 10,
+    max_polls: int = 60,
 ) -> JobResult:
     """Parse selected Flex source files and upsert normalized option facts."""
 
@@ -118,7 +120,9 @@ def run_flex_options_sync(
     if not accounts:
         return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
 
-    paths = _select_flex_source(from_date=from_date, to_date=to_date, synthetic=synthetic)
+    paths = _select_flex_source(
+        from_date=from_date, to_date=to_date, synthetic=synthetic, poll_seconds=poll_seconds, max_polls=max_polls
+    )
     total_trades = 0
     total_cash = 0
     total_positions = 0
@@ -175,7 +179,14 @@ def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsA
     ]
 
 
-def _select_flex_source(*, from_date: date | None, to_date: date | None, synthetic: bool | None) -> list[Path]:
+def _select_flex_source(
+    *,
+    from_date: date | None,
+    to_date: date | None,
+    synthetic: bool | None,
+    poll_seconds: int = 10,
+    max_polls: int = 60,
+) -> list[Path]:
     token = os.getenv("IBKR_FLEX_TOKEN")
     source_env = os.getenv("OPTIONS_FLEX_SOURCE")
     source = source_env.lower() if source_env else None
@@ -194,6 +205,8 @@ def _select_flex_source(*, from_date: date | None, to_date: date | None, synthet
     args = parse_args([])
     args.from_date = from_date
     args.to_date = to_date
+    args.poll_seconds = poll_seconds
+    args.max_polls = max_polls
     configs = query_configs_from_env()
     token = os.environ["IBKR_FLEX_TOKEN"]
     return fetch_live_xml(configs, token, args)

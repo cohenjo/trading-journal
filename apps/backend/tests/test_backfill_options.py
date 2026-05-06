@@ -142,6 +142,98 @@ def test_yearly_windows_split_2021_to_2024() -> None:
     ]
 
 
+def test_monthly_windows_single_month() -> None:
+    """A single-month range produces exactly one window covering the full month."""
+
+    windows = backfill_options.monthly_windows(date(2024, 6, 1), date(2024, 6, 30))
+    assert len(windows) == 1
+    assert windows[0].start == date(2024, 6, 1)
+    assert windows[0].end == date(2024, 6, 30)
+
+
+def test_monthly_windows_partial_first_month() -> None:
+    """A range starting mid-month clips the first window to the start date."""
+
+    windows = backfill_options.monthly_windows(date(2024, 6, 15), date(2024, 8, 31))
+    assert windows[0].start == date(2024, 6, 15)
+    assert windows[0].end == date(2024, 6, 30)
+    assert windows[1].start == date(2024, 7, 1)
+    assert windows[-1].end == date(2024, 8, 31)
+
+
+def test_monthly_windows_quarterly_chunks() -> None:
+    """chunk_months=3 produces quarterly windows."""
+
+    windows = backfill_options.monthly_windows(date(2024, 1, 1), date(2024, 12, 31), chunk_months=3)
+    assert len(windows) == 4
+    assert windows[0] == backfill_options.BackfillWindow(date(2024, 1, 1), date(2024, 3, 31))
+    assert windows[3] == backfill_options.BackfillWindow(date(2024, 10, 1), date(2024, 12, 31))
+
+
+def test_build_windows_chunk_months_12_delegates_to_yearly() -> None:
+    """build_windows with chunk_months=12 produces the same output as yearly_windows."""
+
+    monthly = backfill_options.build_windows(date(2021, 1, 1), date(2024, 12, 31), chunk_months=12)
+    yearly = backfill_options.yearly_windows(date(2021, 1, 1), date(2024, 12, 31))
+    assert monthly == yearly
+
+
+def test_chunk_key_is_stable() -> None:
+    """BackfillWindow.chunk_key is deterministic and unique per window."""
+
+    w = backfill_options.BackfillWindow(date(2024, 6, 1), date(2024, 6, 30))
+    assert w.chunk_key == "2024-06-01:2024-06-30"
+
+
+def test_resume_skips_completed_chunks(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A second run skips already-committed chunks recorded in the state file."""
+
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(backfill_options, "STATE_FILE", state_file)
+
+    session = InMemoryOptionsSession()
+    monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
+    # First run: processes Jan + Feb (2 months)
+    backfill_options.main(["--synthetic", "--start", "2024-01-01", "--end", "2024-02-29", "--account", ACCOUNT_ID])
+    assert session.commits == 3  # 2 chunks + 1 final (multi-window)
+    first_state = backfill_options.load_completed_chunks(ACCOUNT_ID, state_file)
+    assert len(first_state) == 2
+
+    # Second run: both chunks already completed — nothing to commit
+    session2 = InMemoryOptionsSession()
+    monkeypatch.setattr(backfill_options, "Session", lambda _engine: session2)
+    backfill_options.main(["--synthetic", "--start", "2024-01-01", "--end", "2024-02-29", "--account", ACCOUNT_ID])
+    assert session2.commits == 0
+
+
+def test_no_resume_flag_reprocesses_all_chunks(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """--no-resume ignores the checkpoint file and reprocesses all chunks."""
+
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(backfill_options, "STATE_FILE", state_file)
+
+    # Seed the state file as if Jan was already completed.
+    backfill_options.mark_chunk_complete(
+        ACCOUNT_ID, backfill_options.BackfillWindow(date(2024, 1, 1), date(2024, 1, 31)), state_file
+    )
+
+    session = InMemoryOptionsSession()
+    monkeypatch.setattr(backfill_options, "Session", lambda _engine: session)
+    monkeypatch.setattr(backfill_options, "compute_options_strategy_groups", lambda *args, **kwargs: {"group_count": 0})
+    monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
+    monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
+
+    # --no-resume: Jan should be processed again
+    backfill_options.main(
+        ["--synthetic", "--start", "2024-01-01", "--end", "2024-01-31", "--account", ACCOUNT_ID, "--no-resume"]
+    )
+    assert session.commits == 1
+
+
 def test_multiyear_backfill_ingests_one_synthetic_trade_per_year(monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     """Chunked backfill processes each synthetic historical year once and commits each chunk."""
 
@@ -163,9 +255,12 @@ def test_multiyear_backfill_ingests_one_synthetic_trade_per_year(monkeypatch, ca
             ],
         },
     )
+    # Use tmp state file so test is hermetic.
+    monkeypatch.setattr(backfill_options, "mark_chunk_complete", lambda *_args, **_kwargs: None)
 
     exit_code = backfill_options.main(
-        ["--synthetic", "--start", "2021-01-01", "--end", "2024-12-31", "--account", ACCOUNT_ID]
+        # --chunk-months 12 preserves yearly chunking for this test.
+        ["--synthetic", "--start", "2021-01-01", "--end", "2024-12-31", "--account", ACCOUNT_ID, "--chunk-months", "12"]
     )
 
     assert exit_code == 0
@@ -190,7 +285,13 @@ def test_dry_run_rolls_back_each_chunk(monkeypatch) -> None:  # type: ignore[no-
     monkeypatch.setattr(backfill_options, "run_options_margin_sync", lambda *args, **kwargs: {"status": "succeeded"})
     monkeypatch.setattr(backfill_options, "compute_options_monthly_metrics", lambda *args, **kwargs: {"row_count": 0})
 
-    assert backfill_options.main(["--synthetic", "--year", "2021", "--dry-run", "--account", ACCOUNT_ID]) == 0
+    # --chunk-months 12 = 1 yearly chunk for --year 2021; rollbacks == 1 expected.
+    assert (
+        backfill_options.main(
+            ["--synthetic", "--year", "2021", "--dry-run", "--account", ACCOUNT_ID, "--chunk-months", "12"]
+        )
+        == 0
+    )
     assert session.commits == 0
     assert session.rollbacks == 1
 

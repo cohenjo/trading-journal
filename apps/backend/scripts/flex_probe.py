@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 import time
 from collections import defaultdict
@@ -63,8 +64,8 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--from", dest="from_date", type=parse_iso_date, help="Statement start date, YYYY-MM-DD")
     parser.add_argument("--to", dest="to_date", type=parse_iso_date, help="Statement end date, YYYY-MM-DD")
     parser.add_argument("--synthetic", action="store_true", help="Read tmp/flex/synthetic_*.xml instead of IBKR")
-    parser.add_argument("--poll-seconds", type=int, default=5, help="Seconds between GetStatement polls")
-    parser.add_argument("--max-polls", type=int, default=24, help="Maximum GetStatement polls before failing")
+    parser.add_argument("--poll-seconds", type=int, default=10, help="Seconds between GetStatement polls")
+    parser.add_argument("--max-polls", type=int, default=60, help="Maximum GetStatement polls before failing")
     return parser.parse_args(argv)
 
 
@@ -146,7 +147,7 @@ def send_flex_request(
     end: date | None,
     *,
     max_retries: int = 3,
-    initial_backoff_seconds: float = 15.0,
+    initial_backoff_seconds: float = 60.0,
     sleep: Any = time.sleep,
 ) -> str:
     """Call SendRequest and return the Flex reference code.
@@ -156,9 +157,11 @@ def send_flex_request(
     silently overrides the dates and the response is the wrong window.
     See IBKR Flex Web Service Guide.
 
-    Retries with exponential backoff on transient `1001` (statement could not
-    be generated) errors, which IBKR returns when the same Query ID is fired
-    too frequently. Other Flex error codes fail fast.
+    Retries with exponential backoff and jitter on transient `1001` (statement
+    could not be generated) errors.  IBKR returns 1001 when the same Query ID
+    is fired too frequently or a previous statement is still being generated on
+    their side.  Starting at 60 s gives IBKR's backend time to clear the
+    pending job before we retry.  Other Flex error codes fail fast.
     """
     params = {"t": token, "q": config.query_id, "v": "3"}
     if start and end:
@@ -173,13 +176,15 @@ def send_flex_request(
         root = request_xml(SEND_REQUEST_URL, params)
         error_code, error_message = flex_error(root)
         if error_code == "1001" and attempt < max_retries:
+            jitter = random.uniform(0.8, 1.2)
+            sleep_time = min(backoff * jitter, 600.0)
             print(
                 f"{config.name}: Flex 1001 throttle (attempt {attempt}/{max_retries}); "
-                f"sleeping {backoff:.0f}s before retry",
+                f"sleeping {sleep_time:.0f}s before retry",
                 file=sys.stderr,
             )
-            sleep(backoff)
-            backoff = min(backoff * 2, 480.0)
+            sleep(sleep_time)
+            backoff = min(backoff * 2, 600.0)
             last_message = error_message or ""
             continue
         if error_code and error_code != "0":

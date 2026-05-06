@@ -69,13 +69,14 @@ def test_send_flex_request_retries_on_1001_throttle(monkeypatch: pytest.MonkeyPa
         return responses.pop(0)
 
     sleeps: list[float] = []
-
     monkeypatch.setattr("scripts.flex_probe.request_xml", fake_request_xml)
+    # Pin jitter to 1.0 for deterministic assertion.
+    monkeypatch.setattr("scripts.flex_probe.random.uniform", lambda _lo, _hi: 1.0)
     config = QueryConfig(name="trades", query_id="1496910")
     ref = send_flex_request(config, "TOKEN", date(2024, 1, 1), date(2024, 12, 31), sleep=sleeps.append)
     assert ref == "OK"
     assert len(calls) == 2
-    assert sleeps == [15.0]
+    assert sleeps == [60.0]
 
 
 def test_send_flex_request_raises_after_exhausting_1001_retries(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,6 +89,7 @@ def test_send_flex_request_raises_after_exhausting_1001_retries(monkeypatch: pyt
         "</FlexStatementResponse>"
     )
     monkeypatch.setattr("scripts.flex_probe.request_xml", lambda *_a, **_k: failure)
+    monkeypatch.setattr("scripts.flex_probe.random.uniform", lambda _lo, _hi: 1.0)
     config = QueryConfig(name="trades", query_id="1496910")
     sleeps: list[float] = []
     with pytest.raises(Exception, match="1001"):
