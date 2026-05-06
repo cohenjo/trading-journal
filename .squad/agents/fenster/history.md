@@ -48,3 +48,47 @@ This is the **template for all 32 MOVE endpoints**. See decision note at:
 **Merge:** PR #163 rebased on top of #164 (Hockney's RPC), CI green, merged (commit 168171d). Conflict resolution during rebase preserved #163's household context logic.
 
 **Downstream:** PR #166 (Redfoot's comprehensive E2E coverage) depended on #163's household UI, merged successfully after rebase.
+
+## Dual Y-axis: Net Cash Flow vs Realized P&L (2026-05-06)
+
+**Issue:** `NetCashFlowVsRealizedChart` rendered cash-flow bars and cumulative P&L line on a single shared Y-axis, making the bars (±$1K-$10K) invisible against the cumulative line (~$219K).
+
+**Solution:** Dual Y-axis using lightweight-charts' built-in `leftPriceScale` / `rightPriceScale` with `priceScaleId` per series.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `apps/frontend/src/components/Options/net-cash-flow-vs-realized-chart.tsx` | Dual axes, currency formatter, axis-hint labels |
+| `apps/frontend/src/components/Options/__tests__/NetCashFlowVsRealizedChart.test.tsx` | +2 tests (dual-axes, tooltip hints) |
+
+### Implementation details
+
+- `leftPriceScale: { visible: true, borderColor: '#22c55e', scaleMargins: { top: 0.1, bottom: 0.1 } }` — emerald, matches cash-flow bars
+- `rightPriceScale: { borderColor: '#60a5fa', scaleMargins: ... }` — blue, matches P&L line
+- Cash-flow histogram: `priceScaleId: 'left'`
+- Realized P&L + tax lines: `priceScaleId: 'right'`
+- Currency format: `Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })` passed as `priceFormat: { type: 'custom', formatter }`
+- Legend buttons show axis direction hints: `← left axis` / `right axis →`
+- Tooltip shows `Cash Flow (←)` and `Cumulative P&L (→)`
+
+## Learnings
+
+**Charting library:** `lightweight-charts` v5 (canvas-based, not SVG).
+
+**Dual-axis pattern for this project:**
+```typescript
+// Chart creation
+createChart(el, {
+  leftPriceScale:  { visible: true, borderColor: SERIES_A_COLOR, scaleMargins: { top: 0.1, bottom: 0.1 } },
+  rightPriceScale: {                 borderColor: SERIES_B_COLOR, scaleMargins: { top: 0.1, bottom: 0.1 } },
+});
+
+// Series assignment
+chart.addSeries(HistogramSeries, { priceScaleId: 'left',  priceFormat: { type: 'custom', formatter: currencyFn, minMove: 1 } });
+chart.addSeries(LineSeries,      { priceScaleId: 'right', priceFormat: { type: 'custom', formatter: currencyFn, minMove: 1 } });
+```
+
+**Testing dual axes:** The lightweight-charts mock (in `src/test/setup.ts`) exposes `vi.mocked(createChart).mock.calls` — assert `calls[n][1].leftPriceScale.visible === true` to verify dual-axis config without needing DOM introspection.
+
+Reusable pattern documented in `.squad/skills/dual-axis-chart/SKILL.md`.
