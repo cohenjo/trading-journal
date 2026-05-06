@@ -86,6 +86,9 @@ export default function NetCashFlowVsRealizedChart({ months }: Props) {
   const computed = useMemo(() => buildOptionsChartSeries(months), [months]);
   const [hovered, setHovered] = useState<OptionsChartComputedPoint | null>(null);
 
+  const currencyFormatter = (price: number): string =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(price);
+
   useEffect(() => {
     if (!containerRef.current) return;
 
@@ -93,24 +96,38 @@ export default function NetCashFlowVsRealizedChart({ months }: Props) {
       height: 360,
       layout: { background: { type: ColorType.Solid, color: '#020617' }, textColor: '#cbd5e1' },
       grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
-      rightPriceScale: { borderColor: '#334155' },
+      // Left axis: monthly cash flow bars (emerald border matches bar colour)
+      leftPriceScale: {
+        visible: true,
+        borderColor: '#22c55e',
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
+      // Right axis: cumulative P&L and tax estimate (blue border matches line colour)
+      rightPriceScale: {
+        borderColor: '#60a5fa',
+        scaleMargins: { top: 0.1, bottom: 0.1 },
+      },
       timeScale: { borderColor: '#334155' },
     });
 
     const cashFlow = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: 'price', precision: 0, minMove: 1 },
-      priceScaleId: 'right',
+      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
+      // Left axis — monthly cash-flow values are orders of magnitude smaller than
+      // the cumulative P&L line, so they need their own independent scale.
+      priceScaleId: 'left',
     });
     const realized = chart.addSeries(LineSeries, {
       color: '#60a5fa',
       lineWidth: 3,
-      priceFormat: { type: 'price', precision: 0, minMove: 1 },
+      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
+      priceScaleId: 'right',
     });
     const tax = chart.addSeries(LineSeries, {
       color: '#94a3b8',
       lineWidth: 2,
       lineStyle: LineStyle.Dotted,
-      priceFormat: { type: 'price', precision: 0, minMove: 1 },
+      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
+      priceScaleId: 'right',
     });
 
     chartRef.current = chart;
@@ -185,17 +202,20 @@ export default function NetCashFlowVsRealizedChart({ months }: Props) {
         </div>
         <div className="flex flex-wrap gap-2 text-xs">
           {([
-            ['cashFlow', 'Monthly cash flow', 'bg-emerald-500'],
-            ['realized', 'Cumulative realized P&L', 'bg-blue-400'],
-            ['tax', '25% tax estimate', 'bg-slate-400'],
-          ] as const).map(([key, label, swatch]) => (
+            ['cashFlow', 'Monthly cash flow', 'bg-emerald-500', '← left axis'],
+            ['realized', 'Cumulative realized P&L', 'bg-blue-400', 'right axis →'],
+            ['tax', '25% tax estimate', 'bg-slate-400', 'right axis →'],
+          ] as const).map(([key, label, swatch, axisHint]) => (
             <button
               key={key}
               type="button"
+              aria-label={`${visibility[key] ? 'Hide' : 'Show'} ${label} (${axisHint})`}
               onClick={() => setVisibility((current) => ({ ...current, [key]: !current[key] }))}
               className={`rounded-full border px-3 py-1.5 ${visibility[key] ? 'border-slate-500 text-slate-100' : 'border-slate-800 text-slate-500'}`}
             >
-              <span className={`mr-2 inline-block h-2 w-2 rounded-full ${swatch}`} />{label}
+              <span className={`mr-2 inline-block h-2 w-2 rounded-full ${swatch}`} />
+              {label}
+              <span className="ml-1.5 opacity-50">{axisHint}</span>
             </button>
           ))}
         </div>
@@ -206,8 +226,14 @@ export default function NetCashFlowVsRealizedChart({ months }: Props) {
         {tooltip && (
           <div className="pointer-events-none absolute left-4 top-4 rounded-2xl border border-slate-700 bg-slate-950/95 p-3 text-xs shadow-xl" data-testid="options-chart-tooltip">
             <p className="font-semibold text-slate-100">{monthLabel(tooltip.time)}</p>
-            <p className="mt-1 text-emerald-300">Cash flow: {formatSignedUsd(tooltip.cashFlow)}</p>
-            <p className="text-blue-300">Realized P&amp;L: {formatSignedUsd(tooltip.cumulativeRealizedPnl)}</p>
+            <p className="mt-1 text-emerald-300">
+              <span className="text-slate-400">Cash Flow (←):</span>{' '}
+              {formatSignedUsd(tooltip.cashFlow)}
+            </p>
+            <p className="text-blue-300">
+              <span className="text-slate-400">Cumulative P&amp;L (→):</span>{' '}
+              {formatSignedUsd(tooltip.cumulativeRealizedPnl)}
+            </p>
             <p className="text-amber-200">Variance gap: {formatSignedUsd(tooltip.varianceGap)}</p>
           </div>
         )}
