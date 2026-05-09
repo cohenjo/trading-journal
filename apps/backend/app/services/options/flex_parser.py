@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 import logging
+import re
 from pathlib import Path
 from xml.etree import ElementTree
 from xml.etree.ElementTree import Element, ParseError
@@ -20,9 +21,14 @@ SECTION_ROW_NAMES = {
     "OpenPositions": "OpenPosition",
     "OptionEAE": "OptionEAE",
     "AccountInformation": "AccountInformation",
+    "ChangeInDividendAccruals": "ChangeInDividendAccrual",
+    "OpenDividendAccruals": "OpenDividendAccrual",
+    "FinancialInstrumentInformation": "SecurityInfo",
 }
 MONEY_ZERO = Decimal("0")
 ASSIGNMENT_TRANSACTION_TYPES = {"assignment", "exercise"}
+# CashTransaction types that route to dividend_payments instead of options_cash_events.
+DIVIDEND_CASH_TYPES: frozenset[str] = frozenset({"Dividends", "Payment In Lieu Of Dividends", "Withholding Tax"})
 # IBKR notes codes that appear on assignment/exercise legs.
 # The `notes` attribute is a semicolon-separated string, e.g. "A;C".
 NOTES_CODE_SEPARATOR = ";"
@@ -166,7 +172,134 @@ class FlexStockPosition(BaseModel):
     mark_price: Decimal | None = None
     market_value: Decimal | None = None  # positionValue
     unrealized_pnl: Decimal | None = None  # fifoPnlUnrealized
+    listing_exchange: str | None = None
+    cusip: str | None = None
+    isin: str | None = None
+    figi: str | None = None
+    security_id: str | None = None
+    security_id_type: str | None = None
     last_broker_sync_at: datetime
+    raw_payload: dict[str, str] = Field(default_factory=dict)
+
+
+class FlexBondPosition(BaseModel):
+    """Normalized BOND OpenPosition snapshot row from IBKR Flex XML.
+
+    Parsed from ``<OpenPosition assetCategory="BOND" .../>`` rows.
+    Coupon rate and maturity are parsed from the IBKR symbol string
+    (e.g. ``"AAPL 4 1/4 02/09/47"``) because Flex OpenPositions does
+    not expose them as discrete attributes.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    account_id: str
+    as_of_date: date
+    symbol: str
+    con_id: int | None = None
+    description: str | None = None
+    sub_category: str | None = None  # Corp, Govt, …
+    currency: str = "USD"
+    quantity: Decimal  # face-value position
+    mark_price: Decimal | None = None
+    market_value: Decimal | None = None
+    cost_basis_price: Decimal | None = None
+    cost_basis_total: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    accrued_interest: Decimal | None = None
+    # Identifiers
+    cusip: str | None = None
+    isin: str | None = None
+    figi: str | None = None
+    security_id: str | None = None
+    security_id_type: str | None = None
+    listing_exchange: str | None = None
+    issuer: str | None = None
+    # Parsed from symbol
+    coupon_rate: Decimal | None = None
+    maturity_date: date | None = None
+    last_broker_sync_at: datetime
+    raw_payload: dict[str, str] = Field(default_factory=dict)
+
+
+class FlexDividendPayment(BaseModel):
+    """Normalized dividend / withholding-tax CashTransaction row.
+
+    Routed from ``<CashTransaction type="Dividends" .../>`` and
+    ``<CashTransaction type="Payment In Lieu Of Dividends" .../>`` and
+    ``<CashTransaction type="Withholding Tax" .../>`` rows.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    account_id: str
+    source_transaction_id: str
+    symbol: str | None = None
+    con_id: int | None = None
+    description: str | None = None
+    currency: str = "USD"
+    date_time: datetime | None = None
+    report_date: date | None = None
+    settle_date: date | None = None
+    ex_date: date | None = None
+    amount: Decimal
+    type: str  # raw IBKR type string
+    dividend_type: str | None = None
+    trade_id: str | None = None
+    transaction_id: str | None = None
+    action_id: str | None = None
+    source_section: str = "CashTransactions"
+    raw_payload: dict[str, str] = Field(default_factory=dict)
+
+
+class FlexDividendAccrual(BaseModel):
+    """Normalized ChangeInDividendAccrual / OpenDividendAccrual row."""
+
+    model_config = ConfigDict(frozen=True)
+
+    account_id: str
+    symbol: str | None = None
+    con_id: int | None = None
+    description: str | None = None
+    currency: str = "USD"
+    ex_date: date | None = None
+    pay_date: date | None = None
+    accrual_date: date | None = None  # raw "date" attr from XML (renamed to avoid shadowing datetime.date)
+    quantity: Decimal | None = None
+    gross_rate: Decimal | None = None
+    gross_amount: Decimal | None = None
+    tax: Decimal | None = None
+    fee: Decimal | None = None
+    net_amount: Decimal | None = None
+    code: str | None = None
+    report_date: date | None = None
+    source_section: str  # 'change' or 'open'
+    fx_rate_to_base: Decimal | None = None
+    asset_category: str | None = None
+    raw_payload: dict[str, str] = Field(default_factory=dict)
+
+
+class FlexSecurityInfo(BaseModel):
+    """Normalized FinancialInstrumentInformation/SecurityInfo row."""
+
+    model_config = ConfigDict(frozen=True)
+
+    account_id: str
+    con_id: int
+    symbol: str | None = None
+    description: str | None = None
+    asset_category: str | None = None
+    sub_category: str | None = None
+    currency: str = "USD"
+    listing_exchange: str | None = None
+    cusip: str | None = None
+    isin: str | None = None
+    figi: str | None = None
+    security_id: str | None = None
+    security_id_type: str | None = None
+    issuer: str | None = None
+    maturity: date | None = None
+    issue_date: date | None = None
     raw_payload: dict[str, str] = Field(default_factory=dict)
 
 
@@ -179,6 +312,10 @@ class FlexParseResult(BaseModel):
     cash_transactions: list[FlexCashTransaction] = Field(default_factory=list)
     open_positions: list[FlexOpenPosition] = Field(default_factory=list)
     stock_positions: list[FlexStockPosition] = Field(default_factory=list)
+    bond_positions: list[FlexBondPosition] = Field(default_factory=list)
+    dividend_payments: list[FlexDividendPayment] = Field(default_factory=list)
+    dividend_accruals: list[FlexDividendAccrual] = Field(default_factory=list)
+    security_infos: list[FlexSecurityInfo] = Field(default_factory=list)
     option_eae: list[FlexTradeConfirm] = Field(default_factory=list)
     account_information: list[FlexAccountInformation] = Field(default_factory=list)
     section_counts: dict[str, int] = Field(default_factory=dict)
@@ -210,6 +347,10 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
     cash: list[FlexCashTransaction] = []
     positions: list[FlexOpenPosition] = []
     stock_positions: list[FlexStockPosition] = []
+    bond_positions: list[FlexBondPosition] = []
+    dividend_payments: list[FlexDividendPayment] = []
+    dividend_accruals: list[FlexDividendAccrual] = []
+    security_infos: list[FlexSecurityInfo] = []
     eae_rows: list[FlexTradeConfirm] = []
     account_info: list[FlexAccountInformation] = []
     assignment_eae_attrs: list[dict[str, str]] = []
@@ -235,16 +376,24 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
                 elif attrs.get("assetCategory") == "STK":
                     stock_trade_attrs.append(attrs)
             elif section_name == "CashTransactions":
-                cash.append(parse_cash_transaction(attrs))
+                ibkr_type = _optional_text(attrs.get("type")) or ""
+                if ibkr_type in DIVIDEND_CASH_TYPES:
+                    dp = parse_dividend_payment(attrs)
+                    if dp is not None:
+                        dividend_payments.append(dp)
+                else:
+                    cash.append(parse_cash_transaction(attrs))
             elif section_name == "OpenPositions":
                 if _is_option_contract_row(attrs):
                     positions.append(parse_open_position(attrs, statement_dates[1]))
                 elif attrs.get("assetCategory") == "STK" and attrs.get("putCall", "") == "":
-                    # STK open position — parse and collect; BOND/CASH rows are excluded
-                    # by the assetCategory check (only "STK" passes).
                     stk = parse_stock_open_position(attrs, statement_dates[1])
                     if stk is not None:
                         stock_positions.append(stk)
+                elif attrs.get("assetCategory") == "BOND":
+                    bond = parse_bond_open_position(attrs, statement_dates[1])
+                    if bond is not None:
+                        bond_positions.append(bond)
             elif section_name == "OptionEAE":
                 if _is_assignment_lifecycle_row(attrs):
                     assignment_eae_attrs.append(attrs)
@@ -252,12 +401,28 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
                     eae_rows.append(parse_option_eae(attrs, statement_dates[1]))
             elif section_name == "AccountInformation":
                 account_info.append(parse_account_information(attrs))
+            elif section_name == "ChangeInDividendAccruals":
+                accrual = parse_dividend_accrual(attrs, source_section="change")
+                if accrual is not None:
+                    dividend_accruals.append(accrual)
+            elif section_name == "OpenDividendAccruals":
+                accrual = parse_dividend_accrual(attrs, source_section="open")
+                if accrual is not None:
+                    dividend_accruals.append(accrual)
+            elif section_name == "FinancialInstrumentInformation":
+                sec = parse_security_info(attrs)
+                if sec is not None:
+                    security_infos.append(sec)
     cash.extend(_assignment_synthetic_cash_events(assignment_eae_attrs, option_trade_attrs, stock_trade_attrs, counts))
     return FlexParseResult(
         trades=trades,
         cash_transactions=cash,
         open_positions=positions,
         stock_positions=stock_positions,
+        bond_positions=bond_positions,
+        dividend_payments=dividend_payments,
+        dividend_accruals=dividend_accruals,
+        security_infos=security_infos,
         option_eae=eae_rows,
         account_information=account_info,
         section_counts=counts,
@@ -405,6 +570,12 @@ def parse_stock_open_position(attrs: dict[str, str], fallback_date: date | None 
         mark_price=_optional_decimal(attrs, "markPrice"),
         market_value=_optional_decimal(attrs, "positionValue"),
         unrealized_pnl=_optional_decimal(attrs, "fifoPnlUnrealized"),
+        listing_exchange=_optional_text(attrs.get("listingExchange")),
+        cusip=_optional_text(attrs.get("cusip")),
+        isin=_optional_text(attrs.get("isin")),
+        figi=_optional_text(attrs.get("figi")),
+        security_id=_optional_text(attrs.get("securityID")),
+        security_id_type=_optional_text(attrs.get("securityIDType")),
         last_broker_sync_at=sync_time,
         raw_payload=attrs,
     )
@@ -417,6 +588,287 @@ def parse_account_information(attrs: dict[str, str]) -> FlexAccountInformation:
         account_id=_required_any(attrs, ("accountId",)),
         as_of=_optional_datetime_attr(attrs, ("dateTime", "reportDate", "date")),
         currency=attrs.get("baseCurrency") or _currency(attrs),
+        raw_payload=attrs,
+    )
+
+
+def parse_bond_symbol(symbol: str) -> tuple[Decimal | None, date | None]:
+    """Parse an IBKR bond symbol into ``(coupon_rate, maturity_date)``.
+
+    IBKR bond symbols follow the pattern::
+
+        <TICKER> <COUPON> <MM/DD/YY[YY]> [<CUSIP_SUFFIX>]
+
+    where COUPON may be:
+
+    * Decimal: ``"4.05"``
+    * Integer: ``"4"``
+    * Mixed fraction: ``"4 1/4"`` (= 4.25)
+
+    Examples::
+
+        "AAPL 4 1/4 02/09/47"       → (Decimal("4.25"), date(2047, 2, 9))
+        "AMZN 4.05 08/22/47 5BJ4"   → (Decimal("4.05"), date(2047, 8, 22))
+        "AMZN 5.65 03/13/46"        → (Decimal("5.65"), date(2046, 3, 13))
+        "T 4 02/15/34"              → (Decimal("4"),    date(2034, 2, 15))
+
+    Returns:
+        ``(coupon_rate, maturity_date)`` — either element may be ``None`` if
+        the symbol does not match the expected format.
+    """
+    date_match = re.search(r"(\d{2})/(\d{2})/(\d{2,4})", symbol)
+    if not date_match:
+        return None, None
+
+    mm, dd, yy = int(date_match.group(1)), int(date_match.group(2)), int(date_match.group(3))
+    if yy < 100:
+        yy += 2000  # two-digit year → 20xx
+    try:
+        maturity = date(yy, mm, dd)
+    except ValueError:
+        logger.warning("Could not construct maturity date from bond symbol: %r", symbol)
+        maturity = None
+
+    # Extract coupon from the portion before the date, stripping the leading ticker.
+    before_date = symbol[: date_match.start()].strip()
+    tokens = before_date.split()
+    # tokens[0] is the ticker; tokens[1:] are the coupon components.
+    coupon_tokens = tokens[1:] if len(tokens) > 1 else []
+
+    coupon_rate: Decimal | None = None
+    if len(coupon_tokens) == 0:
+        pass
+    elif len(coupon_tokens) == 1:
+        token = coupon_tokens[0]
+        # Simple integer or decimal coupon: "4.05" or "4"
+        num_match = re.match(r"^(\d+\.?\d*)$", token)
+        if num_match:
+            try:
+                coupon_rate = Decimal(token)
+            except InvalidOperation:
+                pass
+        else:
+            # Fraction-only coupon: "3/4" → 0.75
+            frac_match = re.match(r"^(\d+)/(\d+)$", token)
+            if frac_match:
+                numerator = int(frac_match.group(1))
+                denominator = int(frac_match.group(2))
+                if denominator != 0:
+                    coupon_rate = Decimal(numerator) / Decimal(denominator)
+    elif len(coupon_tokens) >= 2:
+        # Possible mixed fraction: last token is fraction "1/4", second-last is integer.
+        frac_match = re.match(r"^(\d+)/(\d+)$", coupon_tokens[-1])
+        if frac_match:
+            numerator = int(frac_match.group(1))
+            denominator = int(frac_match.group(2))
+            int_match = re.match(r"^(\d+)$", coupon_tokens[-2])
+            if int_match and denominator != 0:
+                whole = int(int_match.group(1))
+                coupon_rate = Decimal(whole) + Decimal(numerator) / Decimal(denominator)
+            elif denominator != 0:
+                coupon_rate = Decimal(numerator) / Decimal(denominator)
+        else:
+            # Last token is a decimal/integer coupon
+            num_match = re.match(r"^(\d+\.?\d*)$", coupon_tokens[-1])
+            if num_match:
+                try:
+                    coupon_rate = Decimal(coupon_tokens[-1])
+                except InvalidOperation:
+                    pass
+
+    return coupon_rate, maturity
+
+
+def parse_bond_open_position(attrs: dict[str, str], fallback_date: date | None = None) -> FlexBondPosition | None:
+    """Normalize one BOND OpenPosition row into a bond snapshot model.
+
+    Args:
+        attrs: Raw XML attribute dict from an ``<OpenPosition assetCategory="BOND">`` row.
+        fallback_date: Statement end-date used when the row carries no dateTime.
+
+    Returns:
+        A ``FlexBondPosition`` instance, or ``None`` if the row cannot be parsed.
+    """
+    symbol = _optional_text(attrs.get("symbol")) or _optional_text(attrs.get("description"))
+    if not symbol:
+        logger.warning("Skipping BOND OpenPosition row with no symbol: %s", attrs)
+        return None
+
+    quantity_raw = _optional_decimal(attrs, "position")
+    if quantity_raw is None:
+        logger.warning("Skipping BOND OpenPosition row with no position quantity: symbol=%s", symbol)
+        return None
+
+    sync_time: datetime = _optional_datetime_attr(attrs, ("dateTime",)) or datetime.combine(
+        fallback_date or date.today(), datetime.min.time(), tzinfo=timezone.utc
+    )
+    as_of = _parse_date_value(attrs.get("reportDate")) or sync_time.date()
+
+    con_id_str = attrs.get("conid") or attrs.get("conId")
+    con_id: int | None = None
+    if con_id_str:
+        try:
+            con_id = int(con_id_str)
+        except ValueError:
+            pass
+
+    coupon_rate, maturity_date = parse_bond_symbol(symbol)
+
+    return FlexBondPosition(
+        account_id=_required_any(attrs, ("accountId",)),
+        as_of_date=as_of,
+        symbol=symbol,
+        con_id=con_id,
+        description=_optional_text(attrs.get("description")),
+        sub_category=_optional_text(attrs.get("subCategory")),
+        currency=_currency(attrs),
+        quantity=quantity_raw,
+        mark_price=_optional_decimal(attrs, "markPrice"),
+        market_value=_optional_decimal(attrs, "positionValue"),
+        cost_basis_price=_optional_decimal(attrs, "costBasisPrice"),
+        cost_basis_total=_optional_decimal(attrs, "costBasisMoney"),
+        unrealized_pnl=_optional_decimal(attrs, "fifoPnlUnrealized"),
+        accrued_interest=_optional_decimal(attrs, "accruedInterest"),
+        cusip=_optional_text(attrs.get("cusip")),
+        isin=_optional_text(attrs.get("isin")),
+        figi=_optional_text(attrs.get("figi")),
+        security_id=_optional_text(attrs.get("securityID")),
+        security_id_type=_optional_text(attrs.get("securityIDType")),
+        listing_exchange=_optional_text(attrs.get("listingExchange")),
+        issuer=_optional_text(attrs.get("issuer")),
+        coupon_rate=coupon_rate,
+        maturity_date=maturity_date,
+        last_broker_sync_at=sync_time,
+        raw_payload=attrs,
+    )
+
+
+def parse_dividend_payment(attrs: dict[str, str]) -> FlexDividendPayment | None:
+    """Normalize one dividend / withholding-tax CashTransaction row.
+
+    Returns ``None`` if no transactionID is available (row cannot be made idempotent).
+    """
+    source_id = _optional_text(attrs.get("transactionID")) or _optional_text(attrs.get("tradeID"))
+    if not source_id:
+        logger.warning("Skipping dividend CashTransaction with no transactionID: %s", attrs)
+        return None
+
+    event_time = _optional_datetime_attr(attrs, ("dateTime",))
+    report_date = _parse_date_value(attrs.get("reportDate"))
+    settle_date = _parse_date_value(attrs.get("settleDate"))
+    ex_date = _parse_date_value(attrs.get("exDate"))
+
+    con_id_str = attrs.get("conid") or attrs.get("conId")
+    con_id: int | None = None
+    if con_id_str:
+        try:
+            con_id = int(con_id_str)
+        except ValueError:
+            pass
+
+    return FlexDividendPayment(
+        account_id=_required_any(attrs, ("accountId",)),
+        source_transaction_id=source_id,
+        symbol=_optional_text(attrs.get("symbol")),
+        con_id=con_id,
+        description=_optional_text(attrs.get("description")),
+        currency=_currency(attrs),
+        date_time=event_time,
+        report_date=report_date,
+        settle_date=settle_date,
+        ex_date=ex_date,
+        amount=_first_decimal(attrs, ("amount", "netCash")),
+        type=_optional_text(attrs.get("type")) or "",
+        dividend_type=_optional_text(attrs.get("dividendType")),
+        trade_id=_optional_text(attrs.get("tradeID")),
+        transaction_id=_optional_text(attrs.get("transactionID")),
+        action_id=_optional_text(attrs.get("actionID")),
+        source_section="CashTransactions",
+        raw_payload=attrs,
+    )
+
+
+def parse_dividend_accrual(attrs: dict[str, str], *, source_section: str) -> FlexDividendAccrual | None:
+    """Normalize one ChangeInDividendAccrual or OpenDividendAccrual row.
+
+    Args:
+        attrs: Raw XML attribute dict.
+        source_section: ``'change'`` for ChangeInDividendAccruals;
+            ``'open'`` for OpenDividendAccruals.
+
+    Returns:
+        Normalized row, or ``None`` if account_id is missing.
+    """
+    account_id = _optional_text(attrs.get("accountId"))
+    if not account_id:
+        return None
+
+    con_id_str = attrs.get("conid") or attrs.get("conId")
+    con_id: int | None = None
+    if con_id_str:
+        try:
+            con_id = int(con_id_str)
+        except ValueError:
+            pass
+
+    return FlexDividendAccrual(
+        account_id=account_id,
+        symbol=_optional_text(attrs.get("symbol")),
+        con_id=con_id,
+        description=_optional_text(attrs.get("description")),
+        currency=_currency(attrs),
+        ex_date=_parse_date_value(attrs.get("exDate")),
+        pay_date=_parse_date_value(attrs.get("payDate")),
+        accrual_date=_parse_date_value(attrs.get("date")),
+        quantity=_optional_decimal(attrs, "quantity"),
+        gross_rate=_optional_decimal(attrs, "grossRate"),
+        gross_amount=_optional_decimal(attrs, "grossAmount"),
+        tax=_optional_decimal(attrs, "tax"),
+        fee=_optional_decimal(attrs, "fee"),
+        net_amount=_optional_decimal(attrs, "netAmount"),
+        code=_optional_text(attrs.get("code")),
+        report_date=_parse_date_value(attrs.get("reportDate")),
+        source_section=source_section,
+        fx_rate_to_base=_optional_decimal(attrs, "fxRateToBase"),
+        asset_category=_optional_text(attrs.get("assetCategory")),
+        raw_payload=attrs,
+    )
+
+
+def parse_security_info(attrs: dict[str, str]) -> FlexSecurityInfo | None:
+    """Normalize one FinancialInstrumentInformation/SecurityInfo row.
+
+    Returns ``None`` if con_id is missing or invalid.
+    """
+    con_id_str = attrs.get("conid") or attrs.get("conId")
+    if not con_id_str:
+        logger.warning("Skipping SecurityInfo row with no conid: %s", attrs)
+        return None
+    try:
+        con_id = int(con_id_str)
+    except ValueError:
+        logger.warning("Skipping SecurityInfo row with non-integer conid: %r", con_id_str)
+        return None
+
+    account_id = _optional_text(attrs.get("accountId")) or ""
+
+    return FlexSecurityInfo(
+        account_id=account_id,
+        con_id=con_id,
+        symbol=_optional_text(attrs.get("symbol")),
+        description=_optional_text(attrs.get("description")),
+        asset_category=_optional_text(attrs.get("assetCategory")),
+        sub_category=_optional_text(attrs.get("subCategory")),
+        currency=_currency(attrs),
+        listing_exchange=_optional_text(attrs.get("listingExchange")),
+        cusip=_optional_text(attrs.get("cusip")),
+        isin=_optional_text(attrs.get("isin")),
+        figi=_optional_text(attrs.get("figi")),
+        security_id=_optional_text(attrs.get("securityID")),
+        security_id_type=_optional_text(attrs.get("securityIDType")),
+        issuer=_optional_text(attrs.get("issuer")),
+        maturity=_parse_date_value(attrs.get("maturity")),
+        issue_date=_parse_date_value(attrs.get("issueDate")),
         raw_payload=attrs,
     )
 

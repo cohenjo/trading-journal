@@ -367,3 +367,40 @@ New `apps/backend/app/api/positions.py`:
 4. Once Jony enables portal changes: add bonds + CashTransactions type-routing
 
 **Learnings pattern:** CashTransactions type-field routing is the fallback when structured fields are missing. Applies to any broker that sends `type` strings without `assetCategory` metadata.
+
+---
+
+## 2026-05-10 — Flex Pipeline v2: BOND + Dividends Schema & Parser
+
+**Scope:** Implement schema + parser support for IBKR Activity Flex BOND positions, dividend payments, dividend accruals, and security reference table. Unblocks 4 missing target tables from mcmanus-flex-revalidation-2026-05-10.
+
+**Migrations (5):**
+- `20260510000100` — extend stock_positions with 8 identifier/cost columns
+- `20260510000200` — extend bond_holdings with Flex snapshot columns; DROP NOT NULL on issuer/coupon fields
+- `20260510000300` — NEW dividend_payments table (idempotency via UNIQUE source_transaction_id)
+- `20260510000400` — NEW dividend_accruals table (window-delete idempotency)
+- `20260510000500` — NEW security_reference table (con_id PK, FII precedence upsert)
+
+**Parser changes (flex_parser.py):**
+- Added `import re` (oversight — parse_bond_symbol used re without importing it)
+- New models: FlexBondPosition, FlexDividendPayment, FlexDividendAccrual, FlexSecurityInfo
+- Extended FlexStockPosition + FlexParseResult
+- New parse functions: parse_bond_symbol(), parse_bond_open_position(), parse_dividend_payment(), parse_dividend_accrual(), parse_security_info()
+- parse_bond_symbol() handles: mixed fractions (4 1/4 → 4.25), fraction-only (3/4 → 0.75), CUSIP suffix, 2/4-digit years
+
+**Sync handler changes (options_sync.py):**
+- New: _sync_bond_positions(), _upsert_dividend_payment(), _sync_dividend_accruals(), _upsert_security_reference(), _seed_security_reference_from_positions()
+- Updated: _scope_result(), _filter_result_by_dates(), _parsed_account_ids(), _ingest_account(), run_flex_options_sync()
+- Fixed: missing `params = {}` initializer in _load_accounts() (broken during refactor)
+
+**Tests:** Created tests/test_flex_bond_parser.py — 21 pass, 4 skip. Full suite: 500 passed (was 479).
+
+**Learnings:**
+- Never name a Pydantic field the same as a builtin/imported type. `date: date | None` in FlexDividendAccrual caused `TypeError: unsupported operand type(s) for |: 'NoneType' and 'NoneType'` — Pydantic's annotation evaluator resolves `date` to the field itself (None) in the class namespace. Renamed to `accrual_date`.
+- When copying a multi-arg function signature, always verify all call sites match the new signature. `_sync_bond_positions()` had 5 args but was called with 4.
+- `from __future__ import annotations` defers annotation evaluation to import time, not class definition time. Field name shadowing only surfaces when Pydantic evaluates the string annotation — not at class body parse time.
+
+**Pending:**
+- supabase db push --include-all on production
+- Phase 3 backfill script (backfill_flex_v2.py)
+- IBKR portal fixes needed: accruedInterest field in BOND rows, FinancialInstrumentInformation section

@@ -19,9 +19,13 @@ from sqlmodel import Session
 
 from app.dal.database import engine
 from app.services.options.flex_parser import (
+    FlexBondPosition,
     FlexCashTransaction,
+    FlexDividendAccrual,
+    FlexDividendPayment,
     FlexOpenPosition,
     FlexParseResult,
+    FlexSecurityInfo,
     FlexStockPosition,
     FlexTradeConfirm,
     OptionLegKey,
@@ -171,7 +175,15 @@ def run_flex_options_sync(
 
     accounts = _load_accounts(session, account_id=account_id)
     if not accounts:
-        return {"accounts": [], "trade_count": 0, "cash_event_count": 0, "position_count": 0, "leg_count": 0}
+        return {
+            "accounts": [],
+            "trade_count": 0,
+            "cash_event_count": 0,
+            "dividend_payment_count": 0,
+            "position_count": 0,
+            "bond_position_count": 0,
+            "leg_count": 0,
+        }
 
     if pre_fetched_paths is not None:
         paths = pre_fetched_paths
@@ -183,6 +195,8 @@ def run_flex_options_sync(
     total_cash = 0
     total_positions = 0
     total_stock_positions = 0
+    total_bond_positions = 0
+    total_dividends = 0
     summaries: list[dict[str, Any]] = []
     for account in accounts:
         parsed = parse_flex_files(paths, account.account_id)
@@ -196,18 +210,32 @@ def run_flex_options_sync(
             stk_count = _sync_stock_positions(
                 session, account.household_id, account.config_id, parsed_account_id, scoped
             )
+            bond_count = _sync_bond_positions(
+                session, account.household_id, account.config_id, parsed_account_id, scoped
+            )
             total_trades += counts["trade_count"]
             total_cash += counts["cash_event_count"]
             total_positions += counts["position_count"]
             total_stock_positions += stk_count
-            summaries.append({"account_id": parsed_account_id, **counts, "stock_position_count": stk_count})
+            total_bond_positions += bond_count
+            total_dividends += counts.get("dividend_payment_count", 0)
+            summaries.append(
+                {
+                    "account_id": parsed_account_id,
+                    **counts,
+                    "stock_position_count": stk_count,
+                    "bond_position_count": bond_count,
+                }
+            )
     total_legs = sum(int(summary.get("leg_count", 0)) for summary in summaries)
     return {
         "accounts": summaries,
         "trade_count": total_trades,
         "cash_event_count": total_cash,
+        "dividend_payment_count": total_dividends,
         "position_count": total_positions,
         "stock_position_count": total_stock_positions,
+        "bond_position_count": total_bond_positions,
         "leg_count": total_legs,
         "source_files": [str(path) for path in paths],
     }
@@ -274,12 +302,16 @@ def _sync_stock_positions(
                       household_id, account_id, ticker, quantity, cost_basis,
                       currency, as_of_date, source, con_id,
                       description, sub_category, mark_price, market_value,
-                      unrealized_pnl, last_broker_sync_at, raw_payload
+                      unrealized_pnl, last_broker_sync_at, raw_payload,
+                      cost_basis_total, listing_exchange, cusip, isin, figi,
+                      security_id, security_id_type
                     ) values (
                       :household_id, :account_id, :ticker, :quantity, :cost_basis,
                       :currency, :as_of_date, 'flex', :con_id,
                       :description, :sub_category, :mark_price, :market_value,
-                      :unrealized_pnl, :last_broker_sync_at, cast(:raw_payload as jsonb)
+                      :unrealized_pnl, :last_broker_sync_at, cast(:raw_payload as jsonb),
+                      :cost_basis_total, :listing_exchange, :cusip, :isin, :figi,
+                      :security_id, :security_id_type
                     )
                     """
                 ),
@@ -299,6 +331,13 @@ def _sync_stock_positions(
                     "unrealized_pnl": row.unrealized_pnl,
                     "last_broker_sync_at": row.last_broker_sync_at,
                     "raw_payload": _json(dict(row.raw_payload)),
+                    "cost_basis_total": row.cost_basis_total,
+                    "listing_exchange": row.listing_exchange,
+                    "cusip": row.cusip,
+                    "isin": row.isin,
+                    "figi": row.figi,
+                    "security_id": row.security_id,
+                    "security_id_type": row.security_id_type,
                 },
             )
             inserted += 1
@@ -309,6 +348,428 @@ def _sync_stock_positions(
         inserted,
     )
     return inserted
+
+
+def _sync_bond_positions(
+    session: Session,
+    household_id: str,
+    config_id: int | None,
+    parsed_account_id: str,
+    parsed: FlexParseResult,
+) -> int:
+    """Delete-then-insert BOND positions for all snapshot dates in the parsed result.
+
+    Uses the same idempotency pattern as ``_sync_stock_positions``.  The row
+    ``id`` (text PK inherited from the original bond_holdings design) is set to
+    ``flex_{account_id_str}_{con_id}_{as_of_date}`` to be deterministic and unique.
+
+    Args:
+        session: Active SQLAlchemy session (caller commits).
+        household_id: UUID string for the owning household.
+        config_id: trading_account_config.id (unused for id generation; kept for parity).
+        parsed_account_id: IBKR account string (e.g. ``"U2515365"``).
+        parsed: Full parse result; only ``parsed.bond_positions`` is consumed.
+
+    Returns:
+        Number of bond position rows inserted.
+    """
+    if not parsed.bond_positions:
+        return 0
+    if config_id is None:
+        logger.warning(
+            "Skipping bond position sync for account %s — no config_id resolved",
+            parsed_account_id,
+        )
+        return 0
+
+    by_date: dict[str, list[FlexBondPosition]] = {}
+    for bp in parsed.bond_positions:
+        key = bp.as_of_date.isoformat()
+        by_date.setdefault(key, []).append(bp)
+
+    inserted = 0
+    for as_of_date_str, rows in by_date.items():
+        session.execute(
+            text(
+                """
+                delete from public.bond_holdings
+                 where household_id = :household_id
+                   and account_id   = :account_id_str
+                   and as_of_date   = :as_of_date
+                   and source       = 'flex'
+                """
+            ),
+            {
+                "household_id": household_id,
+                "account_id_str": parsed_account_id,
+                "as_of_date": as_of_date_str,
+            },
+        )
+        for row in rows:
+            row_id = f"flex_{parsed_account_id}_{row.con_id}_{as_of_date_str}"
+            session.execute(
+                text(
+                    """
+                    insert into public.bond_holdings (
+                      household_id, id, account_id, as_of_date, source,
+                      ticker, con_id, description, sub_category, currency,
+                      face_value, maturity_date, coupon_rate,
+                      mark_price, market_value, cost_basis_price, cost_basis_total,
+                      unrealized_pnl, accrued_interest,
+                      cusip, isin, figi, security_id, security_id_type,
+                      listing_exchange, issuer, raw_payload
+                    ) values (
+                      :household_id, :id, :account_id, :as_of_date, 'flex',
+                      :ticker, :con_id, :description, :sub_category, :currency,
+                      :face_value, :maturity_date, :coupon_rate,
+                      :mark_price, :market_value, :cost_basis_price, :cost_basis_total,
+                      :unrealized_pnl, :accrued_interest,
+                      :cusip, :isin, :figi, :security_id, :security_id_type,
+                      :listing_exchange, :issuer, cast(:raw_payload as jsonb)
+                    )
+                    on conflict (household_id, id) do update set
+                      as_of_date       = excluded.as_of_date,
+                      mark_price       = excluded.mark_price,
+                      market_value     = excluded.market_value,
+                      cost_basis_price = excluded.cost_basis_price,
+                      cost_basis_total = excluded.cost_basis_total,
+                      unrealized_pnl   = excluded.unrealized_pnl,
+                      accrued_interest = excluded.accrued_interest,
+                      raw_payload      = excluded.raw_payload,
+                      updated_at       = now()
+                    """
+                ),
+                {
+                    "household_id": household_id,
+                    "id": row_id,
+                    "account_id": parsed_account_id,
+                    "as_of_date": row.as_of_date,
+                    "ticker": row.symbol,
+                    "con_id": row.con_id,
+                    "description": row.description,
+                    "sub_category": row.sub_category,
+                    "currency": row.currency,
+                    "face_value": row.quantity,  # bond position = face value
+                    "maturity_date": row.maturity_date,
+                    "coupon_rate": row.coupon_rate,
+                    "mark_price": row.mark_price,
+                    "market_value": row.market_value,
+                    "cost_basis_price": row.cost_basis_price,
+                    "cost_basis_total": row.cost_basis_total,
+                    "unrealized_pnl": row.unrealized_pnl,
+                    "accrued_interest": row.accrued_interest,
+                    "cusip": row.cusip,
+                    "isin": row.isin,
+                    "figi": row.figi,
+                    "security_id": row.security_id,
+                    "security_id_type": row.security_id_type,
+                    "listing_exchange": row.listing_exchange,
+                    "issuer": row.issuer or "",
+                    "raw_payload": _json(dict(row.raw_payload)),
+                },
+            )
+            inserted += 1
+    logger.info(
+        "bond_holdings sync: account=%s as_of_dates=%s inserted=%d",
+        parsed_account_id,
+        list(by_date.keys()),
+        inserted,
+    )
+    return inserted
+
+
+def _upsert_dividend_payment(
+    session: Session,
+    account_id_str: str,
+    dividend: FlexDividendPayment,
+) -> None:
+    """Idempotent insert of a dividend / withholding-tax row into dividend_payments.
+
+    Uses the ``(account_id, source_transaction_id)`` unique constraint for
+    conflict resolution.  Tax amounts are stored verbatim — no derived math.
+    """
+    session.execute(
+        text(
+            """
+            insert into public.dividend_payments (
+              account_id, symbol, con_id, description, currency,
+              date_time, report_date, settle_date, ex_date,
+              amount, type, dividend_type,
+              trade_id, transaction_id, action_id,
+              source_section, source_transaction_id, raw_payload
+            ) values (
+              :account_id, :symbol, :con_id, :description, :currency,
+              :date_time, :report_date, :settle_date, :ex_date,
+              :amount, :type, :dividend_type,
+              :trade_id, :transaction_id, :action_id,
+              :source_section, :source_transaction_id, cast(:raw_payload as jsonb)
+            )
+            on conflict on constraint dividend_payments_idempotent
+            do update set
+              date_time    = excluded.date_time,
+              report_date  = excluded.report_date,
+              settle_date  = excluded.settle_date,
+              ex_date      = excluded.ex_date,
+              amount       = excluded.amount,
+              type         = excluded.type,
+              dividend_type = excluded.dividend_type,
+              raw_payload  = excluded.raw_payload
+            """
+        ),
+        {
+            "account_id": account_id_str,
+            "symbol": dividend.symbol,
+            "con_id": dividend.con_id,
+            "description": dividend.description,
+            "currency": dividend.currency,
+            "date_time": dividend.date_time,
+            "report_date": dividend.report_date,
+            "settle_date": dividend.settle_date,
+            "ex_date": dividend.ex_date,
+            "amount": dividend.amount,
+            "type": dividend.type,
+            "dividend_type": dividend.dividend_type,
+            "trade_id": dividend.trade_id,
+            "transaction_id": dividend.transaction_id,
+            "action_id": dividend.action_id,
+            "source_section": dividend.source_section,
+            "source_transaction_id": dividend.source_transaction_id,
+            "raw_payload": _json(dict(dividend.raw_payload)),
+        },
+    )
+
+
+def _sync_dividend_accruals(
+    session: Session,
+    account_id_str: str,
+    accruals: list[FlexDividendAccrual],
+    report_date: date | None,
+) -> int:
+    """Delete-then-insert dividend accruals for the given report_date window.
+
+    Accrual rows are keyed by ``(account_id, report_date, source_section)``
+    rather than by a transactionID (IBKR doesn't provide one for accruals).
+    The entire window is replaced on each sync to avoid stale duplicates.
+
+    Returns:
+        Number of rows inserted.
+    """
+    if not accruals:
+        return 0
+
+    # Collect all (report_date, source_section) pairs present in the batch.
+    windows: set[tuple[str | None, str]] = set()
+    for accrual in accruals:
+        rd = accrual.report_date.isoformat() if accrual.report_date else None
+        windows.add((rd, accrual.source_section))
+
+    for rd_str, source_section in windows:
+        if rd_str is None:
+            continue
+        session.execute(
+            text(
+                """
+                delete from public.dividend_accruals
+                 where account_id      = :account_id
+                   and report_date     = :report_date
+                   and source_section  = :source_section
+                """
+            ),
+            {
+                "account_id": account_id_str,
+                "report_date": rd_str,
+                "source_section": source_section,
+            },
+        )
+
+    for accrual in accruals:
+        session.execute(
+            text(
+                """
+                insert into public.dividend_accruals (
+                  account_id, symbol, con_id, description, currency,
+                  ex_date, pay_date, date, quantity,
+                  gross_rate, gross_amount, tax, fee, net_amount,
+                  code, report_date, source_section,
+                  fx_rate_to_base, asset_category, raw_payload
+                ) values (
+                  :account_id, :symbol, :con_id, :description, :currency,
+                  :ex_date, :pay_date, :date, :quantity,
+                  :gross_rate, :gross_amount, :tax, :fee, :net_amount,
+                  :code, :report_date, :source_section,
+                  :fx_rate_to_base, :asset_category, cast(:raw_payload as jsonb)
+                )
+                """
+            ),
+            {
+                "account_id": account_id_str,
+                "symbol": accrual.symbol,
+                "con_id": accrual.con_id,
+                "description": accrual.description,
+                "currency": accrual.currency,
+                "ex_date": accrual.ex_date,
+                "pay_date": accrual.pay_date,
+                "date": accrual.accrual_date,
+                "quantity": accrual.quantity,
+                "gross_rate": accrual.gross_rate,
+                "gross_amount": accrual.gross_amount,
+                "tax": accrual.tax,
+                "fee": accrual.fee,
+                "net_amount": accrual.net_amount,
+                "code": accrual.code,
+                "report_date": accrual.report_date,
+                "source_section": accrual.source_section,
+                "fx_rate_to_base": accrual.fx_rate_to_base,
+                "asset_category": accrual.asset_category,
+                "raw_payload": _json(dict(accrual.raw_payload)),
+            },
+        )
+    logger.info(
+        "dividend_accruals sync: account=%s inserted=%d",
+        account_id_str,
+        len(accruals),
+    )
+    return len(accruals)
+
+
+def _upsert_security_reference(
+    session: Session,
+    rows: list[FlexSecurityInfo],
+    *,
+    source: str,
+) -> int:
+    """Upsert security identifier rows into security_reference.
+
+    FII rows (``source='fii'``) take precedence over OpenPositions seeds
+    (``source='open_positions'``) because FII contains richer metadata.
+    Existing rows are only overwritten when the incoming source is 'fii'
+    or when the stored source is also 'open_positions'.
+
+    Returns:
+        Number of rows upserted.
+    """
+    if not rows:
+        return 0
+    upserted = 0
+    for row in rows:
+        session.execute(
+            text(
+                """
+                insert into public.security_reference (
+                  con_id, symbol, description, asset_category, sub_category,
+                  currency, listing_exchange, cusip, isin, figi,
+                  security_id, security_id_type, issuer,
+                  maturity, issue_date, raw_payload, source, last_seen_at
+                ) values (
+                  :con_id, :symbol, :description, :asset_category, :sub_category,
+                  :currency, :listing_exchange, :cusip, :isin, :figi,
+                  :security_id, :security_id_type, :issuer,
+                  :maturity, :issue_date, cast(:raw_payload as jsonb), :source, now()
+                )
+                on conflict (con_id) do update set
+                  symbol            = excluded.symbol,
+                  description       = coalesce(excluded.description, public.security_reference.description),
+                  asset_category    = coalesce(excluded.asset_category, public.security_reference.asset_category),
+                  sub_category      = coalesce(excluded.sub_category, public.security_reference.sub_category),
+                  listing_exchange  = coalesce(excluded.listing_exchange, public.security_reference.listing_exchange),
+                  cusip             = coalesce(excluded.cusip, public.security_reference.cusip),
+                  isin              = coalesce(excluded.isin, public.security_reference.isin),
+                  figi              = coalesce(excluded.figi, public.security_reference.figi),
+                  security_id       = coalesce(excluded.security_id, public.security_reference.security_id),
+                  security_id_type  = coalesce(excluded.security_id_type, public.security_reference.security_id_type),
+                  issuer            = coalesce(excluded.issuer, public.security_reference.issuer),
+                  maturity          = coalesce(excluded.maturity, public.security_reference.maturity),
+                  issue_date        = coalesce(excluded.issue_date, public.security_reference.issue_date),
+                  raw_payload       = case when :source = 'fii' then excluded.raw_payload
+                                          else public.security_reference.raw_payload end,
+                  source            = case when :source = 'fii' then 'fii'
+                                          else public.security_reference.source end,
+                  last_seen_at      = now()
+                where :source = 'fii' or public.security_reference.source = 'open_positions'
+                """
+            ),
+            {
+                "con_id": row.con_id,
+                "symbol": row.symbol,
+                "description": row.description,
+                "asset_category": row.asset_category,
+                "sub_category": row.sub_category,
+                "currency": row.currency,
+                "listing_exchange": row.listing_exchange,
+                "cusip": row.cusip,
+                "isin": row.isin,
+                "figi": row.figi,
+                "security_id": row.security_id,
+                "security_id_type": row.security_id_type,
+                "issuer": row.issuer,
+                "maturity": row.maturity,
+                "issue_date": row.issue_date,
+                "raw_payload": _json(dict(row.raw_payload)),
+                "source": source,
+            },
+        )
+        upserted += 1
+    logger.info("security_reference upsert: source=%s upserted=%d", source, upserted)
+    return upserted
+
+
+def _seed_security_reference_from_positions(
+    session: Session,
+    parsed: FlexParseResult,
+) -> None:
+    """Seed security_reference from OpenPositions STK and BOND identifier fields."""
+    from app.services.options.flex_parser import FlexSecurityInfo
+
+    infos: list[FlexSecurityInfo] = []
+    for sp in parsed.stock_positions:
+        if sp.con_id is None:
+            continue
+        infos.append(
+            FlexSecurityInfo(
+                account_id=sp.account_id,
+                con_id=sp.con_id,
+                symbol=sp.symbol,
+                description=sp.description,
+                asset_category="STK",
+                sub_category=sp.sub_category,
+                currency=sp.currency,
+                listing_exchange=sp.listing_exchange,
+                cusip=sp.cusip,
+                isin=sp.isin,
+                figi=sp.figi,
+                security_id=sp.security_id,
+                security_id_type=sp.security_id_type,
+                raw_payload=dict(sp.raw_payload),
+            )
+        )
+    for bp in parsed.bond_positions:
+        if bp.con_id is None:
+            continue
+        infos.append(
+            FlexSecurityInfo(
+                account_id=bp.account_id,
+                con_id=bp.con_id,
+                symbol=bp.symbol,
+                description=bp.description,
+                asset_category="BOND",
+                sub_category=bp.sub_category,
+                currency=bp.currency,
+                listing_exchange=bp.listing_exchange,
+                cusip=bp.cusip,
+                isin=bp.isin,
+                figi=bp.figi,
+                security_id=bp.security_id,
+                security_id_type=bp.security_id_type,
+                issuer=bp.issuer,
+                maturity=bp.maturity_date,
+                raw_payload=dict(bp.raw_payload),
+            )
+        )
+    # FII rows from the parsed result take precedence.
+    if parsed.security_infos:
+        _upsert_security_reference(session, parsed.security_infos, source="fii")
+    if infos:
+        _upsert_security_reference(session, infos, source="open_positions")
 
 
 def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsAccount]:
@@ -459,6 +920,9 @@ def _parsed_account_ids(parsed: FlexParseResult) -> set[str]:
     ids.update(row.account_id for row in parsed.cash_transactions)
     ids.update(row.account_id for row in parsed.open_positions)
     ids.update(row.account_id for row in parsed.stock_positions)
+    ids.update(row.account_id for row in parsed.bond_positions)
+    ids.update(row.account_id for row in parsed.dividend_payments)
+    ids.update(row.account_id for row in parsed.dividend_accruals)
     ids.update(row.account_id for row in parsed.option_eae)
     ids.update(row.account_id for row in parsed.account_information)
     return ids
@@ -470,6 +934,10 @@ def _scope_result(parsed: FlexParseResult, account_id: str) -> FlexParseResult:
         cash_transactions=[row for row in parsed.cash_transactions if row.account_id == account_id],
         open_positions=[row for row in parsed.open_positions if row.account_id == account_id],
         stock_positions=[row for row in parsed.stock_positions if row.account_id == account_id],
+        bond_positions=[row for row in parsed.bond_positions if row.account_id == account_id],
+        dividend_payments=[row for row in parsed.dividend_payments if row.account_id == account_id],
+        dividend_accruals=[row for row in parsed.dividend_accruals if row.account_id == account_id],
+        security_infos=[row for row in parsed.security_infos if row.account_id == account_id or not row.account_id],
         option_eae=[row for row in parsed.option_eae if row.account_id == account_id],
         account_information=[row for row in parsed.account_information if row.account_id == account_id],
         section_counts=parsed.section_counts,
@@ -492,6 +960,8 @@ def _ingest_account(
         _upsert_trade(session, household_id, trade, leg_ids[trade.leg])
     for cash in parsed.cash_transactions:
         _upsert_cash_event(session, household_id, cash)
+    for dividend in parsed.dividend_payments:
+        _upsert_dividend_payment(session, account_id, dividend)
     snapshot_dates = {position.as_of_date for position in parsed.open_positions}
     for snapshot_date in snapshot_dates:
         session.execute(
@@ -509,10 +979,21 @@ def _ingest_account(
         _insert_position(session, household_id, position, leg_id)
     for account_info in parsed.account_information:
         _upsert_flex_margin_snapshot(session, household_id, account_info)
+    # Accruals: pass all accruals together so windows are calculated once.
+    _sync_dividend_accruals(
+        session,
+        account_id,
+        parsed.dividend_accruals,
+        report_date=None,
+    )
+    # Security reference: seed from open positions (STK + BOND identifiers).
+    _seed_security_reference_from_positions(session, parsed)
     _upsert_sync_state(session, household_id, account_id, parsed, from_date, to_date)
     return {
         "trade_count": len(trades_to_insert),
         "cash_event_count": len(parsed.cash_transactions),
+        "dividend_payment_count": len(parsed.dividend_payments),
+        "dividend_accrual_count": len(parsed.dividend_accruals),
         "position_count": len(parsed.open_positions),
         "leg_count": len(leg_ids),
     }
@@ -537,6 +1018,11 @@ def _filter_result_by_dates(parsed: FlexParseResult, from_date: date | None, to_
         trades=[row for row in parsed.trades if in_window(row.trade_date)],
         cash_transactions=[row for row in parsed.cash_transactions if in_window(row.event_date)],
         open_positions=[row for row in parsed.open_positions if in_window(row.as_of_date)],
+        stock_positions=[row for row in parsed.stock_positions if in_window(row.as_of_date)],
+        bond_positions=[row for row in parsed.bond_positions if in_window(row.as_of_date)],
+        dividend_payments=[row for row in parsed.dividend_payments if in_window(row.report_date)],
+        dividend_accruals=[row for row in parsed.dividend_accruals if in_window(row.report_date)],
+        security_infos=parsed.security_infos,  # static reference data — always keep
         option_eae=[row for row in parsed.option_eae if in_window(row.trade_date)],
         account_information=[
             row for row in parsed.account_information if in_window(row.as_of.date() if row.as_of else None)
