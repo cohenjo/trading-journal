@@ -147,3 +147,27 @@ completed = list(state.get("_all", []))  # List, not dict
 📌 Team update (2026-05-06): Phase A regression tests written + fixed (9/9 passing). --xml-dir tests shipped (11/11 passing). 444 total tests now passing (+40 net). All test work for backfill resilience initiative complete.
 
 📌 **Team update (2026-05-09):** Fixed Playwright afterAll() hook placement violations (#334) — moved to describe scope, closed dupes #327, #330, #332. Kujan removed no-commit-to-branch hook (#336) + trimmed docker-compose (#337). Hockney audited migration drift (#335). Fenster + McManus shipped stacked income chart (#338).
+
+📌 **Team update (2026-05-10, Issue #340 Phase 2):** R1 + R2 regression test suites shipped.
+
+**R1 — Backend (`apps/backend/tests/test_stock_positions.py`, 24 tests):**
+- `TestAccountTypeCheck` (5): lowercase-only CHECK on account_type (ibkr/schwab/ira)
+- `TestFlexSnapshotUniqueIndex` (4): partial UNIQUE on (account_id, ticker, as_of_date) WHERE source='flex'
+- `TestCrossHouseholdIsolation` (1): SELECT scoped by household_id
+- `TestManualCRUDEndpoints` (5): POST/DELETE via FakeSession; IBKR rejection (422); 404 on missing
+- `TestFlexSTKParser` (6): STK counts per annual XML (63/45/51/54); bond/CASH/OPT exclusion
+- `TestDividendProjectionFallback` (3): #342 fallback — empty stock_positions → dividend_positions_fallback
+
+Full backend suite: **480 passed** (453 baseline + 24 new + 3 pre-existing additions).
+
+**R2 — Frontend:**
+- `TradingAccountsPage.test.tsx` (7 Vitest unit tests): 3 tabs / correct labels, default IBKR tab with refresh-button, Schwab/IRA tabs with add-position-button, tab switching, empty-state
+- `accounts-phase2.spec.ts` (4 Playwright E2E tests): tab labels, IBKR read-only, Schwab/IRA manual headers
+
+Full Vitest suite: **371 passed** (364 baseline + 7 new).
+
+**Finding fixed:** `cleanupHouseholdData` in `seed-data.ts` was missing `stock_positions` deletion — caused FK violations on nightly re-runs. Fixed in same commit. Decision filed: `.squad/decisions/inbox/redfoot-340-findings.md`.
+
+**Bonus:** Extended `seedTradingAccount` with optional `accountType` ('ibkr'|'schwab'|'ira') parameter.
+
+**Commits:** `7daf6cd` (R1 backend) · `aeee1e6` (R2 frontend + seed-data fix) → pushed to main.
