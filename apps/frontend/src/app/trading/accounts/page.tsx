@@ -22,9 +22,9 @@ function normalizeType(t: string): string {
 
 /** Display label for each account type. */
 const TAB_LABELS: Record<string, string> = {
-  ibkr: "IBKR",
+  ibkr: "InteractiveBrokers",
   schwab: "Schwab",
-  ira: "IRA (Hishtalmut)",
+  ira: "LeumiIRA",
 };
 
 const TAB_ORDER: Record<string, number> = { ibkr: 0, schwab: 1, ira: 2 };

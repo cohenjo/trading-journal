@@ -41,9 +41,9 @@ function makePosition(id: string, ticker: string, market_value: number): StockPo
   };
 }
 
-const IBKR_CONFIG = makeConfig(1, "IBKR Main", "ibkr");
+const IBKR_CONFIG = makeConfig(1, "InteractiveBrokers Main", "ibkr");
 const SCHWAB_CONFIG = makeConfig(2, "Schwab", "schwab");
-const IRA_CONFIG = makeConfig(3, "IRA (Hishtalmut)", "ira");
+const IRA_CONFIG = makeConfig(3, "LeumiIRA", "ira");
 
 const IBKR_POSITIONS: StockPosition[] = [
   makePosition("p1", "AAPL", 60000),
