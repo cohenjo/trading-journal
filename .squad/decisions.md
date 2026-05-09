@@ -1,3 +1,7 @@
+## 2026-05-09 — lightweight-charts: last-added series wins z-index
+
+For stacked histogram charts where shorter values should be visible, add series in DESCENDING value order (largest/total LAST → drawn on top would hide smaller bars). Use ASCENDING visual stack order: bottom-most series LAST so it paints over taller bars above. Pair with a `SERIES_COLORS` constant exported from the chart component, referenced by both `addSeries({ color })` calls AND the parent's legend swatches (inline styles, NOT Tailwind classes — purge-safe). Asserted in regression tests via `new Set(seriesFillColors).size === N`. Ref: #343 commit `362851a`.
+
 ### 2026-07-18: After I Leave page — design patterns
 **By:** Fenster
 **Category:** Frontend, UX

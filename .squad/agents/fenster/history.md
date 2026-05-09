@@ -227,3 +227,25 @@ This pattern catches: wrong field name, loop boundary miss, accidental summation
 - `apps/frontend/src/app/summary/page.tsx` (calls `buildYearlyIncomeData`, removes inline merge)
 
 **Commit:** `3a75bd5`
+
+## 2026-05-09T19:39:13+03:00 — Bug Fix #343: Stacked Income Bars All Rendering Blue
+
+**Root cause (one sentence):** All three `HistogramSeries` started at `base=0` and the bonds series (added last) was drawn on top by lightweight-charts, its tallest blue bar covering the amber and emerald bars below it entirely.
+
+**The fix — reversed series addition order:**
+In lightweight-charts, the LAST series added is rendered on top. The correct stacking visual (options at bottom, dividends middle, bonds at top) requires the OPPOSITE addition order: bonds first (background), dividends second, options last (foreground). Each cumulative bar is then "painted over" by the shorter bar of the series above it, revealing the correct color band for each income layer. No data values were changed; only the order of `chart.addSeries()` calls.
+
+**SERIES_COLORS single-source-of-truth pattern:**
+Introduced `export const SERIES_COLORS = { options, dividends, bonds }` in `StackedIncomeBarChart.tsx`. Both the chart's `addSeries` color options AND the legend swatches in `summary/page.tsx` now derive their color from this constant, making drift structurally impossible. Tooltip swatches updated to inline styles from SERIES_COLORS too. Also replaced the hardcoded `rgba(r,g,b,…)` strings with a `hexToRgba(hex, alpha)` helper so projected-year dimming derives from SERIES_COLORS automatically.
+
+**Tailwind purge note:** Not applicable here — the legend swatches were previously using Tailwind `bg-amber-500 / bg-emerald-500 / bg-blue-500` classes. These are safe from purge since they're static class names. After this fix they use inline styles from SERIES_COLORS, which is even safer (no purge risk at all).
+
+**Regression test:**
+`each series receives a distinct fill color matching SERIES_COLORS` in `StackedIncomeBarChart.test.tsx`. Asserts `new Set(seriesColors).size === 3` and that each entry matches the corresponding SERIES_COLORS key. Against the broken code (if all three addSeries calls used the same color), `distinctColors.size` would be 1 and the assertion would fail.
+
+**Files changed:**
+- `apps/frontend/src/components/Summary/StackedIncomeBarChart.tsx` (SERIES_COLORS, hexToRgba, reversed series order, inline tooltip swatches)
+- `apps/frontend/src/app/summary/page.tsx` (import SERIES_COLORS, legend swatches → inline styles)
+- `apps/frontend/src/components/Summary/__tests__/StackedIncomeBarChart.test.tsx` (new color test, updated series indices 0/1/2 to reflect bonds/dividends/options order)
+
+**Commit:** `362851a`
