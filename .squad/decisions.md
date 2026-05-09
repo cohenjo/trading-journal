@@ -1,122 +1,3 @@
-### 2026-05-02: DB triggers own user provisioning (new)
-
-**What:**
-Database triggers, not application code, own user provisioning. `handle_new_auth_user` (user_profile) and `handle_new_user_household` (households via `trg_households_add_creator` chain) are the canonical signup hooks. RLS prevents users from inserting their own household_members rows; provisioning must be SECURITY DEFINER.
-
-**Why:**
-RLS policies are per-row; user cannot insert their own household_members rows as owner. Only SECURITY DEFINER functions can bypass RLS for cross-RLS inserts. Keeps provisioning logic in database (closer to data, auditable, transactional) rather than scattered in application layer.
-
-**By:** Hockney, Coordinator
-
----
-
-### 2026-05-02: Backfill migrations use standard auth columns (new)
-
-**What:**
-Backfill migrations must use only standard auth.users columns (id, email). Supabase-only columns like raw_user_meta_data are absent in the shadow DB harness.
-
-**Why:**
-CI harness runs against a shadow DB that excludes Supabase-only columns. Migrations fail if they reference raw_user_meta_data. Backfills must be portable across all database environments.
-
-**By:** Hockney
-
----
-
-### 2026-05-02: Never duplicate trigger work downstream (new)
-
-**What:**
-When chaining triggers, never duplicate work the downstream trigger already does. `trg_households_add_creator` is idempotent and authoritative for household_members owner row; don't re-insert it in upstream triggers.
-
-**Why:**
-Duplicate inserts cause constraint violations (unique key on household_id + user_id + role for owner), bloat logs, and hide dependency chains. Idempotency in trigger design requires documenting which trigger owns which side effects.
-
-**By:** Coordinator
-
----
-
-### 2026-05-02: Automated E2E Testing Flow (Testing Directive)
-
-**What:**
-Build an automated E2E testing flow (Playwright preferred) that exercises the live app click-by-click — including a dedicated test user — so we can verify "save asset / save fund / save finance" works end-to-end without manual checks. Track work via GitHub issues assigned to squad members.
-
-**Why:**
-Repeated regressions on save flows ("No active household found", 404s) are surfacing in production and only get caught by the user manually clicking. Need automated coverage as a gate.
-
-**Status:** 🟢 In Progress (PRs #143–#156 shipped; 30 passed / 2 skipped / 0 failed locally)
-
-**By:** Coordinator (from Jony directive)
-
-**Related PRs:** #143 (strategy), #152 (harness), #153 (CI), #154 (test-user), #156 (green iteration)
-
----
-
-### 2026-05-02: Production Household Unblock (Emergency Fix)
-
-**What:**
-Prod Household Unblock — migration `20260502120000_auto_provision_household_on_signup` was not applied to production Supabase. Manually applied via `apply_migration` (with REVOKE for security advisor fix), backfilled all users without active household_members rows, and revoked EXECUTE from `anon` and `authenticated` roles on `handle_new_user_household()`.
-
-**Why:**
-Emergency blocker: users seeing "No active household found for your account" on `/current-finances`. Backfill + RLS fix resolves all household scoping issues for both existing users and e2e test provisioning.
-
-**Status:** ✅ Resolved (Jony unblocked; E2E test-user provisioning ready for #145)
-
-**By:** Hockney (Backend Dev), Coordinator (follow-up)
-
-**Related Issues:** #142 (PR; fixed), #145 (E2E test-user provisioning; queued)
-
-
----
-
-### 2026-05-03: Security Officer Reviews All Security-Sensitive PRs
-
-**What:**
-All PRs touching authentication, secrets, credentials, database access control, or encrypted data must be reviewed by Rabin (Security Engineer) before merge. Ratified as policy via INC-2026-05-03-001.
-
-**Why:**
-INC-2026-05-03-001 (Supabase service-role key leak) demonstrated need for dedicated security review gate to catch credential management missteps before they reach main.
-
-**By:** Rabin
-
----
-
-### 2026-05-03: Secrets Only in Gitignored Files (Policy)
-
-**What:**
-All secrets (API keys, JWT tokens, OAuth credentials, DB passwords) must be stored in `.env.local` only (gitignored). Pre-commit `gitleaks` scanning + GitHub push protection mandatory. No live credential values in session logs, inbox, or decision documents. Use `<REDACTED>` or env-var references instead.
-
-**Why:**
-Codifies defense-in-depth from INC-2026-05-03-001: gitignore + pre-commit scanning + push protection catch leaks at each layer.
-
-**By:** Rabin
-
----
-
-### 2026-05-03: Pre-commit Gitleaks & CI Secret-Scan Workflow Mandatory
-
-**What:**
-All developers run `pre-commit install` after clone; CI runs pre-commit checks on all PRs. `.pre-commit-config.yaml` includes gitleaks. GitHub push protection enabled. Service-role keys rotated immediately upon confirmed/suspected leak.
-
-**Why:**
-Detects secrets before commit/push. When alert fires: stop, rotate credential, resolve alert in GitHub as "revoked".
-
-**By:** Rabin
-
----
-
-### 2026-05-02: E2E Testing Strategy (Approved)
-
-**What:**
-Use Playwright for browser-driven E2E tests in `apps/frontend/e2e/`. Hybrid environment: Dev Supabase for CI (exercises RLS + triggers); local Supabase for developer iteration; prod read-only smoke post-deploy. Throwaway test users (`e2e_<ts>_<rand>@example.com`) provisioned via service-role admin API, injected via auth cookies, deleted in `afterAll`.
-
-**Why:**
-Dev Supabase catches prod-only issues (migration drift, trigger behavior) that local can't replicate. No prod mutations eliminates data pollution. Existing scaffold avoids rebuild.
-
-**Status:** 🟢 In Progress (#144–#151 tracked; #143 approved)
-
-**By:** Keaton (Lead)
-
----
-
 ### Single-Supabase E2E opt-in: `SUPABASE_E2E_ALLOW_PROD=true`
 
 **Context:** Jony's personal project uses one consolidated Supabase instance (not dev/prod split). E2E admin fixture rejected single URL as safety block. Kujan + Redfoot unblocked with environment-variable opt-in.
@@ -4275,3 +4156,67 @@ sudo apt-get install -y postgresql-client-17
 ### Preserved for Jony action:
 - **`.squad/decisions/inbox/mcmanus-flex-query-spec.md`** — Jony must configure IBKR portal with Activity Flex Query per spec (88 fields, 5 schema deltas)
 - **`.squad/decisions/inbox/hockney-335-prune-results.md`** — Jony must approve deferred destructive migration (`align_insurance_policies_household_id`)
+
+---
+
+### 2026-05-09T23:53:57+03:00: User directive — Tax computations deferred
+
+**By:** Jony (via Copilot)
+
+**What:** Tax computations are explicitly **out of scope for now**. Specifically:
+- Do NOT compute tax estimates on dividends, options income, capital gains, or bond interest.
+- Do NOT add tax-withholding aggregation views, tax-credit reporting, or country-level WHT breakdown.
+- Withholding tax and gross/net amounts that arrive in broker statements should still be **stored verbatim** (in `dividend_payments`, `cash_transactions`, etc.) — but the app must not derive Israeli tax liability or run any tax math on top of them.
+- The future work — when Jony is ready — will be **Israeli-national tax computations for pre-retirement and post-retirement scenarios**. That phase will be scoped separately.
+
+**Why:** User request — captured for team memory. Avoid scope creep into tax engines, and avoid computing tax credits/deductions in any current sprint.
+
+**Implication for McManus's Flex query spec:** §8 question #3 (foreign WHT tracking by country) is now answered NO for the current sprint — withholding amounts should be stored verbatim per transaction (we already capture `tax_withheld` in the `dividend_payments` table design), but no per-country aggregation, no tax-credit logic, no Israeli tax math. Revisit in the future Israeli-tax sprint.
+
+---
+
+### 2026-05-09T23:53:57+03:00: 📌 Reference — McManus Flex Query Spec (preserved in inbox)
+
+**File:** `.squad/decisions/inbox/mcmanus-flex-query-spec.md`
+
+**Purpose:** Canonical IBKR Activity Flex Query specification for stocks, dividends, and bonds. Recommends one comprehensive Activity Flex Query with sections: AccountInformation, OpenPositions, FinancialInstrumentInformation, CashTransactions, ChangeInDividendAccruals, OpenDividendAccruals, CorporateActions. Use as reference for parser design and portal configuration.
+
+---
+
+### 2026-05-09T23:53:57+03:00: 📌 Reference — McManus Flex Validation Report (preserved in inbox)
+
+**File:** `.squad/decisions/inbox/mcmanus-flex-validation.md`
+
+**Purpose:** Validation report against YTD 2026-01-01→2026-05-08 Flex XML. Key finding: stocks (57 positions) and dividend accruals are ingestion-ready; **FII section is missing from portal** but not blocking (OpenPositions already carries all identifier fields: cusip, isin, figi, securityID, listingExchange, issuer). §6 contains 12-item pre-implementation checklist for Hockney's Flex parser work. CashTransactions missing `assetCategory` and `fxRateToBase`; 3–4 portal config changes needed before full bonds+dividends ingestion.
+
+---
+
+### 2026-05-09T23:53:57+03:00: 📌 Reference — Hockney #335 Prune Results (preserved in inbox)
+
+**File:** `.squad/decisions/inbox/hockney-335-prune-results.md`
+
+**Purpose:** Migration drift resolution log. Phase 1–3 resolved 47→54 remote-applied migrations (with 55 local files). One destructive migration deferred: `20260501120000_align_insurance_policies_household_id` — awaiting Jony go/no-go before applying DELETE + NOT NULL constraint.
+
+---
+
+### 2026-05-10T00:03:18+03:00: ✅ Distilled Lessons — Backup Pipeline + Flex Validation + Tax Scope
+
+**By:** Scribe (consolidating Kujan + McManus + Copilot directives)
+
+#### 1. Backup pipeline restored end-to-end
+Full chain restored: PG14-runner constraint → pg_dump v17 absolute path (commit 1e9e011) → SUPABASE_PROD_DB_URL secret → AGE_PUBLIC_KEY secret → green pipeline (run 25611601320). 4 issues closed (#333/#331/#329/#326). **Pattern:** Secrets are the silent killer for pipelines — verify all referenced secrets exist before declaring infra "fixed."
+
+#### 2. Tax computations deferred (directive)
+**No tax math, no per-country WHT aggregation, no Israeli tax credit reporting in current sprint.** Withholding still stored verbatim from broker statements. Future sprint scope = Israeli pre/post-retirement tax. McManus's spec §8 Q3 is now answered NO.
+
+#### 3. IBKR OpenPositions bonus fields
+**IBKR includes `cusip`, `isin`, `figi`, `securityID`, `listingExchange`, `issuer` directly on `OpenPositions` rows** (not just `FinancialInstrumentInformation`). This means stock + bond positions can be ingested without the FII section enabled. `security_reference` table can be seeded from OpenPositions data.
+
+#### 4. CashTransactions field gaps to flag for parser
+`assetCategory` and `fxRateToBase` are NOT emitted on CashTransactions in current portal config. Workaround: route by `type` field (e.g., `"Bond Interest Received"` vs `"Dividends"` vs `"Withholding Tax"`); external FX rates needed for base-currency income summaries.
+
+#### 5. Bond maturity from symbol string
+When FII section is missing, IBKR bond `symbol` (e.g., `"AAPL 4 1/4 02/09/47"`) reliably encodes coupon rate (4.25%) and maturity (2047-02-09). Symbol parsing is acceptable v1; replace with FII when enabled. `expiry` attribute exists in OpenPositions BOND rows but is empty.
+
+#### 6. Activity Flex confirmed for trades sync continuity
+`<Trades>` section IS present in the new query (OPT=330, STK=45, BOND=6). Existing options trade pipeline unaffected by Flex query consolidation.

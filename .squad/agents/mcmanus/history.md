@@ -195,3 +195,71 @@ Jony reported deployed `/trading/accounts` data had duplicate rows and wrong qua
 ---
 
 📌 **Team update (2026-05-09):** Flex spec submitted; awaiting Jony portal config. Phase 2 reflection (§9 of spec) contains lessons for future broker-data work. Recommend archiving Phase 2 section for reference when planning dividend accrual and bond analytics enrichment. — Scribe
+
+## 2026-05-09T23:53:57+03:00 — Flex Query Validation against OptionsIncomeDashboard_Master.xml
+
+**File:** `reports/activity/OptionsIncomeDashboard_Master.xml` — YTD 2026-01-01→2026-05-08, account U2515365.
+
+**Full report:** `.squad/decisions/inbox/mcmanus-flex-validation.md`
+
+### Section findings (contradicts / refines IBKR docs):
+
+1. **`FinancialInstrumentInformation` is ABSENT.** Not enabled by Jony in the portal. However — key discovery — IBKR already includes most FII fields **directly in `OpenPositions` rows**: `listingExchange`, `securityID`, `securityIDType`, `cusip`, `isin`, `figi`, `issuer` are all on every STK and BOND row. The spec assumed FII was the only source for identifiers; that was wrong. FII is still needed for structured `maturity` and `issueDate` on bonds.
+
+2. **`CashTransactions` is missing `assetCategory` and `fxRateToBase`.** Both are absent from all 770 rows. Parser must route by `type` field instead of `assetCategory` (workable — `type` is fully populated and semantically distinct). `fxRateToBase` absence means multi-currency income (e.g., EUR-denominated WHT) cannot be converted to base currency from the XML; external FX rates needed. NOTE: `ChangeInDividendAccruals` and `OpenDividendAccruals` DO carry both fields correctly — the gap is CT-specific.
+
+3. **BOND `expiry` is present but empty for all 18 bonds.** Maturity date only available via symbol-string parsing (e.g., "AAPL 4 1/4 02/09/47" → maturity=2047-02-09, coupon=4.25%). Fragile but workable for v1. FII section (when enabled) will provide structured `maturity`.
+
+4. **BOND `accruedInterest` is entirely absent** (attribute not emitted). Must be enabled in portal. This is the most impactful bond field gap.
+
+5. **`levelOfDetail` attribute is not emitted by IBKR at all** (not "SUMMARY", just absent). Confirmed Summary-level by empty `openDateTime` on all rows.
+
+6. **Bond mix confirmed: 7 Corp (AAPL, AMZN×2, BA, BCRED, META, NFLX) + 11 Govt (US Treasuries).** No munis.
+
+7. **`ChangeInDividendAccruals` is richer than spec expected:** carries `fxRateToBase`, `assetCategory`, full identifier set, `fromAcct`, `toAcct`, `underlyingConid`. All 211/211 key fields non-empty.
+
+8. **`CorporateActions` is present but empty** (0 events in YTD window). Section tag exists — not missing.
+
+9. **Trades section confirmed:** OPT=330, STK=45, BOND=6, CASH=2. Existing options pipeline unaffected.
+
+### Spec §8 open questions resolved:
+- **Q1 (trades sync):** Trades present — existing sync unaffected.
+- **Q2 (bond mix):** 7 Corp + 11 Govt Treasuries. No munis.
+- **Q3 (foreign WHT):** Answered NO by Jony's tax directive. WHT stored verbatim (585 rows in CT).
+- **Q4 (tax-lot dates):** Summary-level confirmed — first-buy dates unavailable.
+- **Q5 (PortfolioAnalyst for bonds):** Yes, needed for `creditRating`, `yieldToMaturity`. Symbol-string parsing covers coupon + maturity for v1.
+
+### Portal changes Jony must make:
+1. Enable `FinancialInstrumentInformation` section
+2. Enable `accruedInterest` on OpenPositions
+3. Enable `assetCategory` + `fxRateToBase` on CashTransactions
+4. Switch daily scope: YTD → Last Business Day after portal changes done
+
+### What's ready to ingest now (before portal fixes):
+- STK positions (all fields present) ✅
+- ChangeInDividendAccruals + OpenDividendAccruals (all fields present) ✅
+
+📌 **Team update (2026-05-09T23:53:57+03:00):** Validated OptionsIncomeDashboard_Master.xml against spec. Stocks + dividend accruals ready to ingest. 4 portal fixes needed (FII section, accruedInterest, assetCategory+fxRateToBase on CashTransactions, LBD scope). Key discovery: OpenPositions already carries FII identifier fields inline — FII section is needed only for structured bond maturity/issueDate.
+
+---
+
+## 2026-05-10 — ✅ IBKR OpenPositions Bonus Fields Discovery
+
+**Scope:** Analysis of YTD Flex XML validation findings.
+
+**Key Discovery — Stocks unblocked without FII section:**
+IBKR includes `cusip`, `isin`, `figi`, `securityID`, `listingExchange`, `issuer` **directly on OpenPositions rows** (not just in FinancialInstrumentInformation). This means:
+- Stock positions can be ingested without waiting for FII section to be enabled in portal
+- `security_reference` table can be seeded from OpenPositions data immediately
+- Stocks ingestion can proceed in parallel with bond/dividend work
+
+**Impact for Hockney's implementation:**
+- v1 Flex parser can ingest STK + dividend accruals NOW (no portal changes blocking)
+- Bonds ingestion still blocked on 3–4 portal changes (FII/accruedInterest/assetCategory/fxRateToBase)
+- Prioritize: Stocks-only parser → tests → deploy → then tackle bonds
+
+**CashTransactions workaround for parser:**
+`assetCategory` and `fxRateToBase` missing from current portal config. Pattern: Route transactions by `type` field (e.g., `"Bond Interest Received"` vs `"Dividends"` vs `"Withholding Tax"`). External FX rates table needed for base-currency income summaries.
+
+**Bond maturity parsing from symbol string:**
+IBKR bond symbol encoding: `"AAPL 4 1/4 02/09/47"` → coupon 4.25%, maturity 2047-02-09. Acceptable v1 approach. Replace with FII when portal enables that section.

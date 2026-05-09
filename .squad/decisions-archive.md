@@ -1117,3 +1117,122 @@ The architecture directive is the source of truth for what's intended.
 - **Unblocks** Vercel preview deploys (PR #138 and future PRs).
 - **Preserves** opt-in rewrite behavior for self-hosted backends.
 - **Improves** error messaging for actual configuration problems.
+
+### 2026-05-02: DB triggers own user provisioning (new)
+
+**What:**
+Database triggers, not application code, own user provisioning. `handle_new_auth_user` (user_profile) and `handle_new_user_household` (households via `trg_households_add_creator` chain) are the canonical signup hooks. RLS prevents users from inserting their own household_members rows; provisioning must be SECURITY DEFINER.
+
+**Why:**
+RLS policies are per-row; user cannot insert their own household_members rows as owner. Only SECURITY DEFINER functions can bypass RLS for cross-RLS inserts. Keeps provisioning logic in database (closer to data, auditable, transactional) rather than scattered in application layer.
+
+**By:** Hockney, Coordinator
+
+---
+
+### 2026-05-02: Backfill migrations use standard auth columns (new)
+
+**What:**
+Backfill migrations must use only standard auth.users columns (id, email). Supabase-only columns like raw_user_meta_data are absent in the shadow DB harness.
+
+**Why:**
+CI harness runs against a shadow DB that excludes Supabase-only columns. Migrations fail if they reference raw_user_meta_data. Backfills must be portable across all database environments.
+
+**By:** Hockney
+
+---
+
+### 2026-05-02: Never duplicate trigger work downstream (new)
+
+**What:**
+When chaining triggers, never duplicate work the downstream trigger already does. `trg_households_add_creator` is idempotent and authoritative for household_members owner row; don't re-insert it in upstream triggers.
+
+**Why:**
+Duplicate inserts cause constraint violations (unique key on household_id + user_id + role for owner), bloat logs, and hide dependency chains. Idempotency in trigger design requires documenting which trigger owns which side effects.
+
+**By:** Coordinator
+
+---
+
+### 2026-05-02: Automated E2E Testing Flow (Testing Directive)
+
+**What:**
+Build an automated E2E testing flow (Playwright preferred) that exercises the live app click-by-click — including a dedicated test user — so we can verify "save asset / save fund / save finance" works end-to-end without manual checks. Track work via GitHub issues assigned to squad members.
+
+**Why:**
+Repeated regressions on save flows ("No active household found", 404s) are surfacing in production and only get caught by the user manually clicking. Need automated coverage as a gate.
+
+**Status:** 🟢 In Progress (PRs #143–#156 shipped; 30 passed / 2 skipped / 0 failed locally)
+
+**By:** Coordinator (from Jony directive)
+
+**Related PRs:** #143 (strategy), #152 (harness), #153 (CI), #154 (test-user), #156 (green iteration)
+
+---
+
+### 2026-05-02: Production Household Unblock (Emergency Fix)
+
+**What:**
+Prod Household Unblock — migration `20260502120000_auto_provision_household_on_signup` was not applied to production Supabase. Manually applied via `apply_migration` (with REVOKE for security advisor fix), backfilled all users without active household_members rows, and revoked EXECUTE from `anon` and `authenticated` roles on `handle_new_user_household()`.
+
+**Why:**
+Emergency blocker: users seeing "No active household found for your account" on `/current-finances`. Backfill + RLS fix resolves all household scoping issues for both existing users and e2e test provisioning.
+
+**Status:** ✅ Resolved (Jony unblocked; E2E test-user provisioning ready for #145)
+
+**By:** Hockney (Backend Dev), Coordinator (follow-up)
+
+**Related Issues:** #142 (PR; fixed), #145 (E2E test-user provisioning; queued)
+
+
+---
+
+### 2026-05-03: Security Officer Reviews All Security-Sensitive PRs
+
+**What:**
+All PRs touching authentication, secrets, credentials, database access control, or encrypted data must be reviewed by Rabin (Security Engineer) before merge. Ratified as policy via INC-2026-05-03-001.
+
+**Why:**
+INC-2026-05-03-001 (Supabase service-role key leak) demonstrated need for dedicated security review gate to catch credential management missteps before they reach main.
+
+**By:** Rabin
+
+---
+
+### 2026-05-03: Secrets Only in Gitignored Files (Policy)
+
+**What:**
+All secrets (API keys, JWT tokens, OAuth credentials, DB passwords) must be stored in `.env.local` only (gitignored). Pre-commit `gitleaks` scanning + GitHub push protection mandatory. No live credential values in session logs, inbox, or decision documents. Use `<REDACTED>` or env-var references instead.
+
+**Why:**
+Codifies defense-in-depth from INC-2026-05-03-001: gitignore + pre-commit scanning + push protection catch leaks at each layer.
+
+**By:** Rabin
+
+---
+
+### 2026-05-03: Pre-commit Gitleaks & CI Secret-Scan Workflow Mandatory
+
+**What:**
+All developers run `pre-commit install` after clone; CI runs pre-commit checks on all PRs. `.pre-commit-config.yaml` includes gitleaks. GitHub push protection enabled. Service-role keys rotated immediately upon confirmed/suspected leak.
+
+**Why:**
+Detects secrets before commit/push. When alert fires: stop, rotate credential, resolve alert in GitHub as "revoked".
+
+**By:** Rabin
+
+---
+
+### 2026-05-02: E2E Testing Strategy (Approved)
+
+**What:**
+Use Playwright for browser-driven E2E tests in `apps/frontend/e2e/`. Hybrid environment: Dev Supabase for CI (exercises RLS + triggers); local Supabase for developer iteration; prod read-only smoke post-deploy. Throwaway test users (`e2e_<ts>_<rand>@example.com`) provisioned via service-role admin API, injected via auth cookies, deleted in `afterAll`.
+
+**Why:**
+Dev Supabase catches prod-only issues (migration drift, trigger behavior) that local can't replicate. No prod mutations eliminates data pollution. Existing scaffold avoids rebuild.
+
+**Status:** 🟢 In Progress (#144–#151 tracked; #143 approved)
+
+**By:** Keaton (Lead)
+
+---

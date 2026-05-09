@@ -334,3 +334,36 @@ New `apps/backend/app/api/positions.py`:
 ---
 
 📌 **Team update (2026-05-09):** #340 API fix was bypassed by frontend; future API work should verify the actual frontend data path before declaring done. Also, `SUPABASE_DIRECT_SESSION_URL` env var now available for tooling and migration ops. Use `psql ... schema_migrations.statements` technique to retrieve remote-applied SQL (see prune results). — Scribe
+
+---
+
+## 2026-05-10 — 📌 Heads-up: McManus Flex Validation Findings for Parser Implementation
+
+**From:** Scribe (consolidating McManus validation work)
+**Reference:** `.squad/decisions/inbox/mcmanus-flex-validation.md` (§6 pre-implementation checklist)
+
+**Status:** YTD 2026-01-01→2026-05-08 Flex XML validated. **Stocks (57 positions) + dividend accruals are ingestion-ready NOW** — all required fields present.
+
+**What's blocked:**
+- **FII section missing from portal** — but NOT actually blocking STK ingestion. OpenPositions already carries all identifier fields inline (cusip, isin, figi, securityID, listingExchange, issuer). `security_reference` table can be seeded from OpenPositions data without waiting for portal config changes.
+- **Bonds + dividend payments:** Blocked on 3–4 portal changes (FII/accruedInterest/assetCategory/fxRateToBase + LBD scope). Stocks can proceed in parallel.
+
+**§6 Pre-Implementation Checklist for your parser:**
+1. Symbol parsing for bond maturity encoding (`"AAPL 4 1/4 02/09/47"` → coupon 4.25%, maturity 2047-02-09)
+2. CashTransactions routing by `type` field — pattern: when `assetCategory` is missing (current portal config), route transactions by type string:
+   - `"Bond Interest Received"` → bond coupon
+   - `"Bond Interest Paid"` → (unusual; confirm if appears)
+   - `"Dividends"` → equity dividend
+   - `"Withholding Tax"` → WHT (route to correct tax category)
+   - `"Broker Interest"` → cash interest
+   - `"Other Fees"` → expenses
+3. External FX rates table for base-currency income summaries (CashTransactions missing `fxRateToBase`)
+4. Handle `accruedInterest` field when FII section is enabled (currently empty, but schema will be ready)
+
+**Recommended order (Jony not yet decided on portal changes):**
+1. Implement stocks-only parser (v1) — use OpenPositions identifiers directly
+2. Add tests for stocks → dividend accruals join
+3. Deploy to worker + verify e2e
+4. Once Jony enables portal changes: add bonds + CashTransactions type-routing
+
+**Learnings pattern:** CashTransactions type-field routing is the fallback when structured fields are missing. Applies to any broker that sends `type` strings without `assetCategory` metadata.
