@@ -94,3 +94,51 @@ chart.addSeries(LineSeries,      { priceScaleId: 'right', priceFormat: { type: '
 Reusable pattern documented in `.squad/skills/dual-axis-chart/SKILL.md`.
 
 📌 Team update (2026-05-07): Dual-axis chart skill now in `.squad/skills/dual-axis-chart/SKILL.md`. Reusable pattern for any two-metric charts (cash flow vs. P&L, volume vs. price, etc.). FE charts now rendering both metrics independently.
+
+## Stacked Income Bar Chart (2026-05-09)
+
+**Issue:** Jony wanted stacked bars on `/summary` showing options/dividends/bonds income per year with future projections. Existing chart used area series (not bars) and didn't show actual options "Cumulative Cash Flow" data.
+
+**Solution:** Paired with McManus to implement proper stacked histogram bars using lightweight-charts. McManus designed data model, I built the chart.
+
+### Files created/modified
+
+| File | Change |
+|------|--------|
+| `apps/frontend/src/components/Summary/StackedIncomeBarChart.tsx` | NEW — stacked histogram chart with 3 layers (options/dividends/bonds) |
+| `apps/frontend/src/components/Summary/__tests__/StackedIncomeBarChart.test.tsx` | NEW — 6 tests for chart rendering, stacking, and projection styling |
+| `apps/frontend/src/app/summary/page.tsx` | Updated data fetching to use getOptionsYearlyCashFlow() + proper year aggregation |
+| `apps/frontend/src/app/options/actions.ts` | +getOptionsYearlyCashFlow() action (McManus) |
+
+### Implementation details
+
+- **Chart type:** HistogramSeries (lightweight-charts), NOT area series
+- **Stacking:** Three overlapping histograms — options (base), dividends (options + dividends), bonds (total)
+- **Projected years:** Reduced opacity (0.4) vs actuals (1.0) — makes future projection visually distinct
+- **Tooltip:** Interactive floating tooltip shows breakdown by source + total
+- **Currency formatting:** `Intl.NumberFormat` with USD, no decimals, thousands separator
+- **Data source:** `getOptionsYearlyCashFlow()` aggregates from `options_dashboard_monthly.cash_flow_cumulative` — takes max cumulative per year
+
+### Projection model (McManus)
+
+- **Options:** Actual cumulative cash flow for past years, 0 for future (conservative)
+- **Dividends:** Compound growth from current annual income (yield + reinvest + growth rate)
+- **Bonds:** Scheduled coupon + maturity payments from ladder
+
+### Test/lint results
+
+- `npm run test -- --run StackedIncomeBarChart`: 6/6 tests pass
+- `npm run lint`: 0 errors in changed files
+
+## Learnings
+
+**Stacked histograms in lightweight-charts:** Unlike area series, histograms don't auto-stack. Create 3 series with cumulative values:
+- Series 1 (bottom): value = A
+- Series 2 (middle): value = A + B  
+- Series 3 (top): value = A + B + C
+
+Each series draws from 0 to its cumulative value, creating a stacked effect when overlapped.
+
+**Projection styling:** Set opacity in the `color` property of each data point (not series-level). Example: `color: rgba(245, 158, 11, 0.32)` for projected vs `rgba(245, 158, 11, 0.8)` for actuals.
+
+**Paired work with McManus:** Data design first, then UI. McManus owned the SQL aggregation + projection logic, I owned the chart component. Clear separation of concerns made parallel work efficient.
