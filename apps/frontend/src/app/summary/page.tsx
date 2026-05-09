@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useMemo } from "react";
 import { useSettings } from "../settings/SettingsContext";
 import { getDividendDashboard, getDividendEstimations } from "@/app/dividends/actions";
-import StackedIncomeBarChart, { YearlyIncomeData } from "../../components/Summary/StackedIncomeBarChart";
+import StackedIncomeBarChart, { YearlyIncomeData, SERIES_COLORS } from "../../components/Summary/StackedIncomeBarChart";
 import { getLadderIncome } from "../ladder/actions";
 import { getOptionsYearlyCashFlow } from "../options/actions";
 import type { IncomePoint } from "@/components/Ladder/types";
@@ -89,15 +89,15 @@ export default function SummaryPage() {
         <h3 className="text-lg font-semibold mb-4 text-slate-200">Projected Income Stacking (Yearly)</h3>
         <div className="flex gap-4 mb-4 text-sm">
             <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-amber-500 rounded-sm"></div>
+                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: SERIES_COLORS.options }}></div>
                 <span>Options (Cumulative Cash Flow)</span>
             </div>
             <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-emerald-500 rounded-sm"></div>
+                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: SERIES_COLORS.dividends }}></div>
                 <span>Dividends (Projected)</span>
             </div>
             <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-blue-500 rounded-sm"></div>
+                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: SERIES_COLORS.bonds }}></div>
                 <span>Bond Ladder (Scheduled)</span>
             </div>
         </div>

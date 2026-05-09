@@ -3,6 +3,28 @@
 import { createChart, IChartApi, ISeriesApi, ColorType, HistogramSeries, HistogramData, Time } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
 
+/**
+ * Single source of truth for income-series colors.
+ * Both chart bars and legend swatches in summary/page.tsx reference this constant
+ * so they can never drift apart.
+ *
+ * Hex values use Tailwind palette tokens — could be centralized into a
+ * design-token file later if the project adopts a token system.
+ */
+export const SERIES_COLORS = {
+  options:   "#f59e0b", // Tailwind amber-500 (Options — Cumulative Cash Flow)
+  dividends: "#10b981", // Tailwind emerald-500 (Dividends — Projected/Estimated)
+  bonds:     "#3b82f6", // Tailwind blue-500 (Bond Ladder — Scheduled)
+} as const;
+
+/** Convert a hex color + alpha into an rgba() string for opacity variants. */
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 export type YearlyIncomeData = {
   year: number;
   optionsIncome: number;
@@ -61,24 +83,27 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
       },
     });
 
-    // Create three histogram series for stacked bars
-    // We'll render them from bottom to top: Options (base) → Dividends → Bonds
+    // Create three histogram series for stacked bars.
+    // Render order: the LAST series added is drawn on top.
+    // We want options (amber) on top, dividends (green) in the middle, bonds (blue) at the back.
+    // Each series holds a cumulative value from 0; later series "paint over" earlier ones, so the
+    // visible color at each height band matches the correct series.
 
-    // 1. Options (bottom layer - full height)
-    optionsSeriesRef.current = chart.addSeries(HistogramSeries, {
-      color: "#f59e0b", // Amber 500
-      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
-    });
-
-    // 2. Dividends (middle layer - on top of options)
-    dividendsSeriesRef.current = chart.addSeries(HistogramSeries, {
-      color: "#10b981", // Emerald 500
-      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
-    });
-
-    // 3. Bonds (top layer)
+    // 1. Bonds (bottom layer — drawn first, sits behind the others)
     bondsSeriesRef.current = chart.addSeries(HistogramSeries, {
-      color: "#3b82f6", // Blue 500
+      color: SERIES_COLORS.bonds,
+      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
+    });
+
+    // 2. Dividends (middle layer — drawn second, covers bond area up to options+dividends)
+    dividendsSeriesRef.current = chart.addSeries(HistogramSeries, {
+      color: SERIES_COLORS.dividends,
+      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
+    });
+
+    // 3. Options (top layer — drawn last, covers the base of every bar in amber)
+    optionsSeriesRef.current = chart.addSeries(HistogramSeries, {
+      color: SERIES_COLORS.options,
       priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
     });
 
@@ -116,25 +141,25 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
       const dividendsValue = point.optionsIncome + point.dividendsIncome;
       const bondsValue = point.optionsIncome + point.dividendsIncome + point.bondsIncome;
 
-      // Adjust opacity for projected years
-      const baseColor = point.isProjected ? 0.4 : 1.0;
+      // Projected years are dimmed to 40 % opacity; actuals use 80 %.
+      const opacity = point.isProjected ? 0.4 * 0.8 : 0.8;
 
       optionsData.push({
         time,
         value: optionsValue,
-        color: `rgba(245, 158, 11, ${baseColor * 0.8})` // amber with opacity
+        color: hexToRgba(SERIES_COLORS.options, opacity),
       });
 
       dividendsData.push({
         time,
         value: dividendsValue,
-        color: `rgba(16, 185, 129, ${baseColor * 0.8})` // emerald with opacity
+        color: hexToRgba(SERIES_COLORS.dividends, opacity),
       });
 
       bondsData.push({
         time,
         value: bondsValue,
-        color: `rgba(59, 130, 246, ${baseColor * 0.8})` // blue with opacity
+        color: hexToRgba(SERIES_COLORS.bonds, opacity),
       });
     }
 
@@ -180,14 +205,14 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
           <div className="space-y-1 text-slate-300">
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-amber-500 rounded-sm"></div>
+                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: SERIES_COLORS.options }}></div>
                 Options
               </span>
               <span className="font-mono">{currencyFormatter(tooltip.options)}</span>
             </div>
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-emerald-500 rounded-sm"></div>
+                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: SERIES_COLORS.dividends }}></div>
                 Dividends
                 {tooltip.dividendsSource === 'estimation' && (
                   <span className="text-xs text-emerald-400">(est.)</span>
@@ -197,7 +222,7 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
             </div>
             <div className="flex items-center justify-between gap-4">
               <span className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-blue-500 rounded-sm"></div>
+                <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: SERIES_COLORS.bonds }}></div>
                 Bonds
               </span>
               <span className="font-mono">{currencyFormatter(tooltip.bonds)}</span>

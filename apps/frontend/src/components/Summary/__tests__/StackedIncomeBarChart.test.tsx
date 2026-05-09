@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import StackedIncomeBarChart, { YearlyIncomeData } from '../StackedIncomeBarChart';
+import StackedIncomeBarChart, { YearlyIncomeData, SERIES_COLORS } from '../StackedIncomeBarChart';
 import { createChart } from 'lightweight-charts';
 
 // Mock is already configured in src/test/setup.ts
@@ -43,19 +43,59 @@ describe('StackedIncomeBarChart', () => {
   });
 
   it('creates three histogram series for stacked bars', async () => {
-    const { container } = render(<StackedIncomeBarChart data={mockData} />);
+    render(<StackedIncomeBarChart data={mockData} />);
 
     await waitFor(() => {
       expect(createChart).toHaveBeenCalled();
     });
 
-    const calls = vi.mocked(createChart).mock.calls;
-    const lastChart = calls[calls.length - 1][0];
     const mockChart = vi.mocked(createChart).mock.results[vi.mocked(createChart).mock.results.length - 1].value;
 
     await waitFor(() => {
       expect(mockChart.addSeries).toHaveBeenCalledTimes(3);
     });
+  });
+
+  /**
+   * Regression test for #343.
+   *
+   * Root cause: all three HistogramSeries started from base=0 and bonds (tallest bar, total
+   * income) was added LAST, so lightweight-charts rendered it on top, painting every bar blue.
+   *
+   * Fix: bonds is now added FIRST (background), dividends second, options LAST (foreground).
+   * This test verifies the three addSeries calls carry three DISTINCT colors matching
+   * SERIES_COLORS, ensuring no future change accidentally collapses them to one color.
+   *
+   * Mental fail-check: if all three addSeries calls used the same color (e.g. all blue),
+   * `distinctColors.size` would be 1, failing the assertion `toBe(3)`.
+   */
+  it('each series receives a distinct fill color matching SERIES_COLORS', async () => {
+    render(<StackedIncomeBarChart data={mockData} />);
+
+    await waitFor(() => {
+      expect(createChart).toHaveBeenCalled();
+    });
+
+    const mockChart = vi.mocked(createChart).mock.results[vi.mocked(createChart).mock.results.length - 1].value;
+
+    await waitFor(() => {
+      expect(mockChart.addSeries).toHaveBeenCalledTimes(3);
+    });
+
+    // Extract the `color` option from each addSeries call
+    const seriesColors = (mockChart.addSeries.mock.calls as unknown[][]).map(
+      (call) => (call[1] as Record<string, unknown>).color as string,
+    );
+
+    // All three fills must be distinct — prevents "all blue" regression
+    const distinctColors = new Set(seriesColors);
+    expect(distinctColors.size).toBe(3);
+
+    // Each fill must match the exported SERIES_COLORS constant
+    // (chart bars and legend swatches both derive from this, so they stay in sync)
+    expect(seriesColors).toContain(SERIES_COLORS.options);
+    expect(seriesColors).toContain(SERIES_COLORS.dividends);
+    expect(seriesColors).toContain(SERIES_COLORS.bonds);
   });
 
   it('distinguishes projected years with reduced opacity', async () => {
@@ -73,12 +113,13 @@ describe('StackedIncomeBarChart', () => {
       expect(series.length).toBe(3);
 
       // Check that setData was called on each series
-      series.forEach((s: any) => {
+      series.forEach((s: { setData: ReturnType<typeof vi.fn> }) => {
         expect(s.setData).toHaveBeenCalled();
       });
 
-      // Verify first series (options) has data with colors including opacity markers
-      const optionsData = series[0].setData.mock.calls[0][0];
+      // After the render-order fix: series[0]=bonds, series[1]=dividends, series[2]=options.
+      // We check the options series (index 2) since its 2024 value is known.
+      const optionsData = series[2].setData.mock.calls[0][0] as Array<{ color: string }>;
       expect(optionsData).toBeInstanceOf(Array);
       expect(optionsData[0]).toHaveProperty('color');
 
@@ -107,14 +148,15 @@ describe('StackedIncomeBarChart', () => {
       const series = mockChart.__series;
       expect(series.length).toBe(3);
 
-      const optionsData = series[0].setData.mock.calls[0][0];
+      // After the render-order fix the addition order is: bonds (0), dividends (1), options (2).
+      const bondsData    = series[0].setData.mock.calls[0][0];
       const dividendsData = series[1].setData.mock.calls[0][0];
-      const bondsData = series[2].setData.mock.calls[0][0];
+      const optionsData  = series[2].setData.mock.calls[0][0];
 
       // First data point (2024): options=5000, dividends=3000, bonds=2000
-      expect(optionsData[0].value).toBe(5000); // Options layer shows just options
+      expect(optionsData[0].value).toBe(5000);   // Options layer shows just options
       expect(dividendsData[0].value).toBe(8000); // Dividends layer shows options + dividends
-      expect(bondsData[0].value).toBe(10000); // Bonds layer shows total
+      expect(bondsData[0].value).toBe(10000);    // Bonds layer shows total
     });
   });
 
