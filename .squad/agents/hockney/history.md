@@ -1,3 +1,15 @@
+## 2026-05-09 — #340 follow-up: seed 3 canonical accounts
+
+**Scope:** Idempotent migration to pre-create InteractiveBrokers/Schwab/LeumiIRA in trading_account_config.
+
+**Executed:**
+- Created `20260510000002_seed_canonical_accounts.sql` — UPSERT logic preserves IBKR connection; seeded Schwab/LeumiIRA with placeholder host/port/client_id.
+- Migration applied successfully; 213 stock_positions remain attached to IBKR (account_id=1).
+- Backend tests: 456/456 passing (no regressions).
+- Commit: `b44a1b8` pushed to origin/main.
+
+---
+
 - All 14 existing backfill tests pass
 - Added smoke tests for Phase A.1-A.3 (session decoupling, continue-on-error, resume-from-chunk)
 

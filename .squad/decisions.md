@@ -8158,3 +8158,131 @@ To prevent future drift:
 
 ---
 ---
+
+---
+
+## Sprint #340 Phase 2 (2026-05-09): Trading Accounts & Stock Positions
+
+### 1. **3-Canonical-Accounts Pattern**
+**By:** jocohe, Keaton, Hockney, Fenster, McManus, Redfoot
+
+**What:** Hard-coded exactly 3 brokerage accounts with pre-seeded display names in `trading_account_config`: `InteractiveBrokers` (ibkr), `Schwab` (schwab), `LeumiIRA` (ira). The `account_type` column stores the tech identifier (lowercase); user-facing names live in the `name` column. Migration seeds with idempotent UPSERT to converge if legacy display names differ.
+
+**Why:** Simplifies UI tab ordering, avoids arbitrary account creation, and cleanly separates identifier from display. Phase 2d deprecation of `dividend_positions` no longer requires mapping old free-text account strings.
+
+**Implications:** Future account additions require schema migration, not config changes. Fenster's tab UI must read from `trading_account_config.name` not hard-coded strings.
+
+---
+
+### 2. **CHECK Constraint > Postgres ENUM for Evolving Allow-Lists**
+**By:** Hockney
+
+**What:** Used `ALTER TABLE trading_account_config ADD CONSTRAINT chk_account_type CHECK (account_type IN ('ibkr', 'schwab', 'ira'))` instead of `CREATE TYPE ... AS ENUM`. Existing rows were already TEXT-typed; dropping the old uppercase-only legacy constraint and adding the new CHECK was atomic.
+
+**Why:** CHECK constraints are trivially altered (`DROP CONSTRAINT / ADD CONSTRAINT`); Postgres ENUM types cannot be renamed or values removed once added. For a finite, evolving allow-list of brokerage codes, CHECK is lower-friction.
+
+**Trade-off:** Jony adding a 4th account requires a new migration, not a schema patch. Acceptable for this domain.
+
+---
+
+### 3. **Flex STK Parser Discriminator: `assetCategory='STK' AND putCall=''`**
+**By:** McManus, Hockney
+
+**What:** The existing Activity Flex XML files (query 1496910, reports/activity/) already contain complete `<OpenPosition>` rows with STK positions (213 historical across 2022–2025: 63/45/51/54). Parser currently filters them out. The fix: add a parallel branch `elif assetCategory == "STK" and putCall == ""` alongside the existing OPT branch. The `putCall=""` discriminator guards against any future OPT rows misclassified.
+
+**Why:** No new IBKR Flex report needed. Existing data sufficient. `openDateTime` is always empty for STK (IBKR aggregate position, not per-lot), so per-lot holding periods are impossible from this source — acceptable for Phase 2.
+
+**Implementation:** 5-line parser addition. Backfill via direct Python script (acceptable for one-shot historical; future automated syncs use `backfill_options.py` pattern).
+
+---
+
+### 4. **#342 Regression Guard Pattern: Fallback to Old Source Until Deprecation**
+**By:** Redfoot, Fenster, McManus
+
+**What:** When adding a new data source (stock_positions) that supersedes an old one (dividend_positions), wire the `GET /api/dividends/projection` endpoint to fall back to the old table when the new one is empty. Regression test explicitly verifies fallback activates and projects match.
+
+**Why:** Lets Phase 2 land without forcing immediate deprecation of dividend_positions. UI never breaks. Tests catch regression if old source gets skipped.
+
+**Confirmed by:** Redfoot's multi-part R1+R2 verification (backend projection test + E2E with live projection call).
+
+---
+
+### 5. **Multi-Part Verification Protocol (R1+R2)**
+**By:** Redfoot
+
+**What:** When fixing a defect or shipping a feature with multiple components (e.g., backend parser + API endpoint + frontend UI), each component must have an explicit regression test that FAILS without the fix. An independent verification agent (e.g., Redfoot) must confirm the test does what it claims.
+
+**Why:** Prevents silent regressions where a component ships but its test doesn't actually verify it works. Catches implementation gaps early.
+
+**Example:** #340 Phase 2: R1 tests 24 backend expectations (stock_positions ← Flex parser, `/api/dividends/projection` with fallback); R2 tests E2E (3 account tabs, manual CRUD, dividend projection rendering).
+
+---
+
+### 6. **`cleanupHouseholdData` Invariant: Every Household-Scoped Table Needs Cleanup Hook**
+**By:** Redfoot
+
+**What:** Added `stock_positions` to the cleanup helper in `apps/frontend/e2e/fixtures/seed-data.ts`. Pattern: any table with `household_id` FK + references to parent tables (e.g., `trading_account_config`) must be included in `cleanupHouseholdData` before the parent table is deleted.
+
+**Why:** Orphaned FK child rows cause constraint failures during E2E teardown (same defect class as #267, #232, #176).
+
+**Checklist:** When introducing a new household-scoped table, add it to `cleanupHouseholdData` **in the correct dependency order** (children before parents).
+
+---
+
+### 7. **Dividend Projection: Per-Account Latest-Snapshot Strategy**
+**By:** Hockney
+
+**What:** `GET /api/dividends/projection` uses a correlated subquery to select the latest `as_of_date` per `(household_id, account_id)` combination, not a global `MAX(as_of_date)`. Ensures stale year-end snapshots don't dilute current positions if daily Flex syncs run at different times.
+
+**Why:** Prevents position blending: e.g., IBKR synced 2025-12-31, Schwab synced 2025-12-20 → mixing positions from different dates.
+
+**Impact:** Dividend projection always reflects the most recent snapshot per account.
+
+---
+
+### 8. **Account Type Normalization at Page Level**
+**By:** Fenster
+
+**What:** Backend stores `trading_account_config.account_type` lowercase (ibkr/schwab/ira). Frontend `accounts/page.tsx` normalizes types with `normalizeType()` helper before comparison. TypeScript `TradingAccountType` union includes both cases to avoid type errors during transition.
+
+**Why:** Allows backend and frontend to evolve independently. Normalization happens once at page level, not in every component.
+
+**Trade-off:** Temporary double-casing in the union; can be cleaned up after backend migration completes.
+
+---
+
+### 9. **DELETE /api/accounts/positions Returns 200, Not 204**
+**By:** Hockney
+
+**What:** FastAPI raises `AssertionError` at startup if `status_code=204` is declared with a return-type annotation. Changed endpoint to return `{"deleted": True}` with status 200, matching existing DELETE patterns in the codebase (`DELETE /dividends/position/{id}` also returns `bool`).
+
+**Why:** Consistency + avoiding FastAPI startup failures. The 200 response is idiomatic for JSON-returning endpoints.
+
+---
+
+### 10. **Server Actions Gracefully Handle Missing Tables During Staged Rollout**
+**By:** Fenster
+
+**What:** All server actions querying `stock_positions` catch DB errors and return `[]` / `null` gracefully. This lets the UI ship before Hockney's migration lands. Once the migration runs, the actions work without code change.
+
+**Why:** Decouples frontend and backend deployment. Frontend can merge to main before backend migrations are applied.
+
+---
+
+### 11. **Stock Positions Schema: Full Flex Payload + Audit Trail**
+**By:** Hockney
+
+**What:** Extended Keaton's minimal schema sketch to capture the full Flex payload per McManus's STK row: `description`, `sub_category`, `mark_price`, `market_value`, `unrealized_pnl`, `raw_payload` (jsonb), `last_broker_sync_at`. Partial UNIQUE index on `(account_id, ticker, as_of_date)` for Flex syncs (source='flex' only).
+
+**Why:** Enables future analytics/reporting without re-parsing Flex XMLs. Audit trail supports debugging position discrepancies.
+
+---
+
+### 12. **Dividend Positions → Stock Positions Fold: 4-Phase Deprecation**
+**By:** Keaton, Hockney, Fenster, Redfoot
+
+**What:** Phase 2: Stock positions are authoritative source; `dividend_ticker_data` (yfinance) supplies yield. `dividend_positions` deprecated across 4 phases: (a) stays writable through Phase 2c, (b) Phase 2b seeded from `stock_positions`, (c) Phase 2c dashboard migrated to `stock_positions JOIN dividend_ticker_data`, (d) Phase 2d table dropped. #342 regression guard ensures `/dividends/projection` never breaks during transition.
+
+**Why:** Consolidates position data into a single table with consistent schema (cost basis, currency, source tracking). `dividend_positions` lacked these fields; now they're unified.
+
+---
