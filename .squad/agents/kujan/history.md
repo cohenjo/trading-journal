@@ -135,3 +135,26 @@ Trimmed docker-compose.yml to worker-only and removed no-commit-to-branch pre-co
 None. Both issues resolved. Worker is production-ready on Supabase.
 
 📌 **Team update (2026-05-09):** Removed `no-commit-to-branch` hook (#336) + trimmed docker-compose to worker-only (#337). Hockney completed migration drift audit (#335, awaiting approval). Redfoot fixed E2E Playwright hook placement (#334). Fenster + McManus shipped stacked income chart (#338).
+
+## 2026-05-09T14:00 — Nightly backup failure investigation (Issues #326, #329, #331, #333)
+
+### Summary
+Investigated 4+ consecutive days of nightly backup failures. Root cause identified: `SUPABASE_PROD_DB_URL` GitHub secret is empty or not set.
+
+### Findings
+- **Error:** `pg_dump: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.5432" failed: No such file or directory`
+- **Meaning:** `pg_dump --dbname` receives an empty string; falls back to local Unix socket which doesn't exist on the runner.
+- **Scope:** Every recorded run (9+, back to 2026-05-01) fails identically. Zero successful runs on record.
+- **Workflow code:** Healthy. PGDG APT fix in #271 (2026-05-05) was correct; postgresql-client-15 installs fine. `ubuntu-22.04` is pinned, runner image is stable. No code fix needed.
+- **Cause is operational:** Secret `SUPABASE_PROD_DB_URL` is missing/empty/stale in GitHub repo secrets.
+
+### Actions Taken
+1. ✅ Diagnosed root cause from failure logs (runs 25593201093 + 25418843233 + 25204644120)
+2. ✅ Escalated on #333 with exact steps for Jony ([comment](https://github.com/cohenjo/trading-journal/issues/333#issuecomment-4413447955))
+3. ✅ Cross-referenced #331, #329, #326 → pointing at #333
+
+### Blocked On
+Jony must set `SUPABASE_PROD_DB_URL` in GitHub Settings → Secrets → Actions with the Supabase **direct** connection URL (port 5432). Format: `postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres`. If project is paused, restore it at supabase.com/dashboard first.
+
+### Next Steps
+- Jony sets secret → manually triggers workflow → confirms success → closes #333 (and #326, #329, #331).
