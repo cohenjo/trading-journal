@@ -469,3 +469,27 @@ Ran the actual production backfill using 4 manually-exported Activity Flex XML f
 📌 Team update (2026-05-07): McManus's lifecycle/roll canonical spec now authoritative. Two latent bugs identified: (1) `_status()` misclassifies rolls as "open" — needs net-quantity fix; (2) `classify_roll()` uses wrong field (`realized_pnl` vs. `net_cash_flow`). Fixes documented in `.squad/decisions.md`.
 
 📌 **Team update (2026-05-09):** Migration drift audit (#335) completed — 335-line reconciliation plan awaiting Jony approval. Kujan trimmed docker-compose to worker-only (#337). Redfoot fixed Playwright afterAll() hook placement (#334). Fenster + McManus shipped stacked income chart on /summary (#338).
+
+## 2026-05-09T18:19:36+03:00 — Issue #339 Part A: Dividend Estimations Persistence
+
+**Context:** Users entering historical dividend income on `/dividends/estimations` saw data disappear after refresh.
+
+**Root cause:** No `dividend_estimations` table existed. The page only updated local state via `setHistoricalData(newData)` with no API call.
+
+**Fix:**
+- Created `supabase/migrations/20260509151900_dividend_estimations_table.sql`:
+  - Table: `dividend_estimations(household_id, year, amount)` with unique constraint on `(household_id, year)`
+  - RLS policies: household-scoped read/write using `is_household_member` / `is_household_writer`
+  - Indexes on `household_id` and `year` for efficient queries
+- Added server actions in `apps/frontend/src/app/dividends/actions.ts`:
+  - `getDividendEstimations()`: Fetches all estimations for the user's household
+  - `saveDividendEstimations()`: Delete-then-insert pattern for idempotent upsert
+- Updated `/dividends/estimations/page.tsx`:
+  - Load estimations on mount via `getDividendEstimations()`
+  - Save via `saveDividendEstimations()` with loading states and inline error/success alerts
+
+**Outcome:** Estimations now persist across refreshes. Upsert by `(household_id, year)` ensures no duplicates.
+
+**Pattern learned:** Always verify table existence before building CRUD UI. Follow household-scoped RLS pattern with `resolveHouseholdId` helper.
+
+**Paired with:** Fenster (frontend integration) — working as Hockney (backend).

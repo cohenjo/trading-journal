@@ -196,3 +196,12 @@ See `.squad/decisions/inbox/keaton-flex-backfill-strategy.md` for full 3-tier an
 📌 **Team update (2026-05-06T11:35:28Z):** Two-tier API retry pattern extracted as reusable skill in `.squad/skills/two-tier-api-retry/SKILL.md`. Implements transport-tier short backoff (5s–80s for TCP/TLS) + application-tier long backoff (60s–600s for backend throttle). First applied to IBKR Flex 1001 error. Available for adoption by other teams. — Hockney
 
 📌 Team update (2026-05-06): Architectural review gate for Flex backfill resilience PRs active. Phase A, failure log, --xml-dir, and test coverage awaiting review before main merge. ~12–15 commits staged.
+
+📌 **Stock Positions Design for #340 (2026-05-09T18:19:36+03:00):**
+- Scoped design for multi-account stock positions across IB (Flex STK), Schwab, IRA (manual).
+- Key finding: Flex parser already handles `OpenPositions` section but filters to OPT only (line 199). STK rows silently dropped. Fix: add `elif assetCategory == "STK"` branch.
+- Existing `dividend_positions` table lacks cost basis, currency, and account FK. New `stock_positions` table designed to unify all sources with `source` discriminator ('flex' | 'manual').
+- `trading_account_config.account_type` already supports non-IBKR values — no schema change needed for account registration.
+- `price_cache` table exists but is unpopulated. `dividend_ticker_data` (yfinance) is the viable pricing source for Phase 1.
+- Migration must land after Hockney's drift reconciliation (#335). Timestamp ≥ 20260510000000.
+- Design doc at `.squad/decisions/inbox/keaton-accounts-positions-design.md`.

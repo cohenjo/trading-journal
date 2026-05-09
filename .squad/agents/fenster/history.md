@@ -173,3 +173,27 @@ This is a common trap with financial time-series data. Our bug happened because 
 McManus and I paired on this — the separation between data layer (his) and UI layer (mine) made it easy to spot the bug at the boundary and fix it quickly.
 
 📌 **Team update (2026-05-09T18:26:00+03:00):** Fixed #341 stacked income chart cumulative bug. 2025 options now shows correct ~$96k (was ~$373k). Paired with McManus on diagnosis + fix. (commit 1649369)
+
+## 2026-05-09T18:19:36+03:00 — Issue #339 Part B: Summary Uses Dividend Estimations
+
+**Context:** The `/summary` stacked income chart projected dividends using a simple growth model. Jony wanted to override specific years with actual/estimated values.
+
+**Task:** Fetch dividend estimations from the new `dividend_estimations` table and merge with the projection model — estimation wins if present, otherwise fall back to projection.
+
+**Changes:**
+- `apps/frontend/src/app/summary/page.tsx`:
+  - Import `getDividendEstimations` from `@/app/dividends/actions`
+  - Fetch estimations and build a `Map<year, amount>` for fast lookups
+  - Build `divSourceMap` to track whether each year's value came from 'estimation' or 'projection'
+  - In the merge loop: `if (estimationsMap.has(year))` use that, else compute projection
+  - Pass `dividendsSource` to `YearlyIncomeData` objects
+- `apps/frontend/src/components/Summary/StackedIncomeBarChart.tsx`:
+  - Added `dividendsSource?: 'estimation' | 'projection'` to `YearlyIncomeData` and `TooltipData`
+  - Tooltip now shows `(est.)` badge next to "Dividends" when source is 'estimation'
+  - Updated chart description: "Dividends use your estimations where entered, otherwise project with X% growth rate"
+
+**Outcome:** Summary chart now respects user-entered estimations. Tooltip makes the data source transparent.
+
+**Pattern learned:** When merging user-entered data with model projections, always track provenance and surface it in the UI. Estimations override projections, not vice versa.
+
+**Paired with:** Hockney (backend schema + actions) — working as Fenster (frontend).
