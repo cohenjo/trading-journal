@@ -4,7 +4,10 @@ import { createClient } from '@/lib/supabase/server';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export type TradingAccountType = 'IBKR' | 'SCHWAB';
+export type TradingAccountType = 'IBKR' | 'SCHWAB' | 'ibkr' | 'schwab' | 'ira';
+
+/** Canonical lowercase type used for Phase 2 3-account UI. */
+export type Phase2AccountType = 'ibkr' | 'schwab' | 'ira';
 
 export interface TradingAccountConfig {
   id: number;
@@ -303,10 +306,227 @@ export async function getTradingSummary(accountId?: number | null): Promise<Trad
   return data ? coerceSummary(data as Record<string, unknown>) : null;
 }
 
+// ── Stock Positions (Phase 2) ─────────────────────────────────────────────────
+
+/** A single stock position row from `stock_positions`. */
+export interface StockPosition {
+  id: string;
+  account_id: number;
+  ticker: string;
+  description: string | null;
+  sub_category: string | null;
+  quantity: number;
+  cost_basis: number | null;
+  mark_price: number | null;
+  market_value: number | null;
+  unrealized_pnl: number | null;
+  currency: string;
+  as_of_date: string;
+  source: 'flex' | 'manual';
+}
+
+export interface CreateStockPositionPayload {
+  account_id: number;
+  ticker: string;
+  quantity: number;
+  cost_basis?: number | null;
+  as_of_date: string;
+  currency?: string;
+}
+
+export type StockPositionResult =
+  | { ok: true; position: StockPosition }
+  | { ok: false; error: string };
+
+export type DeleteStockPositionResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+export interface DividendProjectionResult {
+  total_annual: number;
+  by_ticker: Array<{ ticker: string; annual_income: number }>;
+  by_account: Array<{ account_id: number; annual_income: number }>;
+}
+
+function coerceStockPosition(row: Record<string, unknown>): StockPosition {
+  return {
+    id: String(row.id ?? ''),
+    account_id: coerceNumber(row.account_id as number | string),
+    ticker: String(row.ticker ?? ''),
+    description: row.description != null ? String(row.description) : null,
+    sub_category: row.sub_category != null ? String(row.sub_category) : null,
+    quantity: coerceNumber(row.quantity as number | string),
+    cost_basis: row.cost_basis != null ? coerceNumber(row.cost_basis as number | string) : null,
+    mark_price: row.mark_price != null ? coerceNumber(row.mark_price as number | string) : null,
+    market_value: row.market_value != null ? coerceNumber(row.market_value as number | string) : null,
+    unrealized_pnl: row.unrealized_pnl != null ? coerceNumber(row.unrealized_pnl as number | string) : null,
+    currency: String(row.currency ?? 'USD'),
+    as_of_date: String(row.as_of_date ?? ''),
+    source: row.source === 'manual' ? 'manual' : 'flex',
+  };
+}
+
 /**
- * Lists current trading positions for the authenticated user's household,
- * optionally scoped to one trading account config.
+ * Returns stock positions for the authenticated user's household,
+ * optionally scoped to one account. Returns [] gracefully if the
+ * stock_positions table doesn't exist yet (pre-migration).
  */
+export async function getStockPositions(accountId?: number | null): Promise<StockPosition[]> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return [];
+
+  let query = supabase
+    .from('stock_positions')
+    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, unrealized_pnl, currency, as_of_date, source')
+    .order('ticker', { ascending: true });
+
+  if (accountId) query = query.eq('account_id', accountId);
+
+  const { data, error } = await query;
+
+  if (error) {
+    // Table may not exist yet — degrade gracefully
+    console.warn('[getStockPositions] query error (table may be pre-migration):', error.message);
+    return [];
+  }
+
+  return ((data ?? []) as Array<Record<string, unknown>>).map(coerceStockPosition);
+}
+
+/**
+ * Creates a manual stock position (Schwab/IRA).
+ * Security: household_id is resolved from session; source is always 'manual'.
+ */
+export async function createStockPosition(
+  payload: CreateStockPositionPayload,
+): Promise<StockPositionResult> {
+  if (!payload.ticker?.trim()) return { ok: false, error: 'Ticker must not be empty' };
+  if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
+    return { ok: false, error: 'Quantity must be greater than 0' };
+  }
+  if (!payload.as_of_date) return { ok: false, error: 'As-of date is required' };
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return { ok: false, error: 'Not authenticated' };
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) return { ok: false, error: 'No active household found' };
+
+  const { data, error } = await supabase
+    .from('stock_positions')
+    .insert({
+      household_id: householdId,
+      account_id: payload.account_id,
+      ticker: payload.ticker.trim().toUpperCase(),
+      quantity: payload.quantity,
+      cost_basis: payload.cost_basis ?? null,
+      as_of_date: payload.as_of_date,
+      currency: payload.currency ?? 'USD',
+      source: 'manual',
+    })
+    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, unrealized_pnl, currency, as_of_date, source')
+    .single();
+
+  if (error) {
+    console.error('[createStockPosition] insert error:', error.message);
+    return { ok: false, error: 'Failed to create position' };
+  }
+
+  return { ok: true, position: coerceStockPosition(data as Record<string, unknown>) };
+}
+
+/**
+ * Deletes a manual stock position by ID.
+ */
+export async function deleteStockPosition(id: string): Promise<DeleteStockPositionResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return { ok: false, error: 'Not authenticated' };
+
+  const { error } = await supabase
+    .from('stock_positions')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    console.error('[deleteStockPosition] delete error:', error.message);
+    return { ok: false, error: 'Failed to delete position' };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Returns distinct ticker symbols from dividend_ticker_data for autocomplete.
+ */
+export async function getTickerSymbols(): Promise<string[]> {
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from('dividend_ticker_data')
+    .select('ticker')
+    .order('ticker', { ascending: true });
+
+  if (error) {
+    console.warn('[getTickerSymbols] query error:', error.message);
+    return [];
+  }
+
+  const tickers = [...new Set(((data ?? []) as Array<{ ticker: string }>).map(r => r.ticker))];
+  return tickers;
+}
+
+/**
+ * Triggers an IBKR Flex re-sync for the specified account.
+ * Returns ok:true if the sync was accepted; errors degrade gracefully.
+ */
+export async function triggerIBKRSync(accountId: number): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`/api/accounts/${accountId}/sync`, { method: 'POST' });
+    if (!res.ok) return { ok: false, error: `Sync request failed (${res.status})` };
+    return { ok: true };
+  } catch (err) {
+    console.error('[triggerIBKRSync] fetch error:', err);
+    return { ok: false, error: 'Unable to reach sync endpoint' };
+  }
+}
+
+/**
+ * Fetches the dividend projection from Hockney's new endpoint.
+ * Returns null on any network/parse error so callers can fall back gracefully.
+ */
+export async function getDividendProjection(): Promise<DividendProjectionResult | null> {
+  try {
+    const res = await fetch('/api/dividends/projection');
+    if (!res.ok) return null;
+    const json = await res.json() as unknown;
+    if (
+      typeof json === 'object' && json !== null &&
+      'total_annual' in json && typeof (json as Record<string, unknown>).total_annual === 'number'
+    ) {
+      return json as DividendProjectionResult;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getTradingPositions(accountId?: number | null): Promise<TradingPosition[]> {
   const supabase = await createClient();
 
