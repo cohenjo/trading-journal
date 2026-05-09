@@ -147,3 +147,21 @@ See `.squad/decisions/inbox/keaton-flex-backfill-strategy.md` for full 3-tier an
 - `price_cache` table exists but is unpopulated. `dividend_ticker_data` (yfinance) is the viable pricing source for Phase 1.
 - Migration must land after Hockney's drift reconciliation (#335). Timestamp ≥ 20260510000000.
 - Design doc at `.squad/decisions/inbox/keaton-accounts-positions-design.md`.
+
+## Learnings
+
+### 2026-05-09 — Phase 2 Plan: Accounts/Positions + Dividend Table Decision
+
+**Context:** Jony answered Phase 1 open questions for #340. Reconciled answers into Phase 2 work plan.
+
+**`dividend_positions` Decision (option b — fold into `stock_positions`):**
+`dividend_positions` is deprecated progressively. `stock_positions` becomes the single source of truth for all held positions across all accounts; `dividend_ticker_data` (already populated by yfinance worker) acts as the per-symbol yield lookup. `dividend_positions` stays alive through Phase 2c (no dashboard breakage), then is dropped in Phase 2d after the `/dividends` dashboard is migrated to read from `stock_positions JOIN dividend_ticker_data`. Key migration risk: 6 queries in `apps/frontend/src/app/dividends/actions.ts` reference `dividend_positions` directly — each must be ported before drop.
+
+**3-Account Hard-Coded Set:**
+Exactly `['ibkr', 'schwab', 'ira']` — enforced via CHECK constraint on `trading_account_config.account_type`. IBKR is Flex-synced; Schwab and IRA (Hishtalmut) are manual CRUD. No arbitrary account names. Enum must be migrated if a 4th account is ever added.
+
+**Architectural Risk — #342 Regression:**
+`summary/page.tsx` derives `projectedDividendAmount` from `dividend_positions` data today. When Fenster wires it to `GET /api/dividends/projection`, if `stock_positions` is empty the chart regresses to $0 (identical to pre-#342 bug). Mitigation: projection endpoint must fall back to `dividend_positions` total during transition; Redfoot must add regression guard test.
+
+**McManus Dependency:**
+All Flex STK parser work (H3) gates on McManus confirming whether existing Activity XMLs carry STK `OpenPosition` rows or if a new Flex query template is needed. Schema migration (H1) is Flex-source-agnostic and can proceed immediately.

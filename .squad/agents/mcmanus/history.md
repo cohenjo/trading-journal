@@ -147,3 +147,52 @@ This is a common trap with financial time-series data. Our bug happened because 
 Fenster and I paired on this. The clear separation between data layer (mine) and UI layer (his) made it easy to spot the bug at the boundary and fix it quickly. The chart worked perfectly — the data contract was just wrong.
 
 📌 **Team update (2026-05-09T18:26:00+03:00):** Fixed #341 stacked income chart cumulative bug. 2025 options now shows correct ~$96k (was ~$373k). Paired with Fenster on diagnosis + fix. (commit 1649369)
+
+## Phase 2 Positions Source Investigation (2026-05-09, Issue #340)
+
+**Mission:** Determine whether the existing IBKR Activity Flex query (`1496910`) already surfaces STK `<OpenPosition>` rows sufficient for an "Open Positions" view, or whether a new Flex query template is needed — gating Hockney's backend and Keaton's design.
+
+### Findings
+
+**Flex XML content (reports/activity/):**
+- All 4 annual files (2022–2025, query ID `1496910`) contain a rich `<OpenPositions>` section with BOTH OPT and STK rows.
+- STK row counts per file: 2022=63, 2023=45, 2024=51, 2025=54
+- Available attributes per STK row: `accountId`, `conid`, `symbol`, `description`, `currency`, `subCategory` (COMMON/ETF/REIT/PREFERENCE), `position` (quantity), `markPrice`, `positionValue`, `costBasisPrice`, `costBasisMoney`, `fifoPnlUnrealized`, `putCall` (always empty "" for STK), `multiplier` (always 1), `underlyingSymbol`, `openDateTime` (always empty for STK — no per-lot open date available)
+- BOND and CASH asset categories also appear in OpenPositions (32 BOND, 8 CASH in 2025 file)
+
+**Parser behavior (flex_parser.py, lines 198–200):**
+- `OpenPositions` section IS parsed, but **only** rows passing `_is_option_contract_row()` are kept.
+- STK/BOND/CASH positions are silently dropped. This is a 5-line change to add an STK branch.
+- `FlexOpenPosition` model captures: `account_id`, `leg`, `as_of_date`, `opened_at`, `quantity_open`, `average_open_price` (mapped from `costBasisPrice`), `open_cash_flow` (mapped from `costBasisMoney`), `ib_margin_requirement`, `last_broker_sync_at`, `raw_payload`.
+- Missing from current model for STK: `markPrice`, `positionValue`, `fifoPnlUnrealized`, `symbol`, `conid`, `sub_category`, `currency` (all in `raw_payload` but not projected fields).
+
+**Flex query configuration:**
+- Query ID `1496910` is used by the live daily sync.
+- `flex_probe.py` defines 5 query ENV keys: `trades`, `option_eae`, `cash`, `positions`, `account_info`. The `IBKR_FLEX_QUERY_ID_POSITIONS` key exists but is currently unused in the options pipeline (options_sync.py uses the activity XML which has all sections bundled).
+- The `OpenPositions` section in existing XMLs is confirmed present — **no new Flex query template needed**.
+
+**DB schema — current state:**
+- `options_positions`: OPT-specific. Has FK `leg_id → options_legs` (options-specific concept). Not reusable for STK.
+- `dividend_positions`: Manual roster `{id, account, ticker, shares}` with index on `account`. No market data, no `conid`, no `currency`. Used for dividend income enrichment via yfinance. NOT synced from Flex XML.
+- `trading_positions`: Live-API-sourced `{symbol, amount, sec_type, avg_cost, con_id, timestamp, account_config_id, household_id}`. Populated from trading_service.py (IBKR/Schwab live API), not from Flex XML. Lacks `markPrice`, `positionValue`, `unrealized_pnl`, `cost_basis_total`.
+- **No `stock_positions` table from Flex XML exists yet.** A new table is needed.
+
+**Dividend pipeline coupling:**
+- `dividend_positions` (manual roster) → `dividend_service.py` enriches via yfinance → computes `annual_income = shares × dividend_rate`. Summary page reads this projected annual income.
+- `dividend_estimations` (just shipped in migration 20260509151900): user-entered year-level income overrides `{household_id, year, amount}`. Summary page's `buildYearlyIncomeData()` uses estimations for past years where user has overridden the projection.
+- These two tables are **separate concerns**: `dividend_positions` drives the yfinance projection; `dividend_estimations` overrides the chart per year.
+- Neither table interacts with Flex XML — they're fully manual/user-entered.
+
+### Recommendation: Option A — Existing XML is sufficient
+
+The STK `<OpenPosition>` data is fully present in every annual Flex XML file. No new IBKR query template needed. Implementation path:
+1. **Parser** (5 lines): Add STK branch alongside OPT branch in `parse_flex_files()` at line 198. Capture a `FlexStockPosition` model with STK-relevant fields (symbol, conid, quantity, costBasisPrice, costBasisMoney, markPrice, positionValue, fifoPnlUnrealized, currency, subCategory, putCall guard).
+2. **DB migration**: New `stock_positions` table with `(id, household_id, account_id, as_of_date, symbol, conid, description, sub_category, currency, quantity, cost_basis_price, cost_basis_total, mark_price, market_value, unrealized_pnl, raw_payload, last_broker_sync_at, created_at, updated_at)`. Unique key: `(household_id, account_id, as_of_date, symbol, conid)`. Delete-then-insert scoped by `as_of_date` (same pattern as options_positions).
+3. **Handler** (Hockney): New `_sync_stock_positions()` function in options_sync.py or a dedicated handler.
+4. **No IBKR Account Management changes** needed.
+
+### Key insight
+
+`openDateTime` is always empty for STK positions in the XML — IBKR does not provide per-lot open dates in the Activity Flex OpenPositions section. The positions view will show aggregate quantity and average cost basis but not open-date-per-lot. This is acceptable for an "Open Positions" dashboard view but rules out per-lot holding period calculations from this data source alone.
+
+📌 **Team update (2026-05-09T20:53:00+03:00):** Phase 2 positions source investigation complete. Verdict: **Option A** — existing Activity Flex XML (query 1496910) already contains STK `<OpenPosition>` rows with all needed fields. Parser at flex_parser.py:198–200 silently drops STK rows — 5-line fix. Need new `stock_positions` table (no IBKR changes). Unblocks Hockney + Keaton.

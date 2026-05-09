@@ -249,3 +249,45 @@ Introduced `export const SERIES_COLORS = { options, dividends, bonds }` in `Stac
 - `apps/frontend/src/components/Summary/__tests__/StackedIncomeBarChart.test.tsx` (new color test, updated series indices 0/1/2 to reflect bonds/dividends/options order)
 
 **Commit:** `362851a`
+
+---
+
+## Issue #340 Phase 2 — 3-Account Tabs UI + Manual Position Entry + Dividend Projection
+
+**Commits:** `c27299a` (F1), `df86e97` (F2)
+**Date:** 2025-07-09
+
+### What was built
+
+**F1: 3-Account Tabs UI**
+- Rewrote `/trading/accounts/page.tsx`: IBKR / Schwab / IRA / Settings tabs
+- `normalizeType()` handles case mismatch (DB uses uppercase `'IBKR'`, `'SCHWAB'`)
+- `StockPositionsTable.tsx`: readonly/editable mode, P&L coloring (green/red), multi-currency (USD/EUR/JPY via `Intl.NumberFormat`), delete button, total footer
+- `AccountHeader.tsx`: account name badge, "FLEX" (IBKR) vs "MANUAL" (Schwab/IRA), IBKR refresh button vs manual add-position button
+- `AggregatePortfolioFooter.tsx`: total portfolio value + per-account breakdown bars + top-5 holdings
+- `AddPositionModal.tsx`: ticker autocomplete from `dividend_ticker_data`, quantity/cost-basis/date fields, validation, error display
+- All 6 server actions (`getStockPositions`, `createStockPosition`, `deleteStockPosition`, `getTickerSymbols`, `triggerIBKRSync`, `getDividendProjection`) degrade gracefully if `stock_positions` table missing (Hockney's migration pending)
+
+**F2: Dividend Projection Wire-Up**
+- `summary/page.tsx`: `getDividendProjection()` called first; falls back to `getDividendDashboard().stats.annual_income` if unavailable
+- `buildYearlyIncomeData.ts` unchanged (preserves #342 fix)
+
+### Key debugging lesson — jsdom `type="number"` with `min` attribute
+
+The two failing tests (`quantity = "0"`, `quantity = "-5"`) were traced to jsdom's handling of `<input type="number" min="0.000001">`. When jsdom sanitizes the value, fractional-min inputs with integer test values may not expose the expected `e.target.value`. Fixes applied:
+1. Changed `min="0.000001"` → `min="0"` (validation is still JavaScript-only: `qty <= 0`)
+2. Added `data-testid="position-form"` to the `<form>` element
+3. Used `fireEvent.submit(form)` instead of `fireEvent.click(button)` for quantity-validation tests to bypass button click routing; wrapped each `fireEvent` in `await act(async () => {})`
+
+Result: all 364 tests passing.
+
+### Test coverage added
+- `StockPositionsTable.test.tsx`: 15 tests
+- `AggregatePortfolioFooter.test.tsx`: 8 tests
+- `AddPositionModal.test.tsx`: 11 tests
+
+**Files changed:**
+- `apps/frontend/src/app/trading/actions.ts` (Phase2 types + 6 new actions)
+- `apps/frontend/src/app/trading/accounts/page.tsx` (complete rewrite)
+- `apps/frontend/src/app/summary/page.tsx` (dividend projection wire-up)
+- `apps/frontend/src/components/trading/accounts/` (4 new components + 3 test files)
