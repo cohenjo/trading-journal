@@ -14,15 +14,6 @@
 
 PR #90 opened and ready for review.
 
-### 2026-04-30 — YOLO Direct-Apply Round: Baseline + Keaton Review
-
-**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
-**Work (Round 1):** Consolidated 22 Alembic migrations into single idempotent baseline migration (20260430115000_baseline_legacy_schema.sql) for fresh Supabase instances. Reconstructed missing trade table creation from d869bcf363dc logic. Fixed SQL reserved word quoting (`right` column). Applied baseline successfully to both DEV+PROD.
-
-**Work (Round 2):** Addressed all 3 code review findings from Keaton on PR #90: added `tradingaccounttype` enum, filled missing column additions, ensured FK constraint coverage. Commit 5a8367e merged.
-
-**Key Insight:** Alembic migrations cannot be replayed directly on fresh Supabase instances; baseline consolidation + idempotent CREATE TABLE IF NOT EXISTS pattern is the right approach for cloud deployment.
-
 📌 Team update (2026-05-06): FLEX backfill chunking pattern (monthly chunks) + checkpoint resume now in backfill_options.py — useful precedent for #65 (Postgres backfill) and multi-chunk import work — decided by Hockney
 
 ## 2026-05-06 — Data Integrity Review: `--continue-on-error` for Flex Backfill
@@ -196,3 +187,11 @@ The STK `<OpenPosition>` data is fully present in every annual Flex XML file. No
 `openDateTime` is always empty for STK positions in the XML — IBKR does not provide per-lot open dates in the Activity Flex OpenPositions section. The positions view will show aggregate quantity and average cost basis but not open-date-per-lot. This is acceptable for an "Open Positions" dashboard view but rules out per-lot holding period calculations from this data source alone.
 
 📌 **Team update (2026-05-09T20:53:00+03:00):** Phase 2 positions source investigation complete. Verdict: **Option A** — existing Activity Flex XML (query 1496910) already contains STK `<OpenPosition>` rows with all needed fields. Parser at flex_parser.py:198–200 silently drops STK rows — 5-line fix. Need new `stock_positions` table (no IBKR changes). Unblocks Hockney + Keaton.
+
+## 2026-05-09 — Flex query redesign for #340 follow-up
+
+Jony reported deployed `/trading/accounts` data had duplicate rows and wrong quantities when trades were used as source. I wrote `.squad/decisions/inbox/mcmanus-flex-query-spec.md` recommending one revised Activity Flex query with OpenPositions, FinancialInstrumentInformation, CashTransactions, ChangeInDividendAccruals, OpenDividendAccruals, and CorporateActions. Verified prod has `stock_positions`, `bond_holdings`, `dividend_ticker_data`, and `dividend_estimations`, but not `dividend_payments` or `dividend_accruals`. Key lesson: Option A was right on source direction but too narrow on field coverage and UI reconciliation.
+
+---
+
+📌 **Team update (2026-05-09):** Flex spec submitted; awaiting Jony portal config. Phase 2 reflection (§9 of spec) contains lessons for future broker-data work. Recommend archiving Phase 2 section for reference when planning dividend accrual and bond analytics enrichment. — Scribe

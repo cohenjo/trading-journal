@@ -339,3 +339,7 @@ Result: all 364 tests passing.
 - `apps/frontend/src/app/trading/accounts/page.tsx` (complete rewrite)
 - `apps/frontend/src/app/summary/page.tsx` (dividend projection wire-up)
 - `apps/frontend/src/components/trading/accounts/` (4 new components + 3 test files)
+
+---
+
+📌 **Team update (2026-05-09):** Backend dedup pattern (#340) now also enforced at server-action layer. Frontend `dedupeLatestSnapshot()` in `apps/frontend/src/app/trading/actions.ts` keeps row with max `as_of_date` per `(account_id, ticker)`. Result: 213 raw rows → 55 unique tickers. Verify actual data path end-to-end before declaring multi-agent features done. — Scribe

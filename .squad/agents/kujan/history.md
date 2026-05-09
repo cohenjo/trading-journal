@@ -221,3 +221,7 @@ The working solution:
 - **pg_dump fix:** ✅ Complete and verified
 - **Issues #333, #331, #329, #326:** Ready to close (pg_dump now works; encryption failure is separate infrastructure issue)
 - **Workflow still incomplete:** AGE_PUBLIC_KEY secret missing/empty. This is pre-existing and unrelated to pg_dump version mismatch fix. Requires separate investigation into GitHub secrets configuration.
+
+---
+
+📌 **Team update (2026-05-09):** PostgreSQL runner environment: ubuntu-22.04 has PG14 baked in; cannot be removed. Workaround: install `postgresql-client-17` ALONGSIDE and invoke via absolute path `/usr/lib/postgresql/17/bin/pg_dump`. Backup workflow now succeeds on pg_dump step; blocked on AGE_PUBLIC_KEY secret (Jony action). Pattern documented in decisions.md for future runner upgrades. — Scribe

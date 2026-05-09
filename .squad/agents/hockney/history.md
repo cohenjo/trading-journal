@@ -227,12 +227,6 @@ Ran the actual production backfill using 4 manually-exported Activity Flex XML f
 - options_legs: 413 → 1,262 (+849)
 - options_dashboard_monthly: 13 → 53 (+40)
 
-**Date coverage:** 2022-01-04 → 2026-05-01 (full historical backfill plus existing 2026 YTD data)
-
-**Reconciliation:** cash_flow=$373,826.26, realized_pnl=$218,955.64, variance_gap=$154,870.62
-
-**Key insight:** Python stdout buffering delayed log output during the run, but DB monitoring confirmed steady data ingestion. No failures file generated — all 4 yearly chunks parsed and committed successfully. The database now has complete options history 2022–2025, ready for daily incremental sync to handle 2026-01-01 onward.
-
 📌 Team update (2026-05-06): Flex backfill resilience shipped — 4 rounds completed (Phase A session/CLI flags + failure log + --xml-dir mode + production run 2022–2025). Keaton's pre-merge review in flight.
 
 📌 Team update (2026-07-02): Lifecycle classifier fix shipped — Trade Lifecycle Timeline and Roll Efficiency Donut charts were broken because the 2022–2025 IBKR backfill omitted `openCloseIndicator` from the Flex report template. This caused `_event_type_from_open_close(None)` to return `"adjustment"` for all trades, making the strategy grouper classify every trade as an ungrouped singleton with status "open" (3,562/3,562), and leaving `options_roll_events` completely empty.
@@ -336,3 +330,7 @@ New `apps/backend/app/api/positions.py`:
 - **Postgres ENUM migration difficulty:** `tradingaccounttype` enum with uppercase values needed to change to lowercase + add new value. Rather than `ALTER TYPE ... ADD VALUE` (which would still leave uppercase-lowercase mismatch for existing rows), converted the column to `text` via the existing CHECK constraint migration pattern — drop old CHECK, bulk-update values to lower(), add new CHECK. Much cleaner.
 - **Backfill via Supabase tool vs. app script:** The `backfill_options.py` script was slow to produce output (suspected DB connection pooler warm-up latency on the Supabase side). For one-shot backfills, constructing raw SQL INSERT via the Supabase MCP or a minimal Python script against the engine is faster.
 - **FlexParseResult immutability + new field:** Adding a field to a `ConfigDict(frozen=True)` Pydantic model requires updating all constructor call sites (`_scope_result`, `_filter_result_by_dates`, `FlexParseResult(...)` in `parse_flex_files`). Missing one causes a Pydantic validation error at runtime. Always grep for all construction sites when adding fields.
+
+---
+
+📌 **Team update (2026-05-09):** #340 API fix was bypassed by frontend; future API work should verify the actual frontend data path before declaring done. Also, `SUPABASE_DIRECT_SESSION_URL` env var now available for tooling and migration ops. Use `psql ... schema_migrations.statements` technique to retrieve remote-applied SQL (see prune results). — Scribe

@@ -455,3 +455,8 @@ Migration `20260502120000_auto_provision_household_on_signup` was absent from pr
 - Approximately 19 distinct work items
 
 **Full history backed up to history-archive.md**
+**Date coverage:** 2022-01-04 → 2026-05-01 (full historical backfill plus existing 2026 YTD data)
+
+**Reconciliation:** cash_flow=$373,826.26, realized_pnl=$218,955.64, variance_gap=$154,870.62
+
+**Key insight:** Python stdout buffering delayed log output during the run, but DB monitoring confirmed steady data ingestion. No failures file generated — all 4 yearly chunks parsed and committed successfully. The database now has complete options history 2022–2025, ready for daily incremental sync to handle 2026-01-01 onward.
