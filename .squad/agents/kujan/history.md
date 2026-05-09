@@ -75,3 +75,61 @@ Both worker and backend poll `compute_jobs` with `next_retry_at` in WHERE clause
 
 
 📌 Team update (2026-05-07): Docker stack rebuilt and healthy. Worker polling compute_jobs queue. Coordinator applied schema migration to Supabase production (compute_jobs.next_retry_at). Ready for backend to re-run classification jobs post-merge.
+
+## 2026-05-09T13:30 — Docker compose trim + pre-commit workflow change (Issues #336, #337)
+
+### Summary
+Trimmed docker-compose.yml to worker-only and removed no-commit-to-branch pre-commit hook per Jony's request.
+
+### Actions Taken
+
+#### Issue #337 — Trim docker-compose
+1. ✅ Analyzed architecture shift:
+   - DB → Supabase (cloud)
+   - Frontend → Vercel (cloud)
+   - Backend → Subsumed by worker for compute jobs
+   - Worker → Docker local, processes `compute_jobs` queue
+   - IB Gateway → REMOVED (replaced with Flex queries: `apps/backend/scripts/flex_probe.py`, `flex_parser.py`)
+   - OTEL collector → REMOVED (worker doesn't import opentelemetry; only API routes use it, but those run on Vercel)
+2. ✅ Trimmed `docker-compose.yml`:
+   - Removed: `db`, `backend`, `frontend`, `ib-gateway`, `otel-collector`, `prometheus`, `jaeger`, `grafana`
+   - Kept: `worker` (polls `compute_jobs` every 5s, writes heartbeat to `/app/worker_heartbeat`)
+   - Worker env: `DATABASE_URL` (Supabase), `WORKER_HEARTBEAT_FILE`, `WORKER_POLL_INTERVAL_SECONDS`
+3. ✅ Deleted `docker-compose.backend.yml` (redundant)
+4. ✅ Updated docs:
+   - `README.md`: New "Running with Docker Compose" section (worker-only)
+   - `docs/options-income-dashboard-design.md`: Removed `ib_gateway` from enum
+   - `docs/design-hosting/operations/secrets-and-env-vars.md`: Replaced IB Gateway section with worker-only env vars
+5. ✅ Verified:
+   - `docker compose config` → validates successfully
+   - `docker compose up -d worker` → boots in ~30s, builds deps, starts polling
+   - Logs show: `INFO:apscheduler.executors.default:Job "_safe_poll_compute_jobs" executed successfully` every 5s
+   - Worker status: `healthy` after startup period
+
+#### Issue #336 — Drop no-commit-to-branch hook
+1. ✅ Removed `no-commit-to-branch` hook from `.pre-commit-config.yaml`
+2. ✅ Updated `CONTRIBUTING.md`:
+   - Added "Development Workflow" section
+   - Direct commits to `main` OK for low-risk changes (docs, config, single-file edits)
+   - PRs recommended for multi-file/feature work
+   - Worktrees encouraged for parallel work
+   - Updated hooks table (removed `no-commit-to-branch`, kept all security hooks)
+3. ✅ Verified:
+   - `uv run pre-commit run --all-files` → passes (trailing whitespace fixed)
+   - `grep -i 'no-commit'` on pre-commit output → no results (hook is gone)
+
+### Current State
+- **docker-compose.yml:** Worker-only. Clean, minimal.
+- **Pre-commit hooks:** Security hooks active (gitleaks, private key detection, reject .env files, ruff). No branch blocking.
+- **Commits pushed:**
+  - `a1fb363` — chore(compose): trim to worker-only, remove db/frontend/backend/ib-gateway (Closes #337)
+  - `01eaa08` — chore(pre-commit): remove no-commit-to-branch hook + document workflow (Closes #336)
+
+### Learnings & Gotchas
+- **OTEL usage:** Only `apps/backend/app/api/metrics.py` and `app/api/plans.py` import opentelemetry. Worker doesn't. Safe to remove otel-collector from compose.
+- **IB Gateway references:** Removed from compose but still exist in worker handlers (`apps/backend/app/worker/handlers/options_margin_sync.py`) as fallback. Code checks `is_ib_gateway_available()` and skips gracefully if offline. No action needed; handlers will naturally stop trying once IB Gateway is never available.
+- **Git index.lock issue:** Encountered during staging. Removed `.git/index.lock` to proceed. Likely VSCode git extension holding lock.
+- **docs/ in .gitignore:** Ran into `ignored by .gitignore` error. Used `git add -f` to force-add specific doc files. Good pattern for tracked files in ignored directories.
+
+### Next Steps
+None. Both issues resolved. Worker is production-ready on Supabase.

@@ -18,7 +18,7 @@ type Props = {
 export default function StackedIncomeChart({ data, cutoffYear }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  
+
   const totalSeriesRef = useRef<ISeriesApi<"Area"> | null>(null);
   const ladderDivsSeriesRef = useRef<ISeriesApi<"Area"> | null>(null);
   const ladderSeriesRef = useRef<ISeriesApi<"Area"> | null>(null);

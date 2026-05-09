@@ -190,6 +190,49 @@ export async function getOptionsMonthlyMetrics(year?: number, accountId?: string
   }));
 }
 
+/**
+ * Reads yearly options cumulative cash flow by taking the last month of each year.
+ * For future projection, we conservatively assume 0 (no new positions opened).
+ * This is the "Cumulative Cash Flow" metric that represents total option premium collected.
+ */
+export async function getOptionsYearlyCashFlow(): Promise<Array<{ year: number; amount: number; isProjected: boolean }>> {
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('options_dashboard_monthly')
+    .select('period_start, cash_flow_cumulative')
+    .eq('household_id', householdId)
+    .order('period_start', { ascending: true });
+
+  if (error) {
+    console.error('[getOptionsYearlyCashFlow] query error:', error.message);
+    return [];
+  }
+
+  const rows = (data ?? []) as Array<{ period_start: string; cash_flow_cumulative: string | number }>;
+  const yearlyMap = new Map<number, number>();
+
+  for (const row of rows) {
+    const year = new Date(row.period_start).getFullYear();
+    const cumulative = Number(row.cash_flow_cumulative ?? 0);
+    const existing = yearlyMap.get(year) ?? 0;
+    if (cumulative > existing) {
+      yearlyMap.set(year, cumulative);
+    }
+  }
+
+  const result: Array<{ year: number; amount: number; isProjected: boolean }> = [];
+
+  for (const [year, amount] of yearlyMap.entries()) {
+    result.push({ year, amount, isProjected: false });
+  }
+
+  result.sort((a, b) => a.year - b.year);
+  return result;
+}
+
 /** Reads detected roll events and joined close/open trade details for chart tooltips. */
 export async function getOptionsRollEvents(
   rangeStart: Date,
