@@ -1,3 +1,35 @@
+## 2026-05-09 — #335 Migration Drift Resolution (Option B — Pragmatic Prune)
+
+**Scope:** Reconcile 47 local migration files vs 46 remote-applied. Align timestamps,
+commit-back remote-only SQL, apply 8 pending migrations, defer 1 destructive one.
+
+**Executed:**
+
+**Phase 1 — Alignment (commit `85eebb3`):**
+- Renamed 14 local files to match remote timestamps (remote timestamp is canonical).
+  Includes 3 from recent #340 work that used manually-set 2026-05-10 timestamps but
+  were applied to prod with auto-generated 2026-05-09 timestamps.
+- Pulled SQL for 5 remote-only migrations from `supabase_migrations.schema_migrations.statements`
+  using `array_to_string(statements, E';\n')` via psql.
+
+**Phase 2 — Prune:**
+- 0 files deleted — all 9 local-only migrations have active code refs or open issues.
+
+**Phase 3 — Apply (via `supabase db push --db-url $SUPABASE_DIRECT_SESSION_URL --include-all`):**
+- Applied 8 migrations: wave2b_holdings_dividends_db, revoke_handle_new_user_household_exec,
+  analyze_batch_results, add_trading_last_synced_at, options_ladder_schema_close,
+  household_audit_trail, household_refresh_state, household_invites_schema.
+- Remote count: 46 → 54.
+
+**Phase 4 — Deferred:**
+- `20260501120000_align_insurance_policies_household_id.sql` deferred. Has `DROP COLUMN user_id`
+  + `DELETE FROM insurance_policies WHERE household_id IS NULL`. Awaiting Jony go/no-go.
+
+**Key learnings:**
+- See `.squad/decisions/inbox/hockney-335-prune-results.md` → Learnings section.
+
+---
+
 ## 2026-05-09 — #340 follow-up: seed 3 canonical accounts
 
 **Scope:** Idempotent migration to pre-create InteractiveBrokers/Schwab/LeumiIRA in trading_account_config.
@@ -32,7 +64,43 @@
 - Worst-case 1001 patience is now ~50min (up from ~25min)
 
 
-## LearningsLearnings
+## Learnings
+
+### 2026-05-09: Migration Drift Reconciliation Patterns
+
+**SUPABASE_DIRECT_SESSION_URL is required for CLI operations.** The transaction-mode
+pooler rejects prepared statements used by `supabase migration list --db-url` and
+`supabase db push --db-url`. Always use the session-pooler URL (direct session URL) for
+Supabase CLI operations, not the transaction-pooler DATABASE_URL.
+
+**Pulling remote-only SQL:** When a migration was applied directly to prod without a
+local file, retrieve the SQL from `supabase_migrations.schema_migrations.statements`
+(a `text[]` column). Use:
+```sql
+SELECT array_to_string(statements, E';\n')
+FROM supabase_migrations.schema_migrations
+WHERE version = '20260504134746';
+```
+via `psql "$SUPABASE_DIRECT_SESSION_URL"`. Wrap in a header comment noting it was
+pulled from production.
+
+**`supabase db push` rejects out-of-order migrations.** If local pending migrations have
+timestamps *earlier* than the last remote-applied migration, `db push` aborts with an
+error listing the out-of-order files. Rerun with `--include-all` to override.
+
+**Temporary skip trick for deferred migrations:** Rename the file from `*.sql` to
+`*.sql.deferred` before `db push`. The CLI skips it (filename doesn't match pattern).
+Rename back after the push. Clean and reversible.
+
+**Remote timestamp is canonical.** When a migration was applied to prod, the Supabase
+CLI assigns a timestamp in `schema_migrations`. If the local file has a different
+timestamp (from manual renaming, merge conflict fixes, etc.), rename the local file to
+match the remote timestamp. Remote always wins.
+
+**Watch for #340-style timestamp drift.** When Hockney creates migration files with
+manually-set timestamps (e.g., `20260510000001`) but pushes to prod, Supabase auto-
+generates a different timestamp (e.g., `20260509180919`). Track this by running
+`supabase migration list` immediately after applying — mismatches show as remote-only.
 
 ### 2026-05-06: Session-Lifetime Bug Pattern in Long-Running Network Calls
 
