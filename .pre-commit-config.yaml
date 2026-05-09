@@ -56,11 +56,3 @@ repos:
     hooks:
       - id: gitleaks
         name: Detect secrets with gitleaks
-
-  # Prevent commits to protected branches
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
-    hooks:
-      - id: no-commit-to-branch
-        name: Don't commit to main
-        args: ['--branch', 'main']

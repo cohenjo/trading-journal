@@ -35,9 +35,9 @@ pre-commit run --all-files
 | `detect-private-key` | Rejects PEM private keys |
 | `reject-env-files` | Rejects `.env` files (only `.env.example` is allowed) |
 | **`gitleaks`** | Scans for tokens, API keys, service-role keys, JWTs, etc. |
-| `no-commit-to-branch` | Blocks direct commits to `main` |
+| `trailing-whitespace`, `end-of-file-fixer`, etc. | Standard formatting and linting |
 
-> ⚠️ **Never bypass hooks with `--no-verify`** unless you have explicit approval from the security lead (Jony).
+> **Note:** The `no-commit-to-branch` hook has been removed. Direct commits to `main` are now allowed for low-risk changes. See [Development Workflow](#development-workflow) below.
 
 ---
 
@@ -46,6 +46,30 @@ pre-commit run --all-files
 - **Do not commit** `.env`, `.env.local`, `.env.development.local`, or any real secrets file.
 - **Safe to commit:** `.env.example`, `.env.*.example` — these contain only placeholder values.
 - Copy `.env.example` to `.env` locally and fill in your own values.
+
+---
+
+## Development Workflow
+
+### Commit Strategy
+
+**Direct commits to `main` are OK for:**
+- Low-risk changes (docs, typos, config tweaks)
+- Single-file edits with clear scope
+- Quick fixes that don't affect core logic
+
+**PRs recommended for:**
+- Multi-file changes
+- Feature additions or refactors
+- Changes that affect multiple components
+- Anything requiring team review
+
+**Worktrees encouraged** for parallel work:
+```bash
+git worktree add ../trading-journal-feature feature-branch
+```
+
+> **Note:** The `no-commit-to-branch` hook has been removed to support this workflow. All other security hooks (gitleaks, private key detection, etc.) remain active.
 
 ---
 
