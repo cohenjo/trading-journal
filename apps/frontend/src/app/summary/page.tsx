@@ -8,6 +8,7 @@ import StackedIncomeBarChart, { YearlyIncomeData } from "../../components/Summar
 import { getLadderIncome } from "../ladder/actions";
 import { getOptionsYearlyCashFlow } from "../options/actions";
 import type { IncomePoint } from "@/components/Ladder/types";
+import { buildYearlyIncomeData } from "./buildYearlyIncomeData";
 
 export default function SummaryPage() {
   const { settings } = useSettings();
@@ -37,17 +38,11 @@ export default function SummaryPage() {
 
         // 1. Fetch Options yearly cumulative cash flow (actuals only)
         const optionsYearly = await getOptionsYearlyCashFlow();
-        const optionsMap = new Map(optionsYearly.map(o => [o.year, o.amount]));
 
         // 2. Fetch Ladder Income (bonds - future cash flows)
         const ladderResult = await getLadderIncome();
         if (!ladderResult.ok) throw new Error(ladderResult.error);
         const ladderSeries: IncomePoint[] = ladderResult.data.income_series;
-        const ladderMap = new Map<number, number>();
-        for (const point of ladderSeries) {
-          const year = new Date(point.date).getFullYear();
-          ladderMap.set(year, (ladderMap.get(year) || 0) + point.value);
-        }
 
         // 3. Fetch dividend estimations (user-entered overrides)
         const estimationsResult = await getDividendEstimations();
@@ -60,52 +55,20 @@ export default function SummaryPage() {
 
         // 4. Project dividends from current dashboard annual income
         const dividendDashboard = await getDividendDashboard(settings.mainCurrency);
-        let projectedDividendAmount = dividendDashboard.stats.annual_income;
-        const divMap = new Map<number, number>();
-        const divSourceMap = new Map<number, 'estimation' | 'projection'>();
 
-        for (let year = currentYear; year <= divParams.final_year; year += 1) {
-          // Prefer estimation if present, otherwise use projection
-          if (estimationsMap.has(year)) {
-            divMap.set(year, estimationsMap.get(year)!);
-            divSourceMap.set(year, 'estimation');
-          } else {
-            if (year > currentYear) {
-              projectedDividendAmount *= 1 + divParams.growth_rate + (divParams.yield_rate * divParams.reinvest_rate);
-            }
-            divMap.set(year, Math.round(projectedDividendAmount * 100) / 100);
-            divSourceMap.set(year, 'projection');
-          }
-        }
-
-        // 5. Merge all data sources
-        const allYears = new Set<number>();
-        optionsYearly.forEach(o => allYears.add(o.year));
-        ladderSeries.forEach(l => allYears.add(new Date(l.date).getFullYear()));
-        for (let year = currentYear; year <= Math.min(divParams.final_year, optionsFinalYear); year++) {
-          allYears.add(year);
-        }
-
-        const maxYear = Math.min(divParams.final_year, optionsFinalYear);
-        const sortedYears = Array.from(allYears)
-          .filter(y => y <= maxYear)
-          .sort((a, b) => a - b);
-
-        const merged: YearlyIncomeData[] = sortedYears.map(year => {
-          const hasOptionsData = optionsMap.has(year);
-          const isProjected = year > currentYear;
-
-          return {
-            year,
-            // Options: use actual for past/current, 0 for future (conservative projection)
-            optionsIncome: hasOptionsData ? optionsMap.get(year)! : 0,
-            // Dividends: use estimation if present, otherwise projection
-            dividendsIncome: divMap.get(year) || 0,
-            dividendsSource: divSourceMap.get(year),
-            // Bonds: scheduled payments
-            bondsIncome: ladderMap.get(year) || 0,
-            isProjected,
-          };
+        // 5. Merge all sources — estimations override projections for any year
+        //    they cover, including years before currentYear (fixes #342).
+        const merged = buildYearlyIncomeData({
+          currentYear,
+          estimationsMap,
+          projectedDividendAmount: dividendDashboard.stats.annual_income,
+          growthRate: divParams.growth_rate,
+          yieldRate: divParams.yield_rate,
+          reinvestRate: divParams.reinvest_rate,
+          finalYear: divParams.final_year,
+          optionsFinalYear,
+          optionsYearly,
+          ladderSeries,
         });
 
         setChartData(merged);
