@@ -185,3 +185,5 @@ Query: `options_dashboard_monthly.select('period_start, cash_flow_cumulative')` 
 **Paired work with Fenster:** Data design first (McManus), then chart implementation (Fenster). Clear contracts (YearlyIncomeData type) enabled parallel work. Fenster handled all UI/visualization, I focused on correctness of aggregation and projection logic.
 
 **Conservative vs. optimistic:** For options income, 0 projection is better than extrapolating current year's pace. Options positions are time-bound — can't assume new positions will be opened. Dividends/bonds are more predictable (holdings + scheduled payments).
+
+📌 **Team update (2026-05-09):** Shipped stacked income chart on /summary with Fenster (#338) — ensured `options_dashboard_monthly` view correctly projects cumulative cash flow. Hockney completed migration drift audit (#335). Kujan removed git hook + trimmed docker-compose (#336, #337). Redfoot fixed E2E Playwright hook placement (#334).

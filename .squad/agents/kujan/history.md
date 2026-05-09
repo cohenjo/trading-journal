@@ -133,3 +133,5 @@ Trimmed docker-compose.yml to worker-only and removed no-commit-to-branch pre-co
 
 ### Next Steps
 None. Both issues resolved. Worker is production-ready on Supabase.
+
+📌 **Team update (2026-05-09):** Removed `no-commit-to-branch` hook (#336) + trimmed docker-compose to worker-only (#337). Hockney completed migration drift audit (#335, awaiting approval). Redfoot fixed E2E Playwright hook placement (#334). Fenster + McManus shipped stacked income chart (#338).

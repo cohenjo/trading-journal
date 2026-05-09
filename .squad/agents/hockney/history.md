@@ -467,3 +467,5 @@ Ran the actual production backfill using 4 manually-exported Activity Flex XML f
 - Reclassification needs both `compute_options_strategy_groups` AND `compute_options_monthly_metrics` re-run to fix donut chart counts
 
 📌 Team update (2026-05-07): McManus's lifecycle/roll canonical spec now authoritative. Two latent bugs identified: (1) `_status()` misclassifies rolls as "open" — needs net-quantity fix; (2) `classify_roll()` uses wrong field (`realized_pnl` vs. `net_cash_flow`). Fixes documented in `.squad/decisions.md`.
+
+📌 **Team update (2026-05-09):** Migration drift audit (#335) completed — 335-line reconciliation plan awaiting Jony approval. Kujan trimmed docker-compose to worker-only (#337). Redfoot fixed Playwright afterAll() hook placement (#334). Fenster + McManus shipped stacked income chart on /summary (#338).

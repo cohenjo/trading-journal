@@ -184,3 +184,5 @@ completed = list(state.get("_all", []))  # List, not dict
 **Commit:** 3f0a678
 
 📌 Team update (2026-05-06): Phase A regression tests written + fixed (9/9 passing). --xml-dir tests shipped (11/11 passing). 444 total tests now passing (+40 net). All test work for backfill resilience initiative complete.
+
+📌 **Team update (2026-05-09):** Fixed Playwright afterAll() hook placement violations (#334) — moved to describe scope, closed dupes #327, #330, #332. Kujan removed no-commit-to-branch hook (#336) + trimmed docker-compose (#337). Hockney audited migration drift (#335). Fenster + McManus shipped stacked income chart (#338).

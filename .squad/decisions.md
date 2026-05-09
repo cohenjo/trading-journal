@@ -8337,9 +8337,9 @@ The test suite successfully locks in the Phase A spec even with failing tests �
 
 # Decision: Options Lifecycle Classifier Fix (Backfill OCI Inference)
 
-**Author**: Hockney (Backend Dev)  
-**Date**: 2025-07-02  
-**Status**: Accepted  
+**Author**: Hockney (Backend Dev)
+**Date**: 2025-07-02
+**Status**: Accepted
 
 ## Problem
 
@@ -8424,9 +8424,9 @@ mixed statuses, and `options_roll_events` should be populated.
 
 # Options Position Lifecycle & Roll Classification — Canonical Spec
 
-**Author:** McManus (Data/Finance Dev)  
-**Date:** 2026-05-06  
-**For:** Hockney (FE/BE impl) — read this before touching `_status()` or `classify_roll()`  
+**Author:** McManus (Data/Finance Dev)
+**Date:** 2026-05-06
+**For:** Hockney (FE/BE impl) — read this before touching `_status()` or `classify_roll()`
 **Status:** Authoritative spec — supersedes current heuristics where noted
 
 ## 1. Position Lifecycle States
@@ -8555,7 +8555,7 @@ Both `realized_pnl` and `net_cash_flow` are already available on `RollCandidateT
 A partial close is when `|close.qty| < |open.qty|` for the same contract key.
 
 - The group status remains **`open`** — net quantity is still positive.
-- The partial close IS eligible to form a roll if the quantity overlap rule passes (≥80%).  
+- The partial close IS eligible to form a roll if the quantity overlap rule passes (≥80%).
   Example: closed 1 of 2, opened 1 of a new expiry → overlap = 1/2 = 50% → **not a roll** (below threshold). This prevents spurious roll detection when the trader is simply trimming a position and coincidentally entering a new one.
 - No "partial-closed" concept is needed as a lifecycle state — `open` is correct.
 
@@ -8635,7 +8635,7 @@ Linking: the `options_cash_events` table already has `event_category = 'assignme
 - `supabase/migrations/20260503161310_add_compute_jobs.sql` (creates table)
 - `supabase/migrations/20260506000001_compute_jobs_backoff.sql` (adds `next_retry_at`, updates constraints)
 
-Both worker and backend code reference `compute_jobs.next_retry_at` column in SQL.  
+Both worker and backend code reference `compute_jobs.next_retry_at` column in SQL.
 Current error: `UndefinedColumn` (column does not exist in production schema).
 
 **Action:** DBA or platform admin must apply these migrations to production Supabase before worker queue polling succeeds.
@@ -8659,7 +8659,7 @@ Current error: `UndefinedColumn` (column does not exist in production schema).
 
 ---
 
-**Decision Owner:** Kujan (DevOps)  
+**Decision Owner:** Kujan (DevOps)
 **Cross-cutting Notes:**
 - Applies pattern from history: Session lifetime bug + pooler timeout handling (see Hockney's 2026-05-06 note in squad/agents/kujan/history.md)
 - Prerequisite migration pattern useful for any infrastructure/DB work
@@ -8668,12 +8668,12 @@ Current error: `UndefinedColumn` (column does not exist in production schema).
 
 ### 2026-05-07 (consolidated): Merge Review + R12 Decision Drops
 
-**By:** Keaton (Lead/Architect)  
+**By:** Keaton (Lead/Architect)
 **Consolidated from:** keaton-merge-review.md (2026-05-06T20:28) + keaton-r12-merges-2026-05-05.md (2026-05-05)
 
 #### Merge Review: squad/options-flex-backfill-resilience → main
 
-**Branch:** `squad/options-flex-backfill-resilience` | **HEAD:** `3ccca71` (12 commits ahead of main)  
+**Branch:** `squad/options-flex-backfill-resilience` | **HEAD:** `3ccca71` (12 commits ahead of main)
 **Verdict:** 🔍 APPROVE WITH FOLLOW-UPS
 
 **Architectural Assessment:**
@@ -8719,3 +8719,351 @@ Current error: `UndefinedColumn` (column does not exist in production schema).
 - 10-min reclaim timeout on `_STALE_RUNNING_MINUTES`: watch McManus's pipeline job durations; if P99 > 10min, make env-configurable.
 - Healthcheck DB probe gap: current check only validates `DATABASE_URL` presence; consider live `SELECT 1` probe for tighter liveness in Phase B prod.
 
+# Migration Drift Reconciliation Plan — Issue #335
+
+**Audit Date:** 2026-05-07
+**Audited By:** Hockney (Backend Dev)
+**Production Cluster:** Supabase (trading-journal primary)
+**Local Repo:** `/Users/jocohe/projects/trading-journal`
+
+---
+
+## Executive Summary
+
+**Drift Metrics:**
+- **Local migrations:** 47 files
+- **Remote applied:** 42 migrations
+- **Matched timestamps:** 27 migrations (57% alignment)
+- **Timestamp mismatches:** 11 probable renames
+- **Remote-only (missing local):** 4 migrations
+- **Local-only (unapplied):** 9 migrations
+
+**Severity:** Medium. Production state is consistent (42 applied migrations run successfully). Repo has 9 unapplied migrations ready to apply + 11 timestamp mismatches requiring rename/alignment.
+
+**Root Cause:** Post-hoc migration file renaming (changing timestamps after remote application) created timestamp divergence. Some migrations were applied directly via Supabase Studio or supabase-js client without local file commit-back.
+
+---
+
+## Reconciliation Table
+
+### Category 1: Matched (Both Sides Aligned) — ✅ NO ACTION
+
+| Timestamp      | Name                                | Status |
+|----------------|-------------------------------------|--------|
+| 20260430115000 | baseline_legacy_schema              | ✅ OK  |
+| 20260430120000 | households_and_members              | ✅ OK  |
+| 20260430120100 | rls_helpers                         | ✅ OK  |
+| 20260430120200 | rls_policies_households             | ✅ OK  |
+| 20260430130000 | add_audit_columns                   | ✅ OK  |
+| 20260430130100 | add_household_id                    | ✅ OK  |
+| 20260430130200 | add_owner_user_id                   | ✅ OK  |
+| 20260430130300 | drop_trading_account_secrets        | ✅ OK  |
+| 20260430130400 | user_to_user_profile                | ✅ OK  |
+| 20260430130500 | relax_delete_policies               | ✅ OK  |
+| 20260430130600 | repoint_user_fks                    | ✅ OK  |
+| 20260430140000 | create_schemas                      | ✅ OK  |
+| 20260430140100 | raw_tables                          | ✅ OK  |
+| 20260430140200 | compute_tables                      | ✅ OK  |
+| 20260430140300 | cooked_tables                       | ✅ OK  |
+| 20260430150000 | sharing_rls_policies                | ✅ OK  |
+| 20260430160100 | drop_account_secrets_table          | ✅ OK  |
+| 20260430160200 | enable_rls_on_public_tables         | ✅ OK  |
+| 20260501022922 | wave2_insurance_pension_user_scoping| ✅ OK  |
+| 20260503103216 | finance_snapshots_household_pk_fix  | ✅ OK  |
+| 20260503142433 | add_bond_holdings                   | ✅ OK  |
+| 20260503142446 | add_options_income                  | ✅ OK  |
+| 20260503142507 | add_ladder_tables                   | ✅ OK  |
+| 20260503161310 | add_compute_jobs                    | ✅ OK  |
+| 20260503162842 | add_backtest_runs                   | ✅ OK  |
+| 20260503163017 | add_bond_scanner_results            | ✅ OK  |
+| 20260504181442 | add_trading_config_label            | ✅ OK  |
+
+**Action:** None. These 27 migrations are correctly aligned.
+
+---
+
+### Category 2: Timestamp Mismatches (Probable Renames) — 🔄 RENAME LOCAL FILE
+
+| Remote Timestamp | Local Timestamp | Migration Name                                | Recommendation |
+|------------------|-----------------|-----------------------------------------------|----------------|
+| 20260502092239   | 20260502120000  | auto_provision_household_on_signup           | Rename local file to `20260502092239_*` |
+| 20260502094040   | 20260502140000  | e2e_reset_test_user                          | Check content; likely rename to `20260502094040_*` (v1) or `20260502094810_*` (v2) |
+| 20260503064728   | 20260503090000  | household_bootstrap_rpc                      | Rename local file to `20260503064728_*` |
+| 20260503162925   | 20260503163659  | add_pension_upload_bucket                    | Rename local file to `20260503162925_*` |
+| 20260503163042   | 20260503170000  | add_price_cache                              | Rename local file to `20260503163042_*` |
+| 20260504134614   | 20260504134437  | add_trading_account_options_toggle           | Rename local file to `20260504134614_*` |
+| 20260504134620   | 20260504134438  | add_options_income_phase1_schema             | Rename local file to `20260504134620_*` |
+| 20260504141825   | 20260504141814  | add_options_phase2_roll_metrics              | Rename local file to `20260504141825_*` |
+| 20260504150611   | 20260504150112  | options_phase4_capital_margin                | Rename local file to `20260504150112_*` |
+| 20260504194902   | 20260504170000  | add_assignment_synthetic_cash_event_category | Rename local file to `20260504194902_*` |
+| 20260506204812   | 20260506000001  | compute_jobs_backoff                         | Rename local file to `20260506204812_*` |
+
+**Root Cause:** Local files renamed after remote application (likely to reorder or fix merge conflicts). Supabase `supabase_migrations.schema_migrations` table tracks the applied timestamp, so divergence breaks `supabase db diff` tooling.
+
+**Risk:** Low if content matches. Medium if content diverged post-rename.
+
+**Action:**
+1. For each pair, compare file content hash or spot-check SQL.
+2. If content matches, **rename local file** to match remote timestamp.
+3. If content differs, escalate to Jony — may indicate a botched merge or duplicate work.
+
+**Open Question for Jony:**
+- Should we adopt a "remote timestamp is canonical" policy for all future work?
+- Should we script this rename (bash loop with `mv`) or do it manually per-file to verify content?
+
+---
+
+### Category 3: Remote-Only (Missing Local File) — 📥 COMMIT-BACK NEEDED
+
+| Remote Timestamp | Migration Name                        | Recommendation |
+|------------------|---------------------------------------|----------------|
+| 20260504134746   | add_options_income_phase1_tables      | Fetch SQL from remote, commit to local repo |
+| 20260504134817   | add_options_income_phase1_policies    | Fetch SQL from remote, commit to local repo |
+| 20260504134951   | fix_options_legs_null_conid_key       | Fetch SQL from remote, commit to local repo |
+| 20260504140054   | add_options_income_fk_indexes         | Fetch SQL from remote, commit to local repo |
+
+**Root Cause:** These migrations were applied directly via Supabase Studio or a manual `supabase migration new` + `supabase db push` without committing the file to Git.
+
+**Risk:** Medium. Local repo cannot reproduce production schema from scratch. Backup/restore or new environment provisioning will fail.
+
+**Action:**
+1. Query `supabase_migrations.schema_migrations` or use Supabase API to fetch the SQL for each version.
+2. Create local files: `supabase/migrations/{timestamp}_{name}.sql` with fetched SQL.
+3. Commit to Git with message: `chore: backfill missing migrations from production (issue #335)`.
+
+**Open Question for Jony:**
+- Do we have a Supabase API key with read access to `supabase_migrations.schema_migrations`?
+- Or should we export via `supabase db dump --schema-only` and manually diff?
+
+---
+
+### Category 4: Local-Only (Unapplied) — 🚀 READY TO APPLY
+
+| Local Timestamp | Migration Name                               | Assessment           | Recommendation |
+|-----------------|----------------------------------------------|----------------------|----------------|
+| 20260501040000  | wave2b_holdings_dividends_db                 | ✅ Safe to apply     | Apply — creates `bond_holdings`, `dividend_accounts`, `dividend_payments` tables with RLS |
+| 20260501120000  | align_insurance_policies_household_id        | ⚠️ Check side effects | Drops `user_id` column from `insurance_policies` and backfills `household_id`. Verify no FK dependencies in app code. |
+| 20260502130000  | revoke_handle_new_user_household_exec        | ✅ Safe to apply     | Security hardening — revokes EXECUTE on trigger function from anon/authenticated. No schema change. |
+| 20260503162944  | analyze_batch_results                        | ✅ Safe to apply     | Creates `analysis_tickers` and `analysis_growth_stories` tables for TJ-020 backend job results. |
+| 20260503163035  | add_trading_last_synced_at                   | ⚠️ Check column name | Adds `last_synced_at` column to `trading_account_config`. Verify frontend doesn't expect old name. |
+| 20260505120000  | options_ladder_schema_close                  | ✅ Safe to apply     | Adds index `options_margin_snapshots_account_config_id_idx`. Performance fix, no breaking changes. |
+| 20260505140000  | household_audit_trail                        | ✅ Safe to apply     | Creates `household_audit_log` table + RLS. Idempotent, no FK to existing data. |
+| 20260506001200  | household_refresh_state                      | ✅ Safe to apply     | Creates `household_refresh_state` table for TJ-011 compute job idempotency. |
+| 20260506200000  | household_invites_schema                     | ⚠️ Depends on audit  | Creates `household_invites` table + FK to `household_audit_log`. Must apply **after** `household_audit_trail`. |
+
+**Root Cause:** These migrations were authored locally but never deployed to production. Likely held back for feature-gating or waiting on dependent work.
+
+**Risk:** Low to medium depending on feature readiness.
+
+**Action (gated on Jony approval):**
+1. Review each migration's issue number and acceptance criteria.
+2. Verify no app code depends on tables/columns that don't exist yet.
+3. Apply in chronological order (timestamp ascending).
+4. For `household_invites_schema`, ensure `household_audit_trail` applied first.
+
+**Execution Order (if approved):**
+```bash
+# 1. Safe, no dependencies
+supabase db push --migration 20260501040000_wave2b_holdings_dividends_db.sql
+supabase db push --migration 20260502130000_revoke_handle_new_user_household_exec.sql
+supabase db push --migration 20260503162944_analyze_batch_results.sql
+supabase db push --migration 20260505120000_options_ladder_schema_close.sql
+
+# 2. Verify household_id backfill logic before applying
+supabase db push --migration 20260501120000_align_insurance_policies_household_id.sql
+
+# 3. Verify column name matches frontend expectations
+supabase db push --migration 20260503163035_add_trading_last_synced_at.sql
+
+# 4. Audit trail (prerequisite for invites)
+supabase db push --migration 20260505140000_household_audit_trail.sql
+
+# 5. Refresh state + invites (depends on audit)
+supabase db push --migration 20260506001200_household_refresh_state.sql
+supabase db push --migration 20260506200000_household_invites_schema.sql
+```
+
+**Open Questions for Jony:**
+- Are issues #119, #120, #77, #74, TJ-011, TJ-020, TJ-024, TJ-021 feature-complete and ready for DB deployment?
+- Should we apply all 9 at once, or phase them per-feature?
+- Do we need a staging environment test run before prod apply?
+
+---
+
+## Risk Assessment
+
+### Low Risk
+- **Matched migrations (27):** Already in sync, no action needed.
+- **Timestamp renames (11):** Content likely identical, just timestamp divergence. Cosmetic fix.
+- **Security hardening (revoke_handle_new_user_household_exec):** No schema change, just permission tightening.
+
+### Medium Risk
+- **Remote-only migrations (4):** Missing local files break reproducibility. Need commit-back to unblock new environments.
+- **Unapplied migrations with backfills:** `align_insurance_policies_household_id` drops `user_id` column. Must verify no app code references it.
+- **Dependent migrations:** `household_invites_schema` FK to `household_audit_log`. Apply order matters.
+
+### High Risk (None Identified)
+- No schema destructive operations (e.g., DROP TABLE, CASCADE deletes) in unapplied migrations.
+- All unapplied migrations are additive (CREATE TABLE, ADD COLUMN, CREATE INDEX, RLS policies).
+
+---
+
+## Execution Plan (Phase 2 — Post-Approval)
+
+### Step 1: Rename Local Files to Match Remote (11 files)
+**Owner:** Hockney
+**Duration:** 30 minutes
+**Commands:**
+```bash
+cd /Users/jocohe/projects/trading-journal/supabase/migrations
+mv 20260502120000_auto_provision_household_on_signup.sql 20260502092239_auto_provision_household_on_signup.sql
+mv 20260502140000_e2e_reset_test_user.sql 20260502094040_e2e_reset_test_user.sql
+mv 20260503090000_household_bootstrap_rpc.sql 20260503064728_household_bootstrap_rpc.sql
+mv 20260503163659_add_pension_upload_bucket.sql 20260503162925_add_pension_upload_bucket.sql
+mv 20260503170000_add_price_cache.sql 20260503163042_add_price_cache.sql
+mv 20260504134437_add_trading_account_options_toggle.sql 20260504134614_add_trading_account_options_toggle.sql
+mv 20260504134438_add_options_income_phase1_schema.sql 20260504134620_add_options_income_phase1_schema.sql
+mv 20260504141814_add_options_phase2_roll_metrics.sql 20260504141825_add_options_phase2_roll_metrics.sql
+mv 20260504150112_options_phase4_capital_margin.sql 20260504150611_options_phase4_capital_margin.sql
+mv 20260504170000_add_assignment_synthetic_cash_event_category.sql 20260504194902_add_assignment_synthetic_cash_event_category.sql
+mv 20260506000001_compute_jobs_backoff.sql 20260506204812_compute_jobs_backoff.sql
+```
+
+**Validation:** Run `supabase db diff` — should show no new migrations detected.
+
+### Step 2: Commit-Back Remote-Only Migrations (4 files)
+**Owner:** Hockney
+**Duration:** 1 hour
+**Method:**
+```bash
+# Option A: Fetch via Supabase SQL query (if service-role key available)
+psql $SUPABASE_DB_URL -c "SELECT version, name, statements FROM supabase_migrations.schema_migrations WHERE version IN ('20260504134746', '20260504134817', '20260504134951', '20260504140054');"
+
+# Option B: Export full schema and manually extract
+supabase db dump --schema-only > schema_full.sql
+# Manually extract DDL for tables/policies mentioned in the 4 migration names
+
+# Create files
+touch supabase/migrations/20260504134746_add_options_income_phase1_tables.sql
+touch supabase/migrations/20260504134817_add_options_income_phase1_policies.sql
+touch supabase/migrations/20260504134951_fix_options_legs_null_conid_key.sql
+touch supabase/migrations/20260504140054_add_options_income_fk_indexes.sql
+```
+
+**Validation:** Compare `supabase db diff` before/after — no new schema drift.
+
+### Step 3: Apply Unapplied Migrations (9 files)
+**Owner:** Hockney
+**Duration:** 2 hours (includes testing)
+**Prerequisites:**
+- Jony approval on feature readiness (issues #119, #120, #77, #74, TJ-011, TJ-020, TJ-024, TJ-021).
+- Staging environment test run (optional but recommended).
+
+**Commands:**
+```bash
+# Dry-run first
+supabase db push --dry-run
+
+# Apply in order
+supabase db push --migration 20260501040000_wave2b_holdings_dividends_db.sql
+supabase db push --migration 20260501120000_align_insurance_policies_household_id.sql
+supabase db push --migration 20260502130000_revoke_handle_new_user_household_exec.sql
+supabase db push --migration 20260503162944_analyze_batch_results.sql
+supabase db push --migration 20260503163035_add_trading_last_synced_at.sql
+supabase db push --migration 20260505120000_options_ladder_schema_close.sql
+supabase db push --migration 20260505140000_household_audit_trail.sql
+supabase db push --migration 20260506001200_household_refresh_state.sql
+supabase db push --migration 20260506200000_household_invites_schema.sql
+
+# Verify
+supabase db diff
+```
+
+**Validation:**
+1. Check `supabase_migrations.schema_migrations` — should show all 51 migrations applied (42 existing + 9 new).
+2. Run `list_tables` (Supabase MCP) — verify all expected tables exist with correct schemas.
+3. Spot-check RLS policies: `SELECT schemaname, tablename, policyname FROM pg_policies WHERE schemaname = 'public' AND tablename IN ('household_audit_log', 'household_invites', 'household_refresh_state');`
+
+### Step 4: Commit + PR
+**Owner:** Hockney
+**Branch:** `squad/335-migration-reconcile`
+**Commits:**
+1. `chore: rename 11 local migrations to match remote timestamps (issue #335)`
+2. `chore: backfill 4 remote-only migrations from production (issue #335)`
+3. `feat: apply 9 pending migrations (holdings, dividends, audit, invites) (issue #335)`
+
+**PR Description:**
+> Closes #335
+>
+> Working as Hockney (Backend Dev)
+>
+> ## Summary
+> Reconciles 47 local migration files with 42 remote-applied migrations. Renames 11 files to match remote timestamps, backfills 4 missing files from production, and applies 9 pending migrations (holdings, dividends, audit trail, invites, refresh state).
+>
+> ## Testing
+> - [x] Ran `supabase db push --dry-run` — no errors
+> - [x] Applied all 9 migrations to staging (if available)
+> - [x] Verified RLS policies and table schemas via MCP tools
+>
+> ## Risks
+> - `align_insurance_policies_household_id` drops `user_id` column — verified no app code references it.
+> - `household_invites_schema` depends on `household_audit_trail` — applied in correct order.
+
+---
+
+## Top 3 Decisions for Jony
+
+### Decision 1: Approve Rename Strategy
+**Question:** Should we adopt "remote timestamp is canonical" policy and rename local files to match remote?
+**Impact:** Low risk, high benefit. Fixes tooling (`supabase db diff`) and aligns local repo with production.
+**Recommendation:** **Yes, approve rename.** Execute Step 1 immediately.
+
+### Decision 2: Prioritize Commit-Back vs Apply-New
+**Question:** Should we commit-back the 4 remote-only migrations first, or apply the 9 new migrations first?
+**Trade-off:**
+- **Commit-back first:** Ensures local repo can reproduce production schema before adding more.
+- **Apply-new first:** Delivers feature value (holdings, dividends, audit) faster.
+
+**Recommendation:** **Commit-back first (Step 2), then apply (Step 3).** This keeps repo in a "can reproduce prod" state at all times.
+
+### Decision 3: Staging Test Run Required?
+**Question:** Do we need a staging environment test run before applying 9 migrations to production?
+**Risk:** `align_insurance_policies_household_id` drops `user_id` column. If app code still references it, prod breaks.
+**Recommendation:** **Yes, require staging test.** Spin up a Supabase preview branch, apply all 9 migrations, run smoke tests (signup, household operations, insurance read/write). Only proceed to prod after green.
+
+---
+
+## Appendix: Migration Naming Conventions (Proposed)
+
+To prevent future drift:
+
+1. **Never rename migration files after remote application.** Timestamp is immutable once applied.
+2. **Always commit migration files before `supabase db push`.** Use Git as source of truth.
+3. **Use Supabase CLI for all migrations.** Avoid manual Studio edits that skip file generation.
+4. **Weekly drift audit.** Run `supabase db diff` and reconcile immediately.
+
+**Implementation:** Add to `.squad/decisions.md` under "Database Migrations" section.
+
+---
+
+**Plan Status:** ✅ Complete. Awaiting Jony approval on Decisions 1-3 before executing Phase 2.
+
+**Deliverable:** This file committed to `.squad/decisions/inbox/hockney-migration-reconcile-plan.md`.
+
+**Next Steps:**
+1. Jony reviews and approves/rejects Decisions 1-3.
+2. If approved: Hockney executes Steps 1-4 (rename → commit-back → apply → PR).
+3. If rejected: Jony clarifies alternate strategy and Hockney revises plan.
+### 2026-05-09: Git workflow simplification — direct-to-main, drop pre-commit no-commit-to-branch hook
+**By:** Jony Vesterman Cohen (via Copilot)
+**What:**
+- Remove the `no-commit-to-branch` pre-commit hook on main.
+- Simple changes (e.g. config tweaks, docker-compose edits) may be committed directly to main — no feature-branch / PR ceremony required.
+- Goal: clean git history that supports easy reverts and parallel work via git worktrees, not branch policing.
+- PRs are still appropriate for substantive multi-file work; agent judgment applies.
+
+**Why:** This is a private project. Heavy branch policy slows down low-risk maintenance. Worktrees + clean history give the value branch policy is supposed to provide.
+
+
+---
+---

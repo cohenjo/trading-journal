@@ -134,7 +134,7 @@ Reusable pattern documented in `.squad/skills/dual-axis-chart/SKILL.md`.
 
 **Stacked histograms in lightweight-charts:** Unlike area series, histograms don't auto-stack. Create 3 series with cumulative values:
 - Series 1 (bottom): value = A
-- Series 2 (middle): value = A + B  
+- Series 2 (middle): value = A + B
 - Series 3 (top): value = A + B + C
 
 Each series draws from 0 to its cumulative value, creating a stacked effect when overlapped.
@@ -142,3 +142,5 @@ Each series draws from 0 to its cumulative value, creating a stacked effect when
 **Projection styling:** Set opacity in the `color` property of each data point (not series-level). Example: `color: rgba(245, 158, 11, 0.32)` for projected vs `rgba(245, 158, 11, 0.8)` for actuals.
 
 **Paired work with McManus:** Data design first, then UI. McManus owned the SQL aggregation + projection logic, I owned the chart component. Clear separation of concerns made parallel work efficient.
+
+📌 **Team update (2026-05-09):** Shipped stacked income bar chart on /summary with McManus (#338) — options via `options_dashboard_monthly.cash_flow_cumulative`, dividends compound-growth, bonds scheduled income; future years at 40% opacity. Hockney completed migration audit (#335). Kujan removed no-commit-to-branch + trimmed docker-compose (#336, #337). Redfoot fixed E2E hook placement (#334).
