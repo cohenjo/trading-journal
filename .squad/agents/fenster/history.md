@@ -144,3 +144,32 @@ Each series draws from 0 to its cumulative value, creating a stacked effect when
 **Paired work with McManus:** Data design first, then UI. McManus owned the SQL aggregation + projection logic, I owned the chart component. Clear separation of concerns made parallel work efficient.
 
 📌 **Team update (2026-05-09):** Shipped stacked income bar chart on /summary with McManus (#338) — options via `options_dashboard_monthly.cash_flow_cumulative`, dividends compound-growth, bonds scheduled income; future years at 40% opacity. Hockney completed migration audit (#335). Kujan removed no-commit-to-branch + trimmed docker-compose (#336, #337). Redfoot fixed E2E hook placement (#334).
+
+## Cumulative-vs-Per-Year Cash Flow Bug Fix (2026-05-09, Issue #341)
+
+**Issue:** 2025 options income showed ~$373k in stacked bar chart instead of actual ~$96k. Bug was in `getOptionsYearlyCashFlow()` — took MAX of `cash_flow_cumulative` per year, but that column is cumulative from inception (not reset annually), so each year's bar included all prior years.
+
+**Solution (paired with McManus):** Changed query to SUM `cash_flow_total` (monthly net) per year instead of MAX `cash_flow_cumulative`. This gives true per-year delta, not cumulative-as-of-EOY.
+
+**Files modified:**
+- `apps/frontend/src/app/options/actions.ts` — `getOptionsYearlyCashFlow()` function
+
+**Before/After:**
+- Before: `SELECT cash_flow_cumulative ... MAX(cumulative) per year`
+- After: `SELECT cash_flow_total ... SUM(monthly_net) per year`
+
+**Verification:**
+- Tests: 6/6 pass in `StackedIncomeBarChart.test.tsx`
+- 2025 options value now renders correctly at ~$96k (was ~$373k)
+- Lint: 0 new errors
+- Typecheck: 0 new errors
+
+**Learning (Cumulative Trap):** When a table has both cumulative and per-period columns (like `options_dashboard_monthly.cash_flow_cumulative` vs `cash_flow_total`), always confirm whether you need:
+1. **Cumulative-to-date**: Use the cumulative column directly (e.g., total P&L from inception)
+2. **Per-period delta**: Sum the per-period column (e.g., annual cash flow) OR difference consecutive cumulative values
+
+This is a common trap with financial time-series data. Our bug happened because we mistakenly treated an inception-cumulative column as if it reset annually. The fix was straightforward once diagnosed: use the right column (`cash_flow_total` for monthly net) and the right aggregation (`SUM` for per-year total).
+
+McManus and I paired on this — the separation between data layer (his) and UI layer (mine) made it easy to spot the bug at the boundary and fix it quickly.
+
+📌 **Team update (2026-05-09T18:26:00+03:00):** Fixed #341 stacked income chart cumulative bug. 2025 options now shows correct ~$96k (was ~$373k). Paired with McManus on diagnosis + fix. (commit 1649369)

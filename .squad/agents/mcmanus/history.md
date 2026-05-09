@@ -187,3 +187,33 @@ Query: `options_dashboard_monthly.select('period_start, cash_flow_cumulative')` 
 **Conservative vs. optimistic:** For options income, 0 projection is better than extrapolating current year's pace. Options positions are time-bound — can't assume new positions will be opened. Dividends/bonds are more predictable (holdings + scheduled payments).
 
 📌 **Team update (2026-05-09):** Shipped stacked income chart on /summary with Fenster (#338) — ensured `options_dashboard_monthly` view correctly projects cumulative cash flow. Hockney completed migration drift audit (#335). Kujan removed git hook + trimmed docker-compose (#336, #337). Redfoot fixed E2E Playwright hook placement (#334).
+
+## Cumulative-vs-Per-Year Cash Flow Bug Fix (2026-05-09, Issue #341)
+
+**Issue:** 2025 options income showed ~$373k in stacked bar chart instead of actual ~$96k. Root cause: `getOptionsYearlyCashFlow()` took MAX of `cash_flow_cumulative` per year, but that column is cumulative from inception (never resets), so each year's bar showed cumulative-through-that-year instead of just that year's delta.
+
+**Solution (paired with Fenster):** Changed query to SUM `cash_flow_total` (monthly net cash flow) per year instead of MAX `cash_flow_cumulative`. This gives true per-year delta.
+
+**Files modified:**
+- `apps/frontend/src/app/options/actions.ts` — `getOptionsYearlyCashFlow()` function
+
+**Before/After:**
+- Before: `SELECT cash_flow_cumulative ... yearlyMap.set(year, MAX(cumulative))`
+- After: `SELECT cash_flow_total ... yearlyMap.set(year, existing + monthly)`
+
+**Verification:**
+- Tests: 6/6 pass in `StackedIncomeBarChart.test.tsx`
+- 2025 options value now renders correctly at ~$96k (was ~$373k)
+- Sanity check: sum of per-year values should equal latest cumulative (verified visually in dev)
+
+**Learning (The Cumulative Trap):** When a table has both cumulative and per-period columns (like `options_dashboard_monthly`), always confirm which you need:
+1. **Cumulative-to-date value**: Use the cumulative column directly (e.g., "total P&L from inception to now")
+2. **Per-period delta**: Either (a) SUM the per-period column (safer), or (b) difference consecutive cumulative values (brittle if data has gaps)
+
+This is a common trap with financial time-series data. Our bug happened because we mistakenly treated an inception-cumulative column as if it reset annually. The aggregation logic (MAX per year) was correct for year-end snapshot queries but wrong for per-year income. Once diagnosed, the fix was straightforward: use the right column (`cash_flow_total` for monthly net) and the right aggregation (`SUM` for annual total).
+
+**Financial data modeling principle:** Cumulative columns are for "total since start" queries; delta columns are for "per-period" queries. Keep these semantics distinct when designing aggregations. In retrospect, the function name `getOptionsYearlyCashFlow()` should have been a hint — "yearly" = per-year delta, not cumulative-as-of-EOY.
+
+Fenster and I paired on this. The clear separation between data layer (mine) and UI layer (his) made it easy to spot the bug at the boundary and fix it quickly. The chart worked perfectly — the data contract was just wrong.
+
+📌 **Team update (2026-05-09T18:26:00+03:00):** Fixed #341 stacked income chart cumulative bug. 2025 options now shows correct ~$96k (was ~$373k). Paired with Fenster on diagnosis + fix. (commit 1649369)
