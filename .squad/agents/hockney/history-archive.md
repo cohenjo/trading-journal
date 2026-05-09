@@ -442,3 +442,16 @@ Migration `20260502120000_auto_provision_household_on_signup` was absent from pr
 - `SUPABASE_URL` is canonical backend env var; `NEXT_PUBLIC_SUPABASE_URL` accepted as alias
 - `SecretStr` for JWT secret — never logged; auth failures audit-logged at WARNING
 - Existing `app/auth/` (local-user JWT) intentionally NOT removed — future cutover ticket
+
+## Archive Entry — 2026-05-09
+
+## Summary
+
+**Total entries:** ~496 lines
+**Period:** See history.md for details
+**Key focus areas:** Backend development, API work, migrations, performance optimization
+
+### Entries archived:
+- Approximately 19 distinct work items
+
+**Full history backed up to history-archive.md**

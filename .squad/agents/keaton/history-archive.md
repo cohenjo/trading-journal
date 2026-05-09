@@ -116,3 +116,8 @@ Three critical team updates issued:
 - ❌ Not suitable: security-critical design, cross-cutting architecture, manual provisioning, E2E test suites
 
 **Artifacts:** `docs/design-hosting/issue-manifest.json`, `docs/design-hosting/issue-manifest.md`
+
+## Archive Entry — 2026-05-09 (keaton)
+
+**Total entries:** ~208 lines
+**Archived to make room for ongoing work.**

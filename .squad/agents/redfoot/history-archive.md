@@ -265,3 +265,8 @@ Reviewed `docs/design-hosting/design.md` plus six section docs as Redfoot. Wrote
 
 **PR depends on:** #163 (Fenster — testids) + #164 (Hockney — ensure_household RPC). PR description requests stacked merge order.
 **Base:** `squad/login-household-bootstrap-2026-05-03` (Fenster PR #163 — testids)
+
+## Archive Entry — 2026-05-09 (redfoot)
+
+**Total entries:** ~205 lines
+**Archived to make room for ongoing work.**
