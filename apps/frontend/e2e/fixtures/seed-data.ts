@@ -245,6 +245,8 @@ export interface TradingAccountSeedData {
   port?: number;
   clientId?: number;
   computeOptionsIncome?: boolean;
+  /** Phase 2 (#340): lowercase account type ('ibkr' | 'schwab' | 'ira'). Defaults to 'ibkr'. */
+  accountType?: 'ibkr' | 'schwab' | 'ira';
 }
 
 /** Seeds a trading account config row for account-management E2E flows. */
@@ -255,11 +257,12 @@ export async function seedTradingAccount(
   const admin = getAdminClient();
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const accountId = data.accountId ?? `E2E_TRADING_${suffix}`;
+  const accountType = data.accountType ?? 'ibkr';
 
   const { error } = await admin.from('trading_account_config').insert({
     household_id: householdId,
     name: data.name ?? 'E2E IBKR Account',
-    account_type: 'IBKR',
+    account_type: accountType,
     host: data.host ?? '127.0.0.1',
     port: data.port ?? 4001,
     client_id: data.clientId ?? 1,
@@ -442,6 +445,10 @@ export async function cleanupHouseholdData(householdId: string): Promise<void> {
     admin.from('options_positions').delete().eq('household_id', householdId),
     admin.from('options_legs').delete().eq('household_id', householdId),
     admin.from('options_flex_sync_state').delete().eq('household_id', householdId),
+    // stock_positions must be deleted before trading_account_config to avoid
+    // FK violations — added in Phase 2 (#340). Omission caused deleteE2eUser
+    // failures when E2E tests created positions and then cleaned up the user.
+    admin.from('stock_positions').delete().eq('household_id', householdId),
     admin.from('trading_account_config').delete().eq('household_id', householdId),
     admin.from('finance_snapshots').delete().eq('household_id', householdId),
     admin.from('trade').delete().eq('household_id', householdId),
