@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useMemo } from "react";
 import { useSettings } from "../settings/SettingsContext";
-import { getDividendDashboard } from "@/app/dividends/actions";
+import { getDividendDashboard, getDividendEstimations } from "@/app/dividends/actions";
 import StackedIncomeBarChart, { YearlyIncomeData } from "../../components/Summary/StackedIncomeBarChart";
 import { getLadderIncome } from "../ladder/actions";
 import { getOptionsYearlyCashFlow } from "../options/actions";
@@ -49,18 +49,36 @@ export default function SummaryPage() {
           ladderMap.set(year, (ladderMap.get(year) || 0) + point.value);
         }
 
-        // 3. Project dividends from current dashboard annual income
+        // 3. Fetch dividend estimations (user-entered overrides)
+        const estimationsResult = await getDividendEstimations();
+        const estimationsMap = new Map<number, number>();
+        if (estimationsResult.ok) {
+          estimationsResult.data.forEach(est => {
+            estimationsMap.set(est.year, est.amount);
+          });
+        }
+
+        // 4. Project dividends from current dashboard annual income
         const dividendDashboard = await getDividendDashboard(settings.mainCurrency);
         let projectedDividendAmount = dividendDashboard.stats.annual_income;
         const divMap = new Map<number, number>();
+        const divSourceMap = new Map<number, 'estimation' | 'projection'>();
+
         for (let year = currentYear; year <= divParams.final_year; year += 1) {
-          if (year > currentYear) {
-            projectedDividendAmount *= 1 + divParams.growth_rate + (divParams.yield_rate * divParams.reinvest_rate);
+          // Prefer estimation if present, otherwise use projection
+          if (estimationsMap.has(year)) {
+            divMap.set(year, estimationsMap.get(year)!);
+            divSourceMap.set(year, 'estimation');
+          } else {
+            if (year > currentYear) {
+              projectedDividendAmount *= 1 + divParams.growth_rate + (divParams.yield_rate * divParams.reinvest_rate);
+            }
+            divMap.set(year, Math.round(projectedDividendAmount * 100) / 100);
+            divSourceMap.set(year, 'projection');
           }
-          divMap.set(year, Math.round(projectedDividendAmount * 100) / 100);
         }
 
-        // 4. Merge all data sources
+        // 5. Merge all data sources
         const allYears = new Set<number>();
         optionsYearly.forEach(o => allYears.add(o.year));
         ladderSeries.forEach(l => allYears.add(new Date(l.date).getFullYear()));
@@ -81,8 +99,9 @@ export default function SummaryPage() {
             year,
             // Options: use actual for past/current, 0 for future (conservative projection)
             optionsIncome: hasOptionsData ? optionsMap.get(year)! : 0,
-            // Dividends: projected growth
+            // Dividends: use estimation if present, otherwise projection
             dividendsIncome: divMap.get(year) || 0,
+            dividendsSource: divSourceMap.get(year),
             // Bonds: scheduled payments
             bondsIncome: ladderMap.get(year) || 0,
             isProjected,
@@ -121,7 +140,7 @@ export default function SummaryPage() {
         </div>
         <p className="text-xs text-slate-400 mb-4">
           <strong>Projection assumptions:</strong> Options show actual cumulative cash flow for past years,
-          0 for future (conservative). Dividends project with {(divParams.growth_rate * 100).toFixed(1)}% growth rate.
+          0 for future (conservative). Dividends use your estimations where entered, otherwise project with {(divParams.growth_rate * 100).toFixed(1)}% growth rate.
           Bonds show scheduled coupon and maturity payments. Projected years are shown with reduced opacity.
         </p>
         <StackedIncomeBarChart data={chartData} cutoffYear={settings.cutoffYear} />

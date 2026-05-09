@@ -6,11 +6,16 @@ import DividendChart, { DividendChartPoint } from "../../../components/Dividends
 import DividendHistory, { DividendRecord } from "../../../components/Dividends/DividendHistory";
 import DividendSettings, { ProjectionParams } from "../../../components/Dividends/DividendSettings";
 import { useSettings } from "../../settings/SettingsContext";
+import { getDividendEstimations, saveDividendEstimations } from "../actions";
 
 export default function DividendEstimationsPage() {
     const { settings, updateSettings } = useSettings();
     const [historicalData, setHistoricalData] = useState<DividendRecord[]>([]);
     const [chartData, setChartData] = useState<DividendChartPoint[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
     const params: ProjectionParams = useMemo(() => ({
         yield_rate: settings.dividendYieldRate,
@@ -68,13 +73,54 @@ export default function DividendEstimationsPage() {
         setChartData([...historicalPoints, ...projectedPoints]);
     }, [historicalData, params]);
 
-    const handleSaveHistory = (newData: DividendRecord[]) => {
-        setHistoricalData(newData);
+    // Load estimations on mount
+    useEffect(() => {
+        const loadEstimations = async () => {
+            setIsLoading(true);
+            setErrorMessage(null);
+            const result = await getDividendEstimations();
+            if (result.ok) {
+                setHistoricalData(result.data);
+            } else {
+                setErrorMessage(`Failed to load estimations: ${result.error}`);
+            }
+            setIsLoading(false);
+        };
+        loadEstimations();
+    }, []);
+
+    const handleSaveHistory = async (newData: DividendRecord[]) => {
+        setIsSaving(true);
+        setErrorMessage(null);
+        setSuccessMessage(null);
+
+        const result = await saveDividendEstimations(newData);
+        if (result.ok) {
+            setHistoricalData(newData);
+            setSuccessMessage("Estimations saved successfully");
+            // Clear success message after 3 seconds
+            setTimeout(() => setSuccessMessage(null), 3000);
+        } else {
+            setErrorMessage(`Save failed: ${result.error}`);
+        }
+        setIsSaving(false);
     };
 
     return (
         <div className="p-6 max-w-7xl mx-auto">
             <h1 className="text-3xl font-bold mb-6 text-slate-100">Dividend Growth Estimations</h1>
+
+            {errorMessage && (
+                <div className="mb-4 p-4 bg-red-900/20 border border-red-800 rounded-lg text-red-200">
+                    {errorMessage}
+                </div>
+            )}
+
+            {successMessage && (
+                <div className="mb-4 p-4 bg-emerald-900/20 border border-emerald-800 rounded-lg text-emerald-200">
+                    {successMessage}
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
                 <div className="lg:col-span-2">
@@ -90,7 +136,17 @@ export default function DividendEstimationsPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2">
-                    <DividendHistory initialData={historicalData} onSave={handleSaveHistory} />
+                    {isLoading ? (
+                        <div className="bg-slate-900 p-4 rounded-lg border border-slate-800">
+                            <p className="text-slate-400">Loading estimations...</p>
+                        </div>
+                    ) : (
+                        <DividendHistory
+                            initialData={historicalData}
+                            onSave={handleSaveHistory}
+                            isSaving={isSaving}
+                        />
+                    )}
                 </div>
             </div>
         </div>

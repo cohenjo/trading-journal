@@ -10,9 +10,10 @@ export type DividendRecord = {
 type DividendHistoryProps = {
   initialData: DividendRecord[];
   onSave: (data: DividendRecord[]) => void;
+  isSaving?: boolean;
 };
 
-export default function DividendHistory({ initialData, onSave }: DividendHistoryProps) {
+export default function DividendHistory({ initialData, onSave, isSaving = false }: DividendHistoryProps) {
   const [records, setRecords] = useState<DividendRecord[]>(initialData);
   const [newYear, setNewYear] = useState<number>(new Date().getFullYear());
   const [newAmount, setNewAmount] = useState<number>(0);
@@ -45,7 +46,10 @@ export default function DividendHistory({ initialData, onSave }: DividendHistory
 
   return (
     <div className="bg-slate-900 p-4 rounded-lg border border-slate-800">
-      <h3 className="text-lg font-semibold mb-4 text-slate-200">Historical Dividends</h3>
+      <h3 className="text-lg font-semibold mb-4 text-slate-200">
+        Historical Dividends
+        {isSaving && <span className="ml-2 text-sm text-slate-400">(saving...)</span>}
+      </h3>
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left text-slate-300">
           <thead className="text-xs text-slate-400 uppercase bg-slate-800">
@@ -60,9 +64,9 @@ export default function DividendHistory({ initialData, onSave }: DividendHistory
               <tr key={record.year} className="border-b border-slate-800 hover:bg-slate-800/50">
                 <td className="px-4 py-2">{record.year}</td>
                 <td className="px-4 py-2">
-                    <input 
-                        type="number" 
-                        value={record.amount} 
+                    <input
+                        type="number"
+                        value={record.amount}
                         onChange={(e) => handleUpdate(record.year, parseFloat(e.target.value))}
                         className="bg-transparent border-none focus:ring-0 w-full"
                     />

@@ -746,3 +746,121 @@ export async function deleteDividendAccount(
 
   return { ok: true };
 }
+
+// ── Dividend Estimations (Issue #339) ────────────────────────────────────────
+
+export interface DividendEstimation {
+  year: number;
+  amount: number;
+}
+
+export type DividendEstimationsResult =
+  | { ok: true; data: DividendEstimation[] }
+  | { ok: false; error: string };
+
+export type SaveDividendEstimationsResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Fetches all dividend estimations for the authenticated user's household.
+ */
+export async function getDividendEstimations(): Promise<DividendEstimationsResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return { ok: false, error: 'Unauthorized' };
+  }
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) {
+    return { ok: false, error: 'No household found' };
+  }
+
+  const { data, error } = await supabase
+    .from('dividend_estimations')
+    .select('year, amount')
+    .eq('household_id', householdId)
+    .order('year', { ascending: true });
+
+  if (error) {
+    console.error('[getDividendEstimations] query error:', error.message);
+    return { ok: false, error: error.message };
+  }
+
+  const estimations: DividendEstimation[] = (data ?? []).map(row => ({
+    year: Number(row.year),
+    amount: toNumber(row.amount),
+  }));
+
+  return { ok: true, data: estimations };
+}
+
+/**
+ * Saves (upserts) all dividend estimations for the authenticated user's household.
+ * Replaces existing data completely: deletes all current rows, then inserts the new set.
+ */
+export async function saveDividendEstimations(
+  estimations: DividendEstimation[]
+): Promise<SaveDividendEstimationsResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return { ok: false, error: 'Unauthorized' };
+  }
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) {
+    return { ok: false, error: 'No household found' };
+  }
+
+  // Validate input
+  for (const est of estimations) {
+    if (!Number.isInteger(est.year)) {
+      return { ok: false, error: `Invalid year: ${est.year}` };
+    }
+    const amount = Number(est.amount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      return { ok: false, error: `Invalid amount for year ${est.year}` };
+    }
+  }
+
+  // Delete all existing estimations for this household
+  const { error: deleteError } = await supabase
+    .from('dividend_estimations')
+    .delete()
+    .eq('household_id', householdId);
+
+  if (deleteError) {
+    console.error('[saveDividendEstimations] delete error:', deleteError.message);
+    return { ok: false, error: deleteError.message };
+  }
+
+  // Insert new estimations (if any)
+  if (estimations.length > 0) {
+    const rows = estimations.map(est => ({
+      household_id: householdId,
+      year: est.year,
+      amount: est.amount,
+    }));
+
+    const { error: insertError } = await supabase
+      .from('dividend_estimations')
+      .insert(rows);
+
+    if (insertError) {
+      console.error('[saveDividendEstimations] insert error:', insertError.message);
+      return { ok: false, error: insertError.message };
+    }
+  }
+
+  return { ok: true };
+}

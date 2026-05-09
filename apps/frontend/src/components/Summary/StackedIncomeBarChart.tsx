@@ -9,6 +9,7 @@ export type YearlyIncomeData = {
   dividendsIncome: number;
   bondsIncome: number;
   isProjected: boolean;
+  dividendsSource?: 'estimation' | 'projection';
 };
 
 type Props = {
@@ -23,6 +24,7 @@ type TooltipData = {
   bonds: number;
   total: number;
   isProjected: boolean;
+  dividendsSource?: 'estimation' | 'projection';
 };
 
 export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
@@ -160,6 +162,7 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
           bonds: dataPoint.bondsIncome,
           total: dataPoint.optionsIncome + dataPoint.dividendsIncome + dataPoint.bondsIncome,
           isProjected: dataPoint.isProjected,
+          dividendsSource: dataPoint.dividendsSource,
         });
       }
     });
@@ -186,6 +189,9 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
               <span className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-emerald-500 rounded-sm"></div>
                 Dividends
+                {tooltip.dividendsSource === 'estimation' && (
+                  <span className="text-xs text-emerald-400">(est.)</span>
+                )}
               </span>
               <span className="font-mono">{currencyFormatter(tooltip.dividends)}</span>
             </div>
