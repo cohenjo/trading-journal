@@ -26,7 +26,7 @@ describe('StackedIncomeBarChart', () => {
 
   it('creates chart with proper configuration', async () => {
     render(<StackedIncomeBarChart data={mockData} />);
-    
+
     await waitFor(() => {
       expect(createChart).toHaveBeenCalled();
     });
@@ -44,7 +44,7 @@ describe('StackedIncomeBarChart', () => {
 
   it('creates three histogram series for stacked bars', async () => {
     const { container } = render(<StackedIncomeBarChart data={mockData} />);
-    
+
     await waitFor(() => {
       expect(createChart).toHaveBeenCalled();
     });
@@ -52,7 +52,7 @@ describe('StackedIncomeBarChart', () => {
     const calls = vi.mocked(createChart).mock.calls;
     const lastChart = calls[calls.length - 1][0];
     const mockChart = vi.mocked(createChart).mock.results[vi.mocked(createChart).mock.results.length - 1].value;
-    
+
     await waitFor(() => {
       expect(mockChart.addSeries).toHaveBeenCalledTimes(3);
     });
@@ -60,32 +60,32 @@ describe('StackedIncomeBarChart', () => {
 
   it('distinguishes projected years with reduced opacity', async () => {
     render(<StackedIncomeBarChart data={mockData} />);
-    
+
     await waitFor(() => {
       expect(createChart).toHaveBeenCalled();
     });
 
     const mockChart = vi.mocked(createChart).mock.results[vi.mocked(createChart).mock.results.length - 1].value;
-    
+
     await waitFor(() => {
       // @ts-expect-error - accessing test-only __series property
       const series = mockChart.__series;
       expect(series.length).toBe(3);
-      
+
       // Check that setData was called on each series
       series.forEach((s: any) => {
         expect(s.setData).toHaveBeenCalled();
       });
-      
+
       // Verify first series (options) has data with colors including opacity markers
       const optionsData = series[0].setData.mock.calls[0][0];
       expect(optionsData).toBeInstanceOf(Array);
       expect(optionsData[0]).toHaveProperty('color');
-      
+
       // Check that projected years have lower opacity (0.4) vs actuals (1.0)
       const actualYearColor = optionsData[0].color;
       const projectedYearColor = optionsData[2].color;
-      
+
       // Actual years should have higher opacity (0.8)
       expect(actualYearColor).toContain('0.8');
       // Projected years should have lower opacity (0.32 = 0.4 * 0.8)
@@ -95,22 +95,22 @@ describe('StackedIncomeBarChart', () => {
 
   it('stacks values correctly', async () => {
     render(<StackedIncomeBarChart data={mockData} />);
-    
+
     await waitFor(() => {
       expect(createChart).toHaveBeenCalled();
     });
 
     const mockChart = vi.mocked(createChart).mock.results[vi.mocked(createChart).mock.results.length - 1].value;
-    
+
     await waitFor(() => {
       // @ts-expect-error - accessing test-only __series property
       const series = mockChart.__series;
       expect(series.length).toBe(3);
-      
+
       const optionsData = series[0].setData.mock.calls[0][0];
       const dividendsData = series[1].setData.mock.calls[0][0];
       const bondsData = series[2].setData.mock.calls[0][0];
-      
+
       // First data point (2024): options=5000, dividends=3000, bonds=2000
       expect(optionsData[0].value).toBe(5000); // Options layer shows just options
       expect(dividendsData[0].value).toBe(8000); // Dividends layer shows options + dividends
@@ -120,14 +120,14 @@ describe('StackedIncomeBarChart', () => {
 
   it('formats currency values correctly in tooltip', () => {
     render(<StackedIncomeBarChart data={mockData} />);
-    
+
     // Currency formatter should format as USD without decimals
-    const formatter = new Intl.NumberFormat('en-US', { 
-      style: 'currency', 
-      currency: 'USD', 
-      maximumFractionDigits: 0 
+    const formatter = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0
     });
-    
+
     expect(formatter.format(5000)).toBe('$5,000');
     expect(formatter.format(10000)).toBe('$10,000');
   });

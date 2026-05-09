@@ -61,7 +61,7 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
 
     // Create three histogram series for stacked bars
     // We'll render them from bottom to top: Options (base) → Dividends → Bonds
-    
+
     // 1. Options (bottom layer - full height)
     optionsSeriesRef.current = chart.addSeries(HistogramSeries, {
       color: "#f59e0b", // Amber 500
@@ -103,7 +103,7 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
     // Bottom series shows cumulative from 0
     // Middle series shows cumulative from 0 to (options + dividends)
     // Top series shows total (options + dividends + bonds)
-    
+
     const optionsData: HistogramData<Time>[] = [];
     const dividendsData: HistogramData<Time>[] = [];
     const bondsData: HistogramData<Time>[] = [];
@@ -117,20 +117,20 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
       // Adjust opacity for projected years
       const baseColor = point.isProjected ? 0.4 : 1.0;
 
-      optionsData.push({ 
-        time, 
+      optionsData.push({
+        time,
         value: optionsValue,
         color: `rgba(245, 158, 11, ${baseColor * 0.8})` // amber with opacity
       });
-      
-      dividendsData.push({ 
-        time, 
+
+      dividendsData.push({
+        time,
         value: dividendsValue,
         color: `rgba(16, 185, 129, ${baseColor * 0.8})` // emerald with opacity
       });
-      
-      bondsData.push({ 
-        time, 
+
+      bondsData.push({
+        time,
         value: bondsValue,
         color: `rgba(59, 130, 246, ${baseColor * 0.8})` // blue with opacity
       });
@@ -151,7 +151,7 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
 
       const year = String(param.time).slice(0, 4);
       const dataPoint = data.find(d => d.year === Number(year));
-      
+
       if (dataPoint) {
         setTooltip({
           year,
@@ -168,7 +168,7 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
   return (
     <div className="relative">
       <div ref={containerRef} className="w-full h-[400px]" />
-      
+
       {tooltip && (
         <div className="absolute top-4 left-4 bg-slate-800/95 border border-slate-700 rounded-lg p-3 text-sm shadow-lg z-10">
           <div className="font-semibold text-slate-200 mb-2">

@@ -21,11 +21,6 @@ const ISSUER_NAME = 'E2E Corp Bond 2031';
 const MATURITY_DATE = '2031-12-31';
 
 test.describe('wave-2 CRUD: /holdings @flow', () => {
-  test.afterAll(async () => {
-    // householdId is not available at afterAll scope from the fixture,
-    // so cleanup is done inside each test via finally blocks.
-  });
-
   test('create a bond holding and verify it appears @flow', async ({
     testUser: { page, householdId },
   }) => {

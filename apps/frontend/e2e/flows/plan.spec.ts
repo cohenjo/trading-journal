@@ -111,15 +111,21 @@ test.describe('P0 flow: /plan (authenticated)', () => {
 // can read it through the Server Action path.
 
 testWithUser.describe('regression #172: plan reads via Server Actions @flow', () => {
-  testWithUser.afterAll(async ({ testUser: { householdId } }) => {
-    await cleanupHouseholdData(householdId).catch((err: Error) =>
-      console.warn(`[plan] cleanup warning: ${err.message}`),
-    );
+  let householdIdForCleanup: string;
+
+  testWithUser.afterAll(async () => {
+    if (householdIdForCleanup) {
+      await cleanupHouseholdData(householdIdForCleanup).catch((err: Error) =>
+        console.warn(`[plan] cleanup warning: ${err.message}`),
+      );
+    }
   });
 
   testWithUser(
     'plan page renders without /api/finances/latest or /api/plans/latest network calls @flow',
     async ({ testUser: { page, householdId } }) => {
+      // Capture householdId for cleanup in afterAll
+      householdIdForCleanup = householdId;
       // Seed 2 finance items with different categories so the page has data to display
       await Promise.all([
         seedFund(householdId, { name: 'E2E Brokerage Fund', value: 50_000, type: 'Brokerage Account' }),

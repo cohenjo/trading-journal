@@ -104,15 +104,21 @@ test.describe('Dividends page (#106)', () => {
 // Cleanup: each test deletes its own data; afterAll clears the household.
 
 testWithUser.describe('regression #171: dividend account CRUD via Server Actions @flow', () => {
-  testWithUser.afterAll(async ({ testUser: { householdId } }) => {
-    await cleanupHouseholdData(householdId).catch((err: Error) =>
-      console.warn(`[dividends] cleanup warning: ${err.message}`),
-    );
+  let householdIdForCleanup: string;
+
+  testWithUser.afterAll(async () => {
+    if (householdIdForCleanup) {
+      await cleanupHouseholdData(householdIdForCleanup).catch((err: Error) =>
+        console.warn(`[dividends] cleanup warning: ${err.message}`),
+      );
+    }
   });
 
   testWithUser(
     'add manual account → appears in Active Accounts list @flow',
-    async ({ testUser: { page } }) => {
+    async ({ testUser: { page, householdId } }) => {
+      // Capture householdId for cleanup in afterAll
+      householdIdForCleanup = householdId;
       await page.goto('/dividends');
       await page.waitForLoadState('domcontentloaded');
 

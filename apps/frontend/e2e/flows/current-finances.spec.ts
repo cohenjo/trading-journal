@@ -114,15 +114,21 @@ test.describe('P0 flow: /current-finances (authenticated)', () => {
 // This E2E covers the full browser → server action → Supabase round-trip.
 
 testWithUser.describe('regression #168: fund save with household @flow', () => {
+  let householdIdForCleanup: string;
+
+  testWithUser.afterAll(async () => {
+    if (householdIdForCleanup) {
+      await cleanupHouseholdData(householdIdForCleanup).catch((err: Error) =>
+        console.warn(`[current-finances] cleanup warning: ${err.message}`),
+      );
+    }
+  });
+
   testWithUser(
     'adding an asset saves successfully and persists after page reload @flow',
     async ({ testUser: { page, householdId } }) => {
-      // Postcondition cleanup — remove seeded snapshot data after this test
-      testWithUser.afterAll(async () => {
-        await cleanupHouseholdData(householdId).catch((err: Error) =>
-          console.warn(`[current-finances] cleanup warning: ${err.message}`),
-        );
-      });
+      // Capture householdId for cleanup in afterAll
+      householdIdForCleanup = householdId;
 
       await page.goto('/current-finances');
       await page.waitForLoadState('domcontentloaded');
