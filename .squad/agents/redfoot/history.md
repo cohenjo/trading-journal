@@ -1,3 +1,35 @@
+## 2026-05-09 — E2E Nightly Suite Fix (Issue #334)
+
+**Evidence:** GitHub Actions run [25593316092](https://github.com/cohenjo/trading-journal/actions/runs/25593316092) failed on main @ c2b5d94 with Playwright hook placement violations.
+
+**Root Cause:** Three illegal `test.afterAll()` patterns:
+
+1. **afterAll inside test body** (current-finances.spec.ts:121) — called testWithUser.afterAll() inside the test function, which Playwright forbids.
+2. **afterAll with fixture parameters** (plan.spec.ts:114, dividends.spec.ts:107) — declared afterAll(async ({ testUser }) => ...) at describe level. Fixtures are only available to tests, not hooks.
+3. **Empty placeholder afterAll** (wave2-holdings.spec.ts:24) — do-nothing hook with a comment about householdId not being available.
+
+**Fix Applied:**
+
+- **Patterns 1 & 2:** Moved afterAll to describe block level with householdId captured in closure variable (`householdIdForCleanup`). This preserves cleanup logic while respecting Playwright's fixture scope rules.
+- **Pattern 3:** Removed placeholder — each test already has try/finally cleanup.
+
+**Files Changed:**
+
+- `apps/frontend/e2e/flows/current-finances.spec.ts`
+- `apps/frontend/e2e/flows/plan.spec.ts`
+- `apps/frontend/e2e/flows/wave2-holdings.spec.ts`
+- `apps/frontend/e2e/pages/dividends.spec.ts`
+
+**Verification:** Local `npx playwright test flows/current-finances.spec.ts` no longer throws afterAll placement errors. Test failures now environmental (Supabase URL safety check), not structural.
+
+**Commit:** b97ab19 (main)
+
+**Learning:** Playwright enforces strict hook placement. afterAll must be at describe/test.describe level and cannot access test-scoped fixtures (page, context, testUser). Use closure variables to bridge scope.
+
+---
+
+## 2026-05-03 — Household Bootstrap E2E (PR #152 Cherry-Pick)
+
 **Cherry-pick:** `788cc3e` from `squad/household-bootstrap-2026-05-03` (Hockney PR #164 — RPC)
 
 **What was added / cherry-picked:**
