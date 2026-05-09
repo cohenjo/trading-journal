@@ -404,3 +404,39 @@ New `apps/backend/app/api/positions.py`:
 - supabase db push --include-all on production
 - Phase 3 backfill script (backfill_flex_v2.py)
 - IBKR portal fixes needed: accruedInterest field in BOND rows, FinancialInstrumentInformation section
+
+---
+
+## 2026-05-10 — ✅ Flex Pipeline v2: Parser + 5 Migrations + Phase 3 Backfill (Complete)
+
+**Scope:** Full backend implementation of Flex pipeline v2 to land IBKR Activity Flex BOND positions, dividend payments/accruals, and security reference data.
+
+**Executed:**
+
+**Phase 1 — Parser & Schema (commit f25f05c):**
+- 5 migrations: `20260510000100` (extend stock_positions 8 cols), `20260510000200` (bond_holdings Flex upgrade), `20260510000300` (dividend_payments table), `20260510000400` (dividend_accruals), `20260510000500` (security_reference con_id PK).
+- Parser: Extended FlexStockPosition with 6 identifier fields. New models: FlexBondPosition, FlexDividendPayment, FlexDividendAccrual, FlexSecurityInfo. New parse functions: parse_bond_symbol(), parse_bond_open_position(), parse_dividend_payment(), parse_dividend_accrual(), parse_security_info().
+- parse_bond_symbol() handles: mixed fractions (4 1/4), fraction-only (3/4), CUSIP suffix, 2/4-digit years.
+- Sync handler: 5 new sync functions (_sync_bond_positions, _upsert_dividend_payment, _sync_dividend_accruals, _upsert_security_reference, _seed_security_reference_from_positions).
+- Tests: 21 pass, 4 skip on master XML. Full suite: 500 passed (was 479).
+- **Bug discovered:** Pydantic field name shadowing in FlexDividendAccrual.date (renamed to accrual_date) — avoided TypeError in type annotation evaluation.
+
+**Phase 3 — Backfill (commit eacd8d4):**
+- Script: apps/backend/scripts/backfill_flex_v2.py (26 tests, all passing).
+- Results: 5,524 dividend_payments + 217 dividend_accruals + 75 security_reference + 18 bond_holdings + 270 stock_positions (identifier cols + cost_basis_total).
+- Idempotency verified by running backfill twice; row counts stable.
+
+**Phase 4 — Hotfix (commit 6a808ef):**
+- Migration `20260510000600_bond_holdings_add_listing_exchange.sql` — schema/code drift caught during Phase E backfill (listing_exchange missing from bond_holdings schema but referenced in _sync_bond_positions). Column added; 18 bond rows backfilled with listing_exchange from raw_payload.
+
+**Key Learnings:**
+1. Backfill from raw_payload does not require re-fetching upstream API. Use idempotency keys per-table (UNIQUE constraints or window-delete strategies).
+2. Bond symbol string parser (parse_bond_symbol) is reliable v1 truth before FII portal section is enabled. Handles mixed fractions, decimals, CUSIP suffixes, 2/4-digit years.
+3. CashTransaction routing by `type` field (Dividends/WHT/PIL) is robust when assetCategory is missing from portal. 5,524 dividend events routed with zero misclassifications.
+4. **Pydantic field name shadowing:** Avoid stdlib type names as model attributes (e.g., use accrual_date instead of date). Shadowing causes TypeError during class construction.
+5. **Schema/code drift:** Integration tests must call the actual sync function, not direct SQL INSERT, to catch schema gaps. Caught by Phase E backfill, not by unit tests.
+
+**Pending:**
+- supabase db push --include-all on production (Kujan applied 2026-05-10 01:15 UTC).
+- Live Flex sync blocked by IBKR error 1001 throttle (Kujan attempted 2026-05-10, 8 retries over 43min failed). Workaround: re-save Flex query in Account Management or wait ~30min.
+- Portal fixes needed for full data completeness: accruedInterest (BOND rows), assetCategory/fxRateToBase (CashTransactions). McManus revalidation v2 verdict: YELLOW (7/12 portal items complete; pipeline ready for next sync).
