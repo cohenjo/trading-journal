@@ -31,6 +31,7 @@ from app.api import (
     pension,
     analyze,
     insurance,
+    positions,
     metrics as telemetry_metrics,
 )
 from opentelemetry import trace, metrics
@@ -246,6 +247,7 @@ app.include_router(trading.router, dependencies=auth_dep)
 app.include_router(pension.router, dependencies=auth_dep)
 app.include_router(analyze.router, dependencies=auth_dep)
 app.include_router(insurance.router, dependencies=auth_dep)
+app.include_router(positions.router, prefix="/api", tags=["positions"], dependencies=auth_dep)
 # Metrics router handles optional auth internally (telemetry must work with sendBeacon)
 app.include_router(telemetry_metrics.router)
 
