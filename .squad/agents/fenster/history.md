@@ -1,4 +1,24 @@
+## 2026-05-09 — #340 follow-up: account label rename
+
+Renamed tab display labels to match Jony's finalized directive:
+- `ibkr: "IBKR"` → `ibkr: "InteractiveBrokers"`
+- `ira: "IRA (Hishtalmut)"` → `ira: "LeumiIRA"`
+- `schwab: "Schwab"` (unchanged)
+
+Internal `account_type` codes stay as tech identifiers (ibkr, schwab, ira).
+
+**Files touched:**
+- `apps/frontend/src/app/trading/accounts/page.tsx` — central `TAB_LABELS` mapping (3-line change)
+- `apps/frontend/src/components/trading/accounts/__tests__/AggregatePortfolioFooter.test.tsx` — test fixture names
+
+**Test results:** 364/364 green (no regressions).
+
+**Commit:** 06c4984 (pushed to origin/main).
+
+---
+
 - Upsert uses `onConflict: 'date'` (PK). RLS blocks cross-household updates at DB level.
+
 
 ### Pattern established
 
