@@ -25,11 +25,11 @@ jobs:
 
     steps:
       # ── 1. Install dependencies ────────────────────────────────────────────
-      - name: Install postgresql-client-15
+      - name: Install postgresql-client-17
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release
-          # Add the official PostgreSQL APT repository (PGDG) so pg-client-15
+          # Add the official PostgreSQL APT repository (PGDG) so pg-client-17
           # remains available even after Ubuntu 22.04 drops it from default sources.
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             | sudo gpg --dearmor -o /etc/apt/keyrings/postgresql.gpg
@@ -38,7 +38,7 @@ jobs:
             $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/postgresql.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends postgresql-client-15
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
 
       - name: Install age
         # age 1.2.0 — verify latest at https://github.com/FiloSottile/age/releases
