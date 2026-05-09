@@ -38,6 +38,8 @@ jobs:
             $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/postgresql.list > /dev/null
           sudo apt-get update -qq
+          # Remove pre-installed postgresql-client versions to avoid PATH conflicts
+          sudo apt-get remove -y postgresql-client* || true
           sudo apt-get install -y --no-install-recommends postgresql-client-17
 
       - name: Install age
