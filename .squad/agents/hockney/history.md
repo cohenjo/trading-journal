@@ -197,3 +197,62 @@ Ran the actual production backfill using 4 manually-exported Activity Flex XML f
 **Pattern learned:** Always verify table existence before building CRUD UI. Follow household-scoped RLS pattern with `resolveHouseholdId` helper.
 
 **Paired with:** Fenster (frontend integration) — working as Hockney (backend).
+
+### 2026-05-10: #340 Phase 2 — stock_positions + dividend projection
+
+**Issue:** #340 Phase 2 — trading accounts, stock positions, dividend projection.
+
+#### H1 — stock_positions table + account_type CHECK
+
+Landed migration `20260510000001_add_stock_positions.sql`:
+- New `stock_positions` table with extended Flex payload fields (description, sub_category, mark_price, market_value, unrealized_pnl, raw_payload, last_broker_sync_at) beyond Keaton's schema sketch, incorporating McManus's field mapping from the representative STK row.
+- Indexes: `(household_id, account_id)`, `(household_id, ticker)`, partial UNIQUE `(account_id, ticker, as_of_date) WHERE source='flex'`.
+- Household-scoped RLS matching `options_positions` pattern (is_household_member / is_household_writer).
+- `account_type` on `trading_account_config`: discovered existing CHECK constraint `trading_account_config_account_type_check` allowing only `'IBKR'/'SCHWAB'` (uppercase). Dropped it, lowercased existing row (IBKR → ibkr), added new CHECK `IN ('ibkr','schwab','ira')`.
+- Updated `TradingAccountType` Python enum to lowercase values + `IRA = "ira"`.
+- **Pitfall:** `trading_service.py` compared `config.account_type == "IBKR"` (string literal). Fixed to accept both `'IBKR'` and `'ibkr'` for backward compat.
+
+#### H2 — Manual Position CRUD API
+
+New `apps/backend/app/api/positions.py`:
+- `POST /api/accounts/positions` — create `source='manual'`; rejects IBKR accounts (422).
+- `PUT /api/accounts/positions/{id}` — partial update (quantity/cost_basis/as_of_date); rejects flex-sourced rows.
+- `DELETE /api/accounts/positions/{id}` — hard delete; rejects flex rows (404 if not manual/own household).
+- `GET /api/accounts/positions[?account_id=N&as_of_date=D]` — list with JOIN on `trading_account_config`.
+- **Pitfall:** FastAPI `status_code=204` with a typed return model raises `AssertionError` at import time. Changed DELETE to return `{"deleted": True}` with status 200.
+
+#### H3 — Flex STK Parser + Handler
+
+**Parser fix** (lines 198–200 bug from McManus):
+- Added `FlexStockPosition` Pydantic model with full attribute mapping from representative Flex XML row.
+- `parse_flex_files()` now has an `elif assetCategory == "STK" and putCall == ""` branch in the `OpenPositions` section; BOND/CASH rows are excluded by the STK category check.
+- `parse_stock_open_position()` helper handles missing symbol/quantity gracefully (returns None with warning log).
+- `FlexParseResult` extended with `stock_positions: list[FlexStockPosition]`.
+- `_scope_result()` and `_parsed_account_ids()` updated to propagate `stock_positions`.
+
+**Sync handler** (`_sync_stock_positions()` in `options_sync.py`):
+- Delete-then-insert keyed on `(household_id, account_id, as_of_date, source='flex')`, same pattern as `options_positions`.
+- Called from `run_flex_options_sync()` alongside existing options positions sync.
+- Returns row count; added `stock_position_count` to job result.
+
+**Backfill result:** 4 Activity Flex XMLs in `reports/activity/` → 213 rows:
+- 2022-12-30: 63 STK positions
+- 2023-12-29: 45 STK positions
+- 2024-12-31: 51 STK positions
+- 2025-12-31: 54 STK positions
+(Matches McManus's expected counts exactly.)
+
+**IBKR quirk documented:** `openDateTime` is always empty for STK rows in Activity Flex — only aggregate position quantity and average cost basis are available. Per-lot holding-period data is not possible from this source; documented in `FlexStockPosition` docstring.
+
+#### H4 — GET /api/dividends/projection
+
+- Primary path: `stock_positions JOIN dividend_ticker_data ON ticker`; uses `dividend_rate` (already annualised); subquery selects latest `as_of_date` per `(household, account)` to avoid stale snapshots.
+- Response: `{total_annual, source, by_ticker[{ticker, quantity, annual}], by_account[{account_id, name, annual}]}`.
+- **#342 regression guard:** when `stock_positions` is empty (no Flex sync yet), falls back to `dividend_positions JOIN dividend_ticker_data`. `source` field signals `'dividend_positions_fallback'` to the client.
+
+#### Learnings
+
+- **FastAPI DELETE + 204:** Using `status_code=204` with any response_model or typed return raises `AssertionError` at app startup — FastAPI forbids body on 204. Use 200 + `{"deleted": True}` for JSON APIs that want to confirm deletion.
+- **Postgres ENUM migration difficulty:** `tradingaccounttype` enum with uppercase values needed to change to lowercase + add new value. Rather than `ALTER TYPE ... ADD VALUE` (which would still leave uppercase-lowercase mismatch for existing rows), converted the column to `text` via the existing CHECK constraint migration pattern — drop old CHECK, bulk-update values to lower(), add new CHECK. Much cleaner.
+- **Backfill via Supabase tool vs. app script:** The `backfill_options.py` script was slow to produce output (suspected DB connection pooler warm-up latency on the Supabase side). For one-shot backfills, constructing raw SQL INSERT via the Supabase MCP or a minimal Python script against the engine is faster.
+- **FlexParseResult immutability + new field:** Adding a field to a `ConfigDict(frozen=True)` Pydantic model requires updating all constructor call sites (`_scope_result`, `_filter_result_by_dates`, `FlexParseResult(...)` in `parse_flex_files`). Missing one causes a Pydantic validation error at runtime. Always grep for all construction sites when adding fields.
