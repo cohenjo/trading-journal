@@ -202,7 +202,7 @@ export async function getOptionsYearlyCashFlow(): Promise<Array<{ year: number; 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('options_dashboard_monthly')
-    .select('period_start, cash_flow_cumulative')
+    .select('period_start, cash_flow_total')
     .eq('household_id', householdId)
     .order('period_start', { ascending: true });
 
@@ -211,16 +211,14 @@ export async function getOptionsYearlyCashFlow(): Promise<Array<{ year: number; 
     return [];
   }
 
-  const rows = (data ?? []) as Array<{ period_start: string; cash_flow_cumulative: string | number }>;
+  const rows = (data ?? []) as Array<{ period_start: string; cash_flow_total: string | number }>;
   const yearlyMap = new Map<number, number>();
 
   for (const row of rows) {
     const year = new Date(row.period_start).getFullYear();
-    const cumulative = Number(row.cash_flow_cumulative ?? 0);
+    const monthlyAmount = Number(row.cash_flow_total ?? 0);
     const existing = yearlyMap.get(year) ?? 0;
-    if (cumulative > existing) {
-      yearlyMap.set(year, cumulative);
-    }
+    yearlyMap.set(year, existing + monthlyAmount);
   }
 
   const result: Array<{ year: number; amount: number; isProjected: boolean }> = [];
