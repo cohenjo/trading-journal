@@ -8,8 +8,9 @@ from sqlmodel import SQLModel, Field
 
 
 class TradingAccountType(str, Enum):
-    IBKR = "IBKR"
-    SCHWAB = "SCHWAB"
+    IBKR = "ibkr"
+    SCHWAB = "schwab"
+    IRA = "ira"
 
 
 class TradingAccountConfig(SQLModel, table=True):
