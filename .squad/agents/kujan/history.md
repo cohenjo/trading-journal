@@ -158,3 +158,66 @@ Jony must set `SUPABASE_PROD_DB_URL` in GitHub Settings → Secrets → Actions 
 
 ### Next Steps
 - Jony sets secret → manually triggers workflow → confirms success → closes #333 (and #326, #329, #331).
+
+## 2026-05-09T19:42 — pg_dump version mismatch post-fix investigation (Issue #333)
+
+### Summary
+After Jony set `SUPABASE_PROD_DB_URL` (confirming secret was provisioned), a new failure surfaced: pg_dump version mismatch (v14.22 vs Supabase server v17.6). Attempted fix by pinning postgresql-client-17 in workflow, but runner image has hard dependency on PostgreSQL 14.
+
+### Root Cause
+- Supabase upgraded backend from Postgres 14 → 17.6
+- Workflow pins postgresql-client-15 (per #271 PGDG repo decision)
+- pg_dump version must match server version or tool aborts
+- ubuntu-22.04 runner image includes PostgreSQL 14 pre-installed
+- Even after explicit apt-get install postgresql-client-17, runner environment (or PATH) still prioritizes v14
+
+### Attempts
+1. **Commit 04d3558:** Bumped postgresql-client-15 → postgresql-client-17 in PGDG install step
+   - Result: `pg_dump version: 14.22` still (v17 installed but shadowed in PATH)
+2. **Commit fa6b75c:** Added `apt-get remove -y postgresql-client*` to purge all versions before installing v17
+   - Result: New error `PostgreSQL version 14 is not installed` (runner has hard-wired dependency on v14)
+
+### Analysis
+- Simple version pinning insufficient; ubuntu-22.04 runner image has deeper PostgreSQL 14 integration
+- Possible solutions (not attempted, per instructions on not looping):
+  - Use explicit binary path: `/usr/lib/postgresql/17/bin/pg_dump` instead of just `pg_dump`
+  - Use `update-alternatives` to override PATH priority
+  - Switch to a custom runner image or container that ships with Postgres 17 only
+  - Separate backup runner onto a different image (e.g., ubuntu-24.04 which may ship v17)
+
+### Escalation
+Documented findings on #333. Not looping further per scope; escalating to Jony for runner image investigation or explicit PATH workaround.
+
+## 2026-05-09T22:52 — pg_dump explicit path fix (Issues #333, #331, #329, #326)
+
+### Summary
+Applied the explicit binary path workaround. Kept PostgreSQL v14 client installed alongside v17, and invoked pg_dump using absolute path `/usr/lib/postgresql/17/bin/pg_dump` instead of relying on PATH resolution. **Fix succeeded.**
+
+### Actions Taken
+1. ✅ Reverted commit fa6b75c (`apt-get remove postgresql-client*`)
+2. ✅ Modified workflow to install postgresql-client-17 without removing v14
+3. ✅ Added verification step: `"${{ env.PG_DUMP }}" --version` (uses absolute path)
+4. ✅ Changed dump invocation from `pg_dump ...` → `"${{ env.PG_DUMP }}" ...` (env var set to `/usr/lib/postgresql/17/bin/pg_dump`)
+5. ✅ Commit `1e9e011`: Pushed fix to main
+6. ✅ Triggered manual workflow run `25610314559`
+
+### Workflow Status
+- ✅ **Step: Install postgresql-client-17** — success (no removal of v14; v17 installed side-by-side)
+- ✅ **Step: Run pg_dump** — **success** (absolute path resolved correctly; no PATH conflicts)
+- ❌ **Step: Encrypt backup with age** — failed (AGE_PUBLIC_KEY secret empty; unrelated to pg_dump fix)
+
+### Root Cause Lessons Learned
+The apt-get remove approach (commit fa6b75c) failed because:
+- Ubuntu-22.04 runner image has hard-wired dependencies on PostgreSQL 14 (beyond just the binary in PATH)
+- Removing all `postgresql-client*` packages triggered system validation errors: `PostgreSQL version 14 is not installed`
+- The runner environment has deeper integration with v14 than a simple apt package
+
+The working solution:
+- **Keep v14 installed.** Don't try to remove it; the runner depends on it.
+- **Use absolute path to v17 binary.** Bypass PATH resolution entirely. Both v14 and v17 binaries can coexist on disk.
+- **env var pattern:** Set `PG_DUMP=/usr/lib/postgresql/17/bin/pg_dump` in job env, use `"${{ env.PG_DUMP }}"` in run steps. Clean, reusable, self-documenting.
+
+### Outcome
+- **pg_dump fix:** ✅ Complete and verified
+- **Issues #333, #331, #329, #326:** Ready to close (pg_dump now works; encryption failure is separate infrastructure issue)
+- **Workflow still incomplete:** AGE_PUBLIC_KEY secret missing/empty. This is pre-existing and unrelated to pg_dump version mismatch fix. Requires separate investigation into GitHub secrets configuration.
