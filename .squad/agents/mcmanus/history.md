@@ -10,7 +10,7 @@
 
 ## 2026-05-06 — Options Lifecycle & Roll Classification Spec
 
-**Requested by:** Jony Vesterman Cohen  
+**Requested by:** Jony Vesterman Cohen
 **Work:** Authored canonical spec for options position lifecycle states and roll classification rules, filed at `.squad/decisions/inbox/mcmanus-lifecycle-roll-spec.md`.
 
 **Root cause of "all positions show open" bug:** `_status()` in `strategy_grouper.py` checks whether every open leg has a corresponding close trade in the group. In a `roll_chain`, both the original open AND the rolled-to open are in `opens`; the rolled-to leg is still live, so `all(has_close)` fails → always returns `"open"`. Fix: compute net quantity per contract key and return `"open"` only if net quantity > 0.
@@ -124,3 +124,64 @@ PR #90 opened and ready for review.
 📌 Team update (2026-05-06): Data-integrity review for --continue-on-error completed. Findings: ⚠️ Safe-with-mitigations. Gaps create visible holes in metrics but no cascading corruption. Full review documented in decisions.md.
 
 📌 Team update (2026-05-07): Lifecycle/roll canonical spec merged to `.squad/decisions.md` and is now the authoritative guide for Hockney's backend implementation. Spec identified two critical bugs in current code; fixes are gated on Hockney's availability.
+
+## Stacked Income Projection (2026-05-09)
+
+**Issue:** Jony requested yearly income stacking chart showing options/dividends/bonds with future projections. Existing implementation used current-year options P&L instead of cumulative cash flow.
+
+**Solution:** Paired with Fenster to design data model and aggregation logic for yearly income projection across three sources.
+
+### Data source analysis
+
+1. **Options:** `options_dashboard_monthly.cash_flow_cumulative` — monthly cumulative cash flow
+   - Aggregation: Take max cumulative per year (last month's value)
+   - Projection: Conservative — 0 for future (no assumption about future positions)
+   - Rationale: Cumulative cash flow = total premium collected, the metric Jony specified
+
+2. **Dividends:** `dividend_dashboard.annual_income` (run-rate from current holdings)
+   - Aggregation: Current annual income from holdings
+   - Projection: Compound growth = `amount * (1 + growth_rate + yield_rate * reinvest_rate)^years`
+   - Rationale: Models reinvestment + yield growth
+
+3. **Bonds:** `ladder_bonds` → scheduled coupon + maturity payments
+   - Aggregation: Sum by year from `getLadderIncome()`
+   - Projection: Deterministic — scheduled payments are known
+   - Rationale: Bond ladder has fixed payment schedule
+
+### Projection assumptions (transparent to user)
+
+- **Options:** 0 for future years (conservative — doesn't assume new positions)
+- **Dividends:** Uses settings.dividendGrowthRate + settings.dividendYieldRate + settings.dividendReinvestRate
+- **Bonds:** Scheduled payments only (no assumption about new purchases)
+- **Visual distinction:** Projected years shown with 40% opacity
+
+### Implementation: getOptionsYearlyCashFlow()
+
+Query: `options_dashboard_monthly.select('period_start, cash_flow_cumulative')` → group by year → max cumulative
+
+### Data quality considerations
+
+- **Decimal precision:** Cash flow stored as `numeric(18,6)` in DB, converted to number (safe for display)
+- **Missing data:** Returns empty array if no household, 0 if no data for a year
+- **Year boundaries:** Uses `period_start` year (not `period_end`) for grouping
+- **Aggregation:** Takes max cumulative per year = last available month's cumulative value
+
+### Files modified
+
+- `apps/frontend/src/app/options/actions.ts`: +getOptionsYearlyCashFlow()
+- `apps/frontend/src/app/summary/page.tsx`: Data aggregation logic for 3 sources + projection model
+
+### Test coverage
+
+- Frontend: 6 tests in `StackedIncomeBarChart.test.tsx` verify stacking math and projection styling
+- Backend: Action returns correct shape, no new tests needed (uses existing RLS)
+
+## Learnings
+
+**Per-year aggregation from monthly data:** When aggregating cumulative metrics by year, take the last (max) value for each year, not the sum. Cumulative = running total, so year-end value represents full-year total.
+
+**Projection transparency:** Always document assumptions in UI ("Options show actual cumulative cash flow for past years, 0 for future (conservative)"). Financial projections require user trust — be explicit about what's known vs. assumed.
+
+**Paired work with Fenster:** Data design first (McManus), then chart implementation (Fenster). Clear contracts (YearlyIncomeData type) enabled parallel work. Fenster handled all UI/visualization, I focused on correctness of aggregation and projection logic.
+
+**Conservative vs. optimistic:** For options income, 0 projection is better than extrapolating current year's pace. Options positions are time-bound — can't assume new positions will be opened. Dividends/bonds are more predictable (holdings + scheduled payments).
