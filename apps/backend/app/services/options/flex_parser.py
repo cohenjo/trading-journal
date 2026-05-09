@@ -131,6 +131,45 @@ class FlexAccountInformation(BaseModel):
     raw_payload: dict[str, str] = Field(default_factory=dict)
 
 
+class FlexStockPosition(BaseModel):
+    """Normalized STK OpenPosition snapshot row from IBKR Flex XML.
+
+    Parsed from ``<OpenPosition assetCategory="STK" putCall="" .../>`` rows.
+
+    **Note on openDateTime:** IBKR Activity Flex does not populate ``openDateTime``
+    for stock positions — only aggregate quantity and average cost basis are
+    available. Per-lot holding-period data requires a separate Portfolio Analyst
+    query and is out of scope for Phase 2.
+
+    Field mapping from Flex XML attributes:
+        position          → quantity
+        costBasisPrice    → cost_basis
+        positionValue     → market_value
+        fifoPnlUnrealized → unrealized_pnl
+        costBasisMoney    → cost_basis_total
+        subCategory       → sub_category
+        conid             → con_id
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    account_id: str
+    as_of_date: date
+    symbol: str  # ticker
+    con_id: int | None = None
+    description: str | None = None
+    sub_category: str | None = None  # COMMON, ETF, REIT, PREFERENCE, …
+    currency: str = "USD"
+    quantity: Decimal
+    cost_basis: Decimal | None = None  # costBasisPrice (per-share)
+    cost_basis_total: Decimal | None = None  # costBasisMoney (total cost)
+    mark_price: Decimal | None = None
+    market_value: Decimal | None = None  # positionValue
+    unrealized_pnl: Decimal | None = None  # fifoPnlUnrealized
+    last_broker_sync_at: datetime
+    raw_payload: dict[str, str] = Field(default_factory=dict)
+
+
 class FlexParseResult(BaseModel):
     """All normalized rows parsed from one or more Flex XML files."""
 
@@ -139,6 +178,7 @@ class FlexParseResult(BaseModel):
     trades: list[FlexTradeConfirm] = Field(default_factory=list)
     cash_transactions: list[FlexCashTransaction] = Field(default_factory=list)
     open_positions: list[FlexOpenPosition] = Field(default_factory=list)
+    stock_positions: list[FlexStockPosition] = Field(default_factory=list)
     option_eae: list[FlexTradeConfirm] = Field(default_factory=list)
     account_information: list[FlexAccountInformation] = Field(default_factory=list)
     section_counts: dict[str, int] = Field(default_factory=dict)
@@ -169,6 +209,7 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
     trades: list[FlexTradeConfirm] = []
     cash: list[FlexCashTransaction] = []
     positions: list[FlexOpenPosition] = []
+    stock_positions: list[FlexStockPosition] = []
     eae_rows: list[FlexTradeConfirm] = []
     account_info: list[FlexAccountInformation] = []
     assignment_eae_attrs: list[dict[str, str]] = []
@@ -198,6 +239,12 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
             elif section_name == "OpenPositions":
                 if _is_option_contract_row(attrs):
                     positions.append(parse_open_position(attrs, statement_dates[1]))
+                elif attrs.get("assetCategory") == "STK" and attrs.get("putCall", "") == "":
+                    # STK open position — parse and collect; BOND/CASH rows are excluded
+                    # by the assetCategory check (only "STK" passes).
+                    stk = parse_stock_open_position(attrs, statement_dates[1])
+                    if stk is not None:
+                        stock_positions.append(stk)
             elif section_name == "OptionEAE":
                 if _is_assignment_lifecycle_row(attrs):
                     assignment_eae_attrs.append(attrs)
@@ -210,6 +257,7 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
         trades=trades,
         cash_transactions=cash,
         open_positions=positions,
+        stock_positions=stock_positions,
         option_eae=eae_rows,
         account_information=account_info,
         section_counts=counts,
@@ -304,6 +352,59 @@ def parse_open_position(attrs: dict[str, str], fallback_date: date | None = None
         average_open_price=_first_decimal(attrs, ("costPrice", "avgCost", "costBasisPrice")),
         open_cash_flow=_first_decimal(attrs, ("costBasis", "openCashFlow", "costBasisMoney")),
         ib_margin_requirement=_optional_decimal(attrs, "marginRequirement"),
+        last_broker_sync_at=sync_time,
+        raw_payload=attrs,
+    )
+
+
+def parse_stock_open_position(attrs: dict[str, str], fallback_date: date | None = None) -> FlexStockPosition | None:
+    """Normalize one STK OpenPosition row into a stock snapshot model.
+
+    Args:
+        attrs: Raw XML attribute dict from an ``<OpenPosition assetCategory="STK">`` row.
+        fallback_date: Statement end-date used when the row carries no dateTime.
+
+    Returns:
+        A ``FlexStockPosition`` instance, or ``None`` if the row cannot be parsed
+        (e.g. missing symbol or invalid quantity).
+    """
+    symbol = _optional_text(attrs.get("symbol")) or _optional_text(attrs.get("underlyingSymbol"))
+    if not symbol:
+        logger.warning("Skipping STK OpenPosition row with no symbol: %s", attrs)
+        return None
+
+    quantity_raw = _optional_decimal(attrs, "position")
+    if quantity_raw is None:
+        logger.warning("Skipping STK OpenPosition row with no position quantity: symbol=%s", symbol)
+        return None
+
+    sync_time: datetime = _optional_datetime_attr(attrs, ("dateTime",)) or datetime.combine(
+        fallback_date or date.today(), datetime.min.time(), tzinfo=timezone.utc
+    )
+    as_of = sync_time.date() if sync_time else (fallback_date or date.today())
+
+    con_id_str = attrs.get("conid") or attrs.get("conId")
+    con_id: int | None = None
+    if con_id_str:
+        try:
+            con_id = int(con_id_str)
+        except ValueError:
+            pass
+
+    return FlexStockPosition(
+        account_id=_required_any(attrs, ("accountId",)),
+        as_of_date=as_of,
+        symbol=symbol,
+        con_id=con_id,
+        description=_optional_text(attrs.get("description")),
+        sub_category=_optional_text(attrs.get("subCategory")),
+        currency=_currency(attrs),
+        quantity=quantity_raw,
+        cost_basis=_optional_decimal(attrs, "costBasisPrice"),
+        cost_basis_total=_optional_decimal(attrs, "costBasisMoney"),
+        mark_price=_optional_decimal(attrs, "markPrice"),
+        market_value=_optional_decimal(attrs, "positionValue"),
+        unrealized_pnl=_optional_decimal(attrs, "fifoPnlUnrealized"),
         last_broker_sync_at=sync_time,
         raw_payload=attrs,
     )

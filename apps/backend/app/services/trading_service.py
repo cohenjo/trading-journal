@@ -84,9 +84,9 @@ class TradingService:
         if not config:
             raise Exception("No trading account configured")
 
-        if config.account_type == "IBKR":
+        if config.account_type in ("IBKR", "ibkr"):
             return await self.sync_ibkr(db, config, household_id)
-        elif config.account_type == "SCHWAB":
+        elif config.account_type in ("SCHWAB", "schwab"):
             return await self.sync_schwab(db, config, household_id)
         else:
             raise Exception(f"Unsupported account type: {config.account_type}")

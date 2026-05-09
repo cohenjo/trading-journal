@@ -22,6 +22,7 @@ from app.services.options.flex_parser import (
     FlexCashTransaction,
     FlexOpenPosition,
     FlexParseResult,
+    FlexStockPosition,
     FlexTradeConfirm,
     OptionLegKey,
     parse_flex_files,
@@ -181,6 +182,7 @@ def run_flex_options_sync(
     total_trades = 0
     total_cash = 0
     total_positions = 0
+    total_stock_positions = 0
     summaries: list[dict[str, Any]] = []
     for account in accounts:
         parsed = parse_flex_files(paths, account.account_id)
@@ -191,19 +193,122 @@ def run_flex_options_sync(
         for parsed_account_id in sorted(account_ids):
             scoped = _scope_result(parsed, parsed_account_id)
             counts = _ingest_account(session, account.household_id, parsed_account_id, scoped, from_date, to_date)
+            stk_count = _sync_stock_positions(
+                session, account.household_id, account.config_id, parsed_account_id, scoped
+            )
             total_trades += counts["trade_count"]
             total_cash += counts["cash_event_count"]
             total_positions += counts["position_count"]
-            summaries.append({"account_id": parsed_account_id, **counts})
+            total_stock_positions += stk_count
+            summaries.append({"account_id": parsed_account_id, **counts, "stock_position_count": stk_count})
     total_legs = sum(int(summary.get("leg_count", 0)) for summary in summaries)
     return {
         "accounts": summaries,
         "trade_count": total_trades,
         "cash_event_count": total_cash,
         "position_count": total_positions,
+        "stock_position_count": total_stock_positions,
         "leg_count": total_legs,
         "source_files": [str(path) for path in paths],
     }
+
+
+def _sync_stock_positions(
+    session: Session,
+    household_id: str,
+    config_id: int | None,
+    parsed_account_id: str,
+    parsed: FlexParseResult,
+) -> int:
+    """Delete-then-insert stock positions for all snapshot dates found in the parsed result.
+
+    Idempotency: for each (household_id, account_id, as_of_date) combination present in
+    the parsed STK rows, deletes existing flex-sourced rows first, then bulk-inserts the
+    new ones.  This mirrors the options_positions write pattern.
+
+    Args:
+        session: Active SQLAlchemy session (caller commits).
+        household_id: UUID string for the owning household.
+        config_id: trading_account_config.id for the IBKR account.  If None the
+            account config cannot be linked and rows are skipped (logged as warning).
+        parsed_account_id: IBKR account ID string (e.g. "U2515365") used for logging.
+        parsed: Full parse result; only ``parsed.stock_positions`` is consumed here.
+
+    Returns:
+        Number of stock position rows inserted.
+    """
+    if not parsed.stock_positions:
+        return 0
+    if config_id is None:
+        logger.warning(
+            "Skipping stock position sync for account %s — no config_id resolved",
+            parsed_account_id,
+        )
+        return 0
+
+    # Group by snapshot date for targeted delete-then-insert
+    by_date: dict[str, list[FlexStockPosition]] = {}
+    for sp in parsed.stock_positions:
+        key = sp.as_of_date.isoformat()
+        by_date.setdefault(key, []).append(sp)
+
+    inserted = 0
+    for as_of_date_str, rows in by_date.items():
+        session.execute(
+            text(
+                """
+                delete from public.stock_positions
+                 where household_id = :household_id
+                   and account_id   = :account_id
+                   and as_of_date   = :as_of_date
+                   and source       = 'flex'
+                """
+            ),
+            {"household_id": household_id, "account_id": config_id, "as_of_date": as_of_date_str},
+        )
+        for row in rows:
+            session.execute(
+                text(
+                    """
+                    insert into public.stock_positions (
+                      household_id, account_id, ticker, quantity, cost_basis,
+                      currency, as_of_date, source, con_id,
+                      description, sub_category, mark_price, market_value,
+                      unrealized_pnl, last_broker_sync_at, raw_payload
+                    ) values (
+                      :household_id, :account_id, :ticker, :quantity, :cost_basis,
+                      :currency, :as_of_date, 'flex', :con_id,
+                      :description, :sub_category, :mark_price, :market_value,
+                      :unrealized_pnl, :last_broker_sync_at, cast(:raw_payload as jsonb)
+                    )
+                    """
+                ),
+                {
+                    "household_id": household_id,
+                    "account_id": config_id,
+                    "ticker": row.symbol,
+                    "quantity": row.quantity,
+                    "cost_basis": row.cost_basis,
+                    "currency": row.currency,
+                    "as_of_date": row.as_of_date,
+                    "con_id": row.con_id,
+                    "description": row.description,
+                    "sub_category": row.sub_category,
+                    "mark_price": row.mark_price,
+                    "market_value": row.market_value,
+                    "unrealized_pnl": row.unrealized_pnl,
+                    "last_broker_sync_at": row.last_broker_sync_at,
+                    "raw_payload": _json(dict(row.raw_payload)),
+                },
+            )
+            inserted += 1
+    logger.info(
+        "stock_positions sync: account=%s as_of_dates=%s inserted=%d",
+        parsed_account_id,
+        list(by_date.keys()),
+        inserted,
+    )
+    return inserted
 
 
 def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsAccount]:
@@ -353,6 +458,7 @@ def _parsed_account_ids(parsed: FlexParseResult) -> set[str]:
     ids = {row.account_id for row in parsed.trades}
     ids.update(row.account_id for row in parsed.cash_transactions)
     ids.update(row.account_id for row in parsed.open_positions)
+    ids.update(row.account_id for row in parsed.stock_positions)
     ids.update(row.account_id for row in parsed.option_eae)
     ids.update(row.account_id for row in parsed.account_information)
     return ids
@@ -363,6 +469,7 @@ def _scope_result(parsed: FlexParseResult, account_id: str) -> FlexParseResult:
         trades=[row for row in parsed.trades if row.account_id == account_id],
         cash_transactions=[row for row in parsed.cash_transactions if row.account_id == account_id],
         open_positions=[row for row in parsed.open_positions if row.account_id == account_id],
+        stock_positions=[row for row in parsed.stock_positions if row.account_id == account_id],
         option_eae=[row for row in parsed.option_eae if row.account_id == account_id],
         account_information=[row for row in parsed.account_information if row.account_id == account_id],
         section_counts=parsed.section_counts,
