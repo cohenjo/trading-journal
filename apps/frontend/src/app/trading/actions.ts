@@ -367,8 +367,29 @@ function coerceStockPosition(row: Record<string, unknown>): StockPosition {
 }
 
 /**
+ * Deduplicates stock positions, keeping only the latest snapshot per
+ * (account_id, ticker). Handles multi-year Flex history where the same
+ * ticker appears as separate year-end snapshots (2022/2023/2024/2025).
+ * Also applies defensively to manual (Schwab/LeumiIRA) rows.
+ */
+function dedupeLatestSnapshot(rows: StockPosition[]): StockPosition[] {
+  const map = new Map<string, StockPosition>();
+  for (const row of rows) {
+    const key = `${row.account_id}:${row.ticker}`;
+    const existing = map.get(key);
+    if (!existing || (row.as_of_date && row.as_of_date > existing.as_of_date)) {
+      map.set(key, row);
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
+}
+
+/**
  * Returns stock positions for the authenticated user's household,
- * optionally scoped to one account. Returns [] gracefully if the
+ * optionally scoped to one account. Only the latest snapshot per
+ * (account_id, ticker) is returned — historical year-end snapshots
+ * from Flex imports are deduplicated here to prevent duplicate rows
+ * from appearing in the UI. Returns [] gracefully if the
  * stock_positions table doesn't exist yet (pre-migration).
  */
 export async function getStockPositions(accountId?: number | null): Promise<StockPosition[]> {
@@ -396,7 +417,8 @@ export async function getStockPositions(accountId?: number | null): Promise<Stoc
     return [];
   }
 
-  return ((data ?? []) as Array<Record<string, unknown>>).map(coerceStockPosition);
+  const rows = ((data ?? []) as Array<Record<string, unknown>>).map(coerceStockPosition);
+  return dedupeLatestSnapshot(rows);
 }
 
 /**

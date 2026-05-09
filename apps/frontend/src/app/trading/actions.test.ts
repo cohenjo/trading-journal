@@ -18,6 +18,7 @@ import {
   getTradingSummary,
   getTradingPositions,
   saveTradingConfig,
+  getStockPositions,
 } from './actions';
 import { createClient } from '@/lib/supabase/server';
 
@@ -289,5 +290,145 @@ describe('getTradingPositions', () => {
       con_id: 123,
       timestamp: '2026-01-01T00:00:00Z',
     }]);
+  });
+});
+
+// ── getStockPositions — dedup regression tests ────────────────────────────────
+
+/** Helper: build a minimal stock_positions DB row for mocking. */
+function makeStockRow(overrides: {
+  id?: string;
+  account_id?: number;
+  ticker: string;
+  quantity?: number;
+  as_of_date: string;
+  source?: 'flex' | 'manual';
+}) {
+  return {
+    id: overrides.id ?? `row-${overrides.ticker}-${overrides.as_of_date}`,
+    account_id: overrides.account_id ?? 1,
+    ticker: overrides.ticker,
+    description: null,
+    sub_category: null,
+    quantity: overrides.quantity ?? 10,
+    cost_basis: null,
+    mark_price: null,
+    market_value: null,
+    unrealized_pnl: null,
+    currency: 'USD',
+    as_of_date: overrides.as_of_date,
+    source: overrides.source ?? 'flex',
+  };
+}
+
+function mockStockPositionsClient(rows: ReturnType<typeof makeStockRow>[]) {
+  mockGetUser.mockResolvedValue({ data: { user: { id: MOCK_USER_ID } }, error: null });
+
+  const resolved = { data: rows, error: null };
+  // The query must be awaitable directly (no accountId) OR have .eq() called on it (with accountId).
+  const eq = vi.fn().mockReturnValue(Promise.resolve(resolved));
+  const orderResult = Object.assign(Promise.resolve(resolved), { eq });
+  const order = vi.fn().mockReturnValue(orderResult);
+  const select = vi.fn().mockReturnValue({ order });
+  const from = vi.fn().mockReturnValue({ select });
+
+  (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+    auth: { getUser: mockGetUser },
+    from,
+  });
+}
+
+describe('getStockPositions — dedup behavior', () => {
+  it('returns only the most recent snapshot when the same ticker has multiple historical rows (ABR × 4)', async () => {
+    // ABR has 4 Flex year-end snapshots; only the 2025 row must survive.
+    const abrRows = [
+      makeStockRow({ ticker: 'ABR', quantity: 100, as_of_date: '2022-12-31' }),
+      makeStockRow({ ticker: 'ABR', quantity: 110, as_of_date: '2023-12-31' }),
+      makeStockRow({ ticker: 'ABR', quantity: 120, as_of_date: '2024-12-31' }),
+      makeStockRow({ ticker: 'ABR', quantity: 130, as_of_date: '2025-12-31' }),
+    ];
+    mockStockPositionsClient(abrRows);
+
+    const result = await getStockPositions(1);
+
+    const abrResults = result.filter(r => r.ticker === 'ABR');
+    expect(abrResults).toHaveLength(1);
+    expect(abrResults[0].as_of_date).toBe('2025-12-31');
+    expect(abrResults[0].quantity).toBe(130);
+  });
+
+  it('returns total row count equal to unique (account_id, ticker) pairs', async () => {
+    const rows = [
+      // ABR: 4 snapshots for account 1
+      makeStockRow({ ticker: 'ABR', account_id: 1, as_of_date: '2022-12-31' }),
+      makeStockRow({ ticker: 'ABR', account_id: 1, as_of_date: '2023-12-31' }),
+      makeStockRow({ ticker: 'ABR', account_id: 1, as_of_date: '2024-12-31' }),
+      makeStockRow({ ticker: 'ABR', account_id: 1, as_of_date: '2025-12-31' }),
+      // MSFT: 2 snapshots for account 1
+      makeStockRow({ ticker: 'MSFT', account_id: 1, as_of_date: '2024-12-31' }),
+      makeStockRow({ ticker: 'MSFT', account_id: 1, as_of_date: '2025-12-31' }),
+      // DBK: 1 snapshot for account 1 (should pass through unchanged)
+      makeStockRow({ ticker: 'DBK', account_id: 1, as_of_date: '2025-12-31' }),
+      // ABR: 2 snapshots for a different account 2 (separate dedup key)
+      makeStockRow({ ticker: 'ABR', account_id: 2, as_of_date: '2024-12-31' }),
+      makeStockRow({ ticker: 'ABR', account_id: 2, as_of_date: '2025-12-31' }),
+    ];
+    mockStockPositionsClient(rows);
+
+    const result = await getStockPositions();
+
+    // Unique (account_id, ticker) pairs: ABR/1, MSFT/1, DBK/1, ABR/2 → 4
+    expect(result).toHaveLength(4);
+  });
+
+  it('preserves single-snapshot tickers unchanged (DBK)', async () => {
+    const rows = [
+      makeStockRow({ ticker: 'DBK', account_id: 1, quantity: 50, as_of_date: '2025-12-31' }),
+    ];
+    mockStockPositionsClient(rows);
+
+    const result = await getStockPositions(1);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].ticker).toBe('DBK');
+    expect(result[0].quantity).toBe(50);
+  });
+
+  it('applies dedup to manual (Schwab/LeumiIRA) rows as well as flex', async () => {
+    const rows = [
+      makeStockRow({ ticker: 'VTI', account_id: 3, quantity: 200, as_of_date: '2024-06-30', source: 'manual' }),
+      makeStockRow({ ticker: 'VTI', account_id: 3, quantity: 220, as_of_date: '2025-01-31', source: 'manual' }),
+    ];
+    mockStockPositionsClient(rows);
+
+    const result = await getStockPositions(3);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].quantity).toBe(220);
+    expect(result[0].as_of_date).toBe('2025-01-31');
+  });
+
+  it('returns results sorted alphabetically by ticker after dedup', async () => {
+    const rows = [
+      makeStockRow({ ticker: 'ZZZ', account_id: 1, as_of_date: '2025-12-31' }),
+      makeStockRow({ ticker: 'AAA', account_id: 1, as_of_date: '2024-12-31' }),
+      makeStockRow({ ticker: 'AAA', account_id: 1, as_of_date: '2025-12-31' }),
+      makeStockRow({ ticker: 'MMM', account_id: 1, as_of_date: '2025-12-31' }),
+    ];
+    mockStockPositionsClient(rows);
+
+    const result = await getStockPositions(1);
+
+    expect(result.map(r => r.ticker)).toEqual(['AAA', 'MMM', 'ZZZ']);
+  });
+
+  it('returns [] when not authenticated', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: new Error('no session') });
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn(),
+    });
+
+    await expect(getStockPositions()).resolves.toEqual([]);
   });
 });
