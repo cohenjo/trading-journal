@@ -26,6 +26,8 @@ jobs:
     steps:
       # ── 1. Install dependencies ────────────────────────────────────────────
       - name: Install postgresql-client-17
+        env:
+          PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release
@@ -38,9 +40,11 @@ jobs:
             $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/postgresql.list > /dev/null
           sudo apt-get update -qq
-          # Remove pre-installed postgresql-client versions to avoid PATH conflicts
-          sudo apt-get remove -y postgresql-client* || true
+          # Install postgresql-client-17 alongside system v14 (don't remove anything)
+          # to avoid breaking the runner environment
           sudo apt-get install -y --no-install-recommends postgresql-client-17
+          # Verify the pg_dump v17 binary is available via absolute path
+          "${{ env.PG_DUMP }}" --version
 
       - name: Install age
         # age 1.2.0 — verify latest at https://github.com/FiloSottile/age/releases
@@ -71,8 +75,9 @@ jobs:
         env:
           PGPASSWORD_IGNORE: "1"   # silence pg warning; password is in the URL
           DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+          PG_DUMP: /usr/lib/postgresql/17/bin/pg_dump
         run: |
-          pg_dump \
+          "${{ env.PG_DUMP }}" \
             --format=custom \
             --compress=9 \
             --no-password \
