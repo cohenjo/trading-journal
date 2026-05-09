@@ -1,9 +1,9 @@
 # Secrets & Environment Variable Inventory
 
-> **Owner:** Kujan (DevOps/Infra) | **Issue:** TJ-002 / GH #55  
+> **Owner:** Kujan (DevOps/Infra) | **Issue:** TJ-002 / GH #55
 > **Last updated:** 2025-01-01 | **Review cadence:** quarterly
 
-This document is the single source of truth for every environment variable the trading-journal project uses.  
+This document is the single source of truth for every environment variable the trading-journal project uses.
 Every var was confirmed by `grep` against actual code or workflow YAML — no aspirational entries.
 
 ---
@@ -57,20 +57,17 @@ Rotation policies:
 
 ---
 
-### 1.3 Docker Compose — IB Gateway container (`docker-compose.yml`)
+### 1.3 Docker Compose — Worker (`docker-compose.yml`)
+
+> **Note:** IB Gateway has been removed from the stack. The architecture now uses Flex queries (`apps/backend/scripts/flex_probe.py`, `flex_parser.py`) for IBKR data.
 
 | Variable | Tier | Description | Source of Truth | Rotation |
 |----------|------|-------------|-----------------|----------|
-| `TWS_USERID` | 🔴 | Interactive Brokers account username | `.env` local | per-leak |
-| `TWS_PASSWORD` | 🔴 | Interactive Brokers account password | `.env` local | per-leak |
-| `TRADING_MODE` | 🟡 | `paper` or `live` (default: `paper`) | `.env` local | never |
-| `READ_ONLY_API` | 🟡 | `yes`/`no` — block order submission via API (default: `no`) | `.env` local | never |
-| `TWOFA_TIMEOUT_ACTION` | 🟡 | `restart`/`exit` on 2FA timeout (default: `restart`) | `.env` local | never |
-| `AUTO_RESTART_TIME` | 🟡 | Daily gateway restart time (default: `"11:59 PM"`) | `.env` local | never |
-| `RELOGIN_AFTER_TWOFA_TIMEOUT` | 🟡 | `yes`/`no` auto-relogin (default: `yes`) | `.env` local | never |
-| `TIME_ZONE` | 🟡 | Gateway timezone (default: `Asia/Jerusalem`) | `.env` local | never |
+| `DATABASE_URL` | 🔴 | Supabase connection string | `.env` local | 90d |
+| `WORKER_HEARTBEAT_FILE` | 🟡 | Heartbeat file path (default: `/app/worker_heartbeat`) | `.env` local | never |
+| `WORKER_POLL_INTERVAL_SECONDS` | 🟡 | Compute jobs polling interval (default: 5) | `.env` local | never |
 
-> 📍 **Source confirmation:** All confirmed in `docker-compose.yml` `ib-gateway` service environment block.
+> 📍 **Source confirmation:** Confirmed in `docker-compose.yml` `worker` service environment block (as of 2026-05-09).
 
 ---
 

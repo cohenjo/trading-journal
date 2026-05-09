@@ -222,7 +222,8 @@ These are DDL sketches for future migrations, not implementation in this PR. All
 ### 6.1 Source sync state
 
 ```sql
-create type public.options_sync_source as enum ('ibkr_flex', 'ib_gateway', 'snaptrade');
+create type public.options_sync_source as enum ('ibkr_flex', 'snaptrade');
+-- Note: 'ib_gateway' removed — IB Gateway integration deprecated in favor of Flex queries
 create type public.options_sync_status as enum ('pending', 'running', 'succeeded', 'failed');
 
 create table public.options_sync_runs (

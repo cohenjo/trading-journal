@@ -14,54 +14,27 @@ This project is a personal trading journal designed to help users track their op
 
 ### Running with Docker Compose
 
-1.  Build and start the services:
+Docker Compose now runs **worker only**. The architecture has shifted:
+- **DB** → Supabase (cloud)
+- **Frontend** → Vercel (cloud)
+- **Backend** → Mostly subsumed by worker for compute jobs
+- **Worker** → Runs locally in Docker, processes `compute_jobs` queue
+
+1.  Set your Supabase connection string in `.env`:
     ```bash
-    docker-compose up --build
+    DATABASE_URL=postgresql://...@db.xxxxx.supabase.co:5432/postgres
     ```
-2.  The frontend will be available at `http://localhost:3000` and the backend at `http://localhost:8000`.
+2.  Build and start the worker:
+    ```bash
+    docker compose up --build worker
+    ```
+3.  The worker will poll the `compute_jobs` table and process background jobs.
 
 ### Running with Aspire (development orchestration)
 
-Aspire support is available via `aspire/apphost.cs` for development orchestration of:
-- `frontend` (Next.js app run natively via Aspire JavaScript integration)
-- `backend` (FastAPI/Uvicorn app run natively via Aspire Python integration with `uv`)
-- `db` (PostgreSQL 13 container)
-- `ib-gateway` (IB Gateway container, optional/opt-in)
+> **Note:** Aspire mode is legacy. The stack now runs on Supabase + Vercel + local worker.
 
-The AppHost intentionally omits the existing Prometheus/Jaeger/Grafana/Collector stack because Aspire provides built-in dev-time monitoring with OpenTelemetry and the Aspire dashboard.
-
-1. Install Aspire CLI:
-   ```bash
-   curl -fsSL https://aspire.dev/install.sh | bash
-   ```
-2. Run Aspire from repo root:
-   ```bash
-   aspire run aspire/apphost.cs
-   ```
-3. (Optional) Enable IB Gateway only when needed:
-   ```bash
-   export RUN_IB_GATEWAY=true
-   export TWS_USERID="your-user"
-   export TWS_PASSWORD="your-password"
-   aspire run aspire/apphost.cs
-   ```
-4. Open:
-   - Aspire dashboard URL from terminal output
-   - Frontend: `http://localhost:3000`
-   - Backend: `http://localhost:8000`
-   - IB Gateway ports: `4001` (live), `4002` (paper)
-
-Notes:
-- Backend/frontend run as local processes (not Docker containers) in Aspire mode.
-- Keep Python/uv and Node/npm installed locally when using Aspire mode.
-- Frontend API URL is injected from the backend Aspire endpoint reference.
-- Backend DB URL is injected from the Aspire Postgres resource and backend waits for DB readiness.
-- `ib-gateway` is disabled by default unless `RUN_IB_GATEWAY=true`.
-- Existing `docker-compose.yml` remains unchanged and can still be used as-is.
-- On Apple Silicon, if the IB image requires amd64 emulation, run with:
-  ```bash
-  export DOCKER_DEFAULT_PLATFORM=linux/amd64
-  ```
+For historical reference, Aspire support is available via `aspire/apphost.cs` for development orchestration. See `aspire/README.md` for details.
 
 ### Running Locally
 
