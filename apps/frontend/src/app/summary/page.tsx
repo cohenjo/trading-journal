@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 import { useEffect, useState, useMemo } from "react";
 import { useSettings } from "../settings/SettingsContext";
 import { getDividendDashboard, getDividendEstimations } from "@/app/dividends/actions";
+import { getDividendProjection } from "@/app/trading/actions";
 import StackedIncomeBarChart, { YearlyIncomeData, SERIES_COLORS } from "../../components/Summary/StackedIncomeBarChart";
 import { getLadderIncome } from "../ladder/actions";
 import { getOptionsYearlyCashFlow } from "../options/actions";
@@ -53,15 +54,25 @@ export default function SummaryPage() {
           });
         }
 
-        // 4. Project dividends from current dashboard annual income
+        // 4. Project dividends — prefer Hockney's new endpoint; fall back to dividend_positions
         const dividendDashboard = await getDividendDashboard(settings.mainCurrency);
+        let projectedDividendAmount = dividendDashboard.stats.annual_income;
+
+        try {
+          const projection = await getDividendProjection();
+          if (projection && projection.total_annual > 0) {
+            projectedDividendAmount = projection.total_annual;
+          }
+        } catch {
+          // network error — use existing dividend_positions fallback above
+        }
 
         // 5. Merge all sources — estimations override projections for any year
         //    they cover, including years before currentYear (fixes #342).
         const merged = buildYearlyIncomeData({
           currentYear,
           estimationsMap,
-          projectedDividendAmount: dividendDashboard.stats.annual_income,
+          projectedDividendAmount: projectedDividendAmount,
           growthRate: divParams.growth_rate,
           yieldRate: divParams.yield_rate,
           reinvestRate: divParams.reinvest_rate,
