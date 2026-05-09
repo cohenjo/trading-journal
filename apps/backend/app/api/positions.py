@@ -310,10 +310,11 @@ def list_positions(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_session),
 ) -> list[StockPositionRow]:
-    """List stock positions for the authenticated user's household.
+    """List latest stock positions for the authenticated user's household.
 
     Joins with trading_account_config to include account name and type.
-    Optionally filtered by account_id or as_of_date.
+    By default, returns one latest row per (account_id, ticker). If an
+    as_of_date is supplied, that date constrains the candidate snapshot rows.
     """
     household_id = _resolve_household(db, user_id)
 
@@ -332,18 +333,29 @@ def list_positions(
         db.execute(
             text(
                 f"""
-            select
-              sp.id, sp.household_id, sp.account_id,
-              tac.name as account_name, tac.account_type,
-              sp.ticker, sp.quantity, sp.cost_basis, sp.currency,
-              sp.as_of_date, sp.source, sp.con_id, sp.description,
-              sp.sub_category, sp.mark_price, sp.market_value,
-              sp.unrealized_pnl, sp.last_broker_sync_at,
-              sp.created_at, sp.updated_at
-            from public.stock_positions sp
-            join public.trading_account_config tac on tac.id = sp.account_id
-            where {where}
-            order by sp.as_of_date desc, sp.ticker
+            with latest_positions as (
+              select distinct on (sp.account_id, sp.ticker)
+                sp.id, sp.household_id, sp.account_id,
+                tac.name as account_name, tac.account_type,
+                sp.ticker, sp.quantity, sp.cost_basis, sp.currency,
+                sp.as_of_date, sp.source, sp.con_id, sp.description,
+                sp.sub_category, sp.mark_price, sp.market_value,
+                sp.unrealized_pnl, sp.last_broker_sync_at,
+                sp.created_at, sp.updated_at
+              from public.stock_positions sp
+              join public.trading_account_config tac on tac.id = sp.account_id
+              where {where}
+              order by
+                sp.account_id,
+                sp.ticker,
+                sp.as_of_date desc,
+                sp.updated_at desc,
+                sp.created_at desc,
+                sp.id desc
+            )
+            select *
+              from latest_positions
+             order by account_name, ticker
             """
             ),
             params,

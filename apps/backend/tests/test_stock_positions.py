@@ -8,6 +8,7 @@ Scope:
   R1.2  POST /api/accounts/positions creates a manual position for a non-IBKR account.
   R1.2  DELETE /api/accounts/positions/{id} returns 200 + {"deleted": True}.
   R1.2  POST with account_type='ibkr' returns 422 (IBKR is sync-only).
+  R1.2  GET /api/accounts/positions returns one latest row per account/ticker.
   R1.3  parse_flex_files() yields the expected STK counts per annual XML (63/45/51/54).
   R1.3  BOND and CASH rows are filtered out (assetCategory != 'STK').
   R1.3  An OPT row with putCall='C' in the STK category guard is excluded.
@@ -494,6 +495,206 @@ class TestManualCRUDEndpoints:
                 )
 
         assert exc_info.value.status_code == 404
+
+
+def _api_stock_position_row(
+    *,
+    row_id: int,
+    account_id: int,
+    account_name: str,
+    account_type: str,
+    ticker: str,
+    quantity: Decimal,
+    as_of_date: date,
+    source: str,
+    market_value: Decimal | None = None,
+) -> dict[str, Any]:
+    """Build a StockPositionRow-shaped mapping for list endpoint tests."""
+    return {
+        "id": f"00000000-0000-0000-0000-{row_id:012d}",
+        "household_id": TEST_HOUSEHOLD_STR,
+        "account_id": account_id,
+        "account_name": account_name,
+        "account_type": account_type,
+        "ticker": ticker,
+        "quantity": quantity,
+        "cost_basis": None,
+        "currency": "USD",
+        "as_of_date": as_of_date,
+        "source": source,
+        "con_id": None,
+        "description": None,
+        "sub_category": "COMMON",
+        "mark_price": None,
+        "market_value": market_value,
+        "unrealized_pnl": None,
+        "last_broker_sync_at": None,
+        "created_at": f"2026-05-09T12:00:{row_id:02d}Z",
+        "updated_at": f"2026-05-09T12:00:{row_id:02d}Z",
+    }
+
+
+class _ListPositionsSession:
+    """Fake session that exposes pre-fix flat selects as duplicate rows.
+
+    The fake deliberately returns all seeded rows unless the endpoint query uses
+    the latest-snapshot DISTINCT ON pattern. That makes these tests fail against
+    the old flat SELECT while staying independent of a live Postgres instance.
+    """
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+        self.last_sql = ""
+        self.last_params: dict[str, Any] = {}
+
+    def execute(self, statement: object, params: dict[str, Any] | None = None) -> _FakeMappings:
+        sql = str(statement).lower()
+        self.last_sql = sql
+        self.last_params = dict(params or {})
+
+        if "stock_positions" not in sql:
+            return _FakeMappings([])
+
+        filtered = [
+            row
+            for row in self.rows
+            if ("account_id" not in self.last_params or row["account_id"] == self.last_params["account_id"])
+            and ("as_of_date" not in self.last_params or row["as_of_date"] == self.last_params["as_of_date"])
+        ]
+
+        if "distinct on (sp.account_id, sp.ticker)" not in sql:
+            return _FakeMappings(filtered)
+
+        latest_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+        for row in filtered:
+            key = (row["account_id"], row["ticker"])
+            existing = latest_by_key.get(key)
+            if existing is None or (
+                row["as_of_date"],
+                row["updated_at"],
+                row["created_at"],
+                row["id"],
+            ) > (
+                existing["as_of_date"],
+                existing["updated_at"],
+                existing["created_at"],
+                existing["id"],
+            ):
+                latest_by_key[key] = row
+
+        rows = sorted(latest_by_key.values(), key=lambda r: (r["account_name"], r["ticker"]))
+        return _FakeMappings(rows)
+
+
+class TestListPositionsLatestSnapshot:
+    """R1.2 — list endpoint returns current positions, not historical snapshots."""
+
+    def _patch_resolve(self):
+        """Patch _resolve_household to return the test household_id string."""
+        return patch(
+            "app.api.positions._resolve_household",
+            return_value=TEST_HOUSEHOLD_STR,
+        )
+
+    def test_flex_positions_return_latest_snapshot_per_account_ticker(self):
+        """Flex annual snapshots collapse to the max as_of_date per ticker."""
+        from app.api.positions import list_positions
+
+        session = _ListPositionsSession(
+            [
+                _api_stock_position_row(
+                    row_id=1,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="ABR",
+                    quantity=Decimal("10"),
+                    as_of_date=date(2023, 12, 29),
+                    source="flex",
+                    market_value=Decimal("100"),
+                ),
+                _api_stock_position_row(
+                    row_id=2,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="ABR",
+                    quantity=Decimal("30"),
+                    as_of_date=date(2025, 12, 31),
+                    source="flex",
+                    market_value=Decimal("300"),
+                ),
+                _api_stock_position_row(
+                    row_id=3,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="VYM",
+                    quantity=Decimal("5"),
+                    as_of_date=date(2025, 12, 31),
+                    source="flex",
+                    market_value=Decimal("50"),
+                ),
+            ]
+        )
+
+        with self._patch_resolve():
+            result = list_positions(account_id=1, as_of_date=None, user_id=TEST_USER_ID, db=session)
+
+        abr_rows = [row for row in result if row.ticker == "ABR"]
+        assert len(abr_rows) == 1, "API must return one Flex row per (account_id, ticker)"
+        assert abr_rows[0].as_of_date == date(2025, 12, 31)
+        assert abr_rows[0].quantity == Decimal("30")
+        assert {row.ticker for row in result} == {"ABR", "VYM"}
+        assert "distinct on (sp.account_id, sp.ticker)" in session.last_sql
+
+    def test_manual_positions_return_latest_without_swallowing_other_tickers(self):
+        """Manual duplicate ticker rows collapse to latest while preserving others."""
+        from app.api.positions import list_positions
+
+        session = _ListPositionsSession(
+            [
+                _api_stock_position_row(
+                    row_id=4,
+                    account_id=2,
+                    account_name="Schwab",
+                    account_type="schwab",
+                    ticker="AAPL",
+                    quantity=Decimal("10"),
+                    as_of_date=date(2026, 5, 1),
+                    source="manual",
+                ),
+                _api_stock_position_row(
+                    row_id=5,
+                    account_id=2,
+                    account_name="Schwab",
+                    account_type="schwab",
+                    ticker="AAPL",
+                    quantity=Decimal("15"),
+                    as_of_date=date(2026, 5, 9),
+                    source="manual",
+                ),
+                _api_stock_position_row(
+                    row_id=6,
+                    account_id=2,
+                    account_name="Schwab",
+                    account_type="schwab",
+                    ticker="MSFT",
+                    quantity=Decimal("3"),
+                    as_of_date=date(2026, 5, 9),
+                    source="manual",
+                ),
+            ]
+        )
+
+        with self._patch_resolve():
+            result = list_positions(account_id=2, as_of_date=None, user_id=TEST_USER_ID, db=session)
+
+        assert {row.ticker for row in result} == {"AAPL", "MSFT"}
+        aapl_rows = [row for row in result if row.ticker == "AAPL"]
+        assert len(aapl_rows) == 1, "Manual edit-like duplicates must collapse to the latest row"
+        assert aapl_rows[0].as_of_date == date(2026, 5, 9)
+        assert aapl_rows[0].quantity == Decimal("15")
 
 
 # ---------------------------------------------------------------------------
