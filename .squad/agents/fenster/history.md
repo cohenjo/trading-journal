@@ -197,3 +197,33 @@ McManus and I paired on this — the separation between data layer (his) and UI 
 **Pattern learned:** When merging user-entered data with model projections, always track provenance and surface it in the UI. Estimations override projections, not vice versa.
 
 **Paired with:** Hockney (backend schema + actions) — working as Fenster (frontend).
+
+## 2026-05-09T18:42:35+03:00 — Bug Fix #342: Dividend Estimations Not Appearing on Summary Chart
+
+**What the actual bug was:**
+The projection loop in `summary/page.tsx` started at `currentYear` (2026). Jony's estimations were for 2022–2025 — all *before* `currentYear`. Those years were correctly fetched into `estimationsMap` but never written into `divMap` because the loop's range excluded them. The merge step then read `divMap.get(year) || 0` → `0` for those years, silently zeroing out the dividend bar instead of using the estimation value.
+
+The estimations data existed in the DB (confirmed: 4 rows for 2022–2025 with household_id scoped correctly). The field name matched (`amount`). The fetch logic was correct. Only the loop boundary was wrong.
+
+**Why it slipped through #339's test:**
+The test added in `StackedIncomeBarChart.test.tsx` asserted structural plumbing — chart renders, three series created, stacking math correct, projected opacity lower. It did not assert the override semantic: "for an estimation year, `dividendsIncome` equals the estimation amount, not the projection." No test data included a year whose estimation would be missed by the loop boundary (all test mock data used years ≥ 2024 with the test running before 2026's rollover was a factor). The test could pass even with the bug present.
+
+**The fix:**
+Extracted merge logic to pure `buildYearlyIncomeData()` in `apps/frontend/src/app/summary/buildYearlyIncomeData.ts`. The function adds a "Pass 1" before the projection loop that writes all `estimationsMap` entries for years < `currentYear` into `divMap`/`divSourceMap`. Also adds estimation years to `allYears` so they appear in the chart even when no options/ladder data shares the same year.
+
+**New regression test pattern for "this overrides that" behavior:**
+When A should override B for the same year:
+1. Set A to a known value (e.g., 50_000).
+2. Set B to a deliberately absurd value (e.g., 999_999) to make any failure obvious.
+3. Assert result equals A — and explicitly assert it is NOT B, NOT A+B, and NOT 0.
+4. Add a separate case where A is absent and assert B is used.
+5. Mentally (or in CI via branch) revert the override pass and confirm the test returns 0 or B instead of A.
+
+This pattern catches: wrong field name, loop boundary miss, accidental summation instead of replacement, silent swallow by `|| 0`.
+
+**Files changed:**
+- `apps/frontend/src/app/summary/buildYearlyIncomeData.ts` (NEW — pure merge function)
+- `apps/frontend/src/app/summary/__tests__/buildYearlyIncomeData.test.ts` (NEW — 5 regression tests)
+- `apps/frontend/src/app/summary/page.tsx` (calls `buildYearlyIncomeData`, removes inline merge)
+
+**Commit:** `3a75bd5`
