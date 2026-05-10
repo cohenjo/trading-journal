@@ -3973,3 +3973,117 @@ The new XML includes 57 `<NetStockPosition>` rows tracking `sharesAtIb`, `shares
 #### 8. McManus v3 revalidation: `accruedInterest` dropped permanently; three remaining gaps are portal-gated
 
 All 8 user-flagged code bugs are closed (verdict 🟡 YELLOW). Permanently dropped: `accruedInterest` — confirmed by Jony this field will not be ingested. Three remaining open items are NOT code regressions; they require IBKR portal configuration by Jony: (a) FII `source='fii'` distinction in `security_reference`, (b) `assetCategory` on historical CashTx rows (0.6% coverage), (c) XML period scope is LBW not YTD (no YTD backfill path yet). Future revalidations should skip `accruedInterest` entirely. (McManus `5d84229`)
+
+---
+
+## Manual Brokerage Accounts — CRUD Implementation (2026-05-10)
+
+### Decision: IBKR Accounts Immutable via API; Manual Accounts Support Full CRUD
+
+**By:** Hockney (Backend), Fenster (Frontend), Jony (Product)
+**Commit:** `6adf8e7`
+**Date:** 2026-05-10
+
+### What
+
+Schwab (account_id=71) and LeumiIRA (account_id=72) manual accounts now support full CRUD on `stock_positions` via four new endpoints:
+- `POST /api/accounts/{account_id}/positions` — Create one position
+- `PATCH /api/accounts/{account_id}/positions/{position_id}` — Partial update
+- `DELETE /api/accounts/{account_id}/positions/{position_id}` — Hard delete
+- `POST /api/accounts/{account_id}/positions/import` — CSV bulk upload (DELETE+INSERT in transaction)
+
+**IBKR (account_type='ibkr') is blocked** with HTTP 422 on all mutation endpoints — IBKR positions remain Flex-sourced only. UI uses `isManualAccount` flag to hide Add/Edit/Delete/Import buttons on IBKR.
+
+### Why
+
+Manual brokerages require user-facing management. CSV import is full-account refresh semantics (not upsert) — each upload deletes all `source='manual'` rows and inserts the new set in one atomic transaction. This prevents dangling orphaned positions.
+
+### Key Constraints
+
+1. **API contract asymmetry:** Request body uses `average_cost` (per-share); DB column is `cost_basis`. Responses surface `cost_basis` (same value, DB name). Frontend must convert.
+2. **Flex rows immutable:** Positions with `source='flex'` reject PATCH/DELETE with 422 — these originate from Flex feeds and must be updated there.
+3. **Route order matters:** `POST /positions/import` registered before `PATCH /positions/{position_id}` so "import" is not mistaken for a UUID.
+4. **CSV format:** Ticker (required), quantity (required), average_cost (required), currency/cost_basis_total/market_value/as_of_date (optional). Malformed rows are reported in `errors[]` and skipped; valid rows insert regardless.
+
+### Files Modified
+
+**Backend:**
+- `apps/backend/app/api/positions.py` — 4 endpoints + 4 Pydantic models
+- `apps/backend/tests/test_manual_crud.py` — 23 new tests (558 total passing)
+
+**Frontend:**
+- `apps/frontend/src/app/trading/actions.ts` — `updateStockPosition()`, `importManualPositionsCsv()`
+- `apps/frontend/src/app/api/accounts/[accountId]/positions/import/route.ts` — multipart proxy
+- `AddPositionModal.tsx` — edit mode with pre-fill
+- `StockPositionsTable.tsx` — Edit button + two-step delete confirmation
+- `CSVImportButton.tsx` — file input + multipart upload
+- `apps/frontend/e2e/` — 9 new tests (387/387 green)
+
+### Implementation Guarantee
+
+Every manual CRUD mutation endpoint guards with `if account_type == 'ibkr': return 422`. This is server-side enforcement, not just UI gating. Frontend guard (`isManualAccount` flag) hides UI; backend guard prevents API misuse.
+
+---
+
+### Decision: Frontend-Manual-Account UI Gating Pattern
+
+**By:** Fenster
+**Pattern:** Use single `isManualAccount` boolean flag on the account object. Render Add/Edit/Delete/Import buttons **only** when `isManualAccount === true`. Do not implement deeper role-based or display-logic gating.
+
+**Rationale:** Flex accounts are immutable by design (data originates from brokers). Manual accounts are editable. The distinction is clear and boolean. Adding role-based checks or conditional rendering deeper in components creates maintenance debt.
+
+---
+
+## API Conventions — Financial Request/Response Asymmetry
+
+### Convention: `average_cost` in Requests, `cost_basis` in Responses
+
+**Established:** 2026-05-10 (Manual CRUD API, Hockney)
+
+**Pattern:**
+- **Request body:** field name `average_cost` (per-share cost basis)
+- **Database:** column name `cost_basis` (same semantic value)
+- **Response:** surfaces `cost_basis` (DB column name for clarity)
+
+**Why:** `average_cost` is the per-share cost. `cost_basis` is the total cost or the accounting term. Responses use DB column name for consistency with schema introspection. Frontend must convert request bodies: `{ average_cost: 425.50 }` for Pydantic deserialization, then the response returns `{ cost_basis: 425.50 }`.
+
+**Document this asymmetry in API specs.** Avoid surprises in integration.
+
+---
+
+## Flex Pipeline (IBKR) — Data Acceptance & Scope
+
+### Decision: `issueDate` Field Supported; Current IBKR Values Empty (Acceptable)
+
+**By:** Jony (via Copilot)
+**Date:** 2026-05-10
+
+**Finding:** The `issueDate` field IS part of the FII pipeline. IBKR exports currently have empty values for this field. This is acceptable — populate when IBKR provides data; frontend tolerates empty.
+
+**Action:** Do NOT engineer around missing source data. If Jony's export in the future includes `issueDate`, the pipeline will ingest it automatically.
+
+---
+
+### Directive: Drop `NetStockPosition` Tracking (Lent/Borrowed Shares)
+
+**By:** Jony
+**Date:** 2026-05-10
+
+**What:** Remove `net_stock_positions` table and lent/borrowed tracking from future tickets.
+
+**Why:** "no need to track the lent/borrowed shares - we don't do that much"
+
+**Action:** Future work on position tables MUST NOT add `net_stock_positions`. Drop from any pending design specs.
+
+---
+
+### Directive: Portal Scope Changed to YTD (Pending Fresh Export)
+
+**By:** Jony
+**Date:** 2026-05-10
+
+**Update:** Portal scope is now YTD (changed from 5/4-5/8 LBW). The current seeded XML (`Master-10-may.xml`) reflects old LBW scope.
+
+**Action:** Once a fresh YTD export is ingested, close §6 item 12.
+
+---

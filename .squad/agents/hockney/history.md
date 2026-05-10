@@ -457,3 +457,13 @@ Confirmed via live query: all 18 `bond_holdings` rows have proper CUSIPs (e.g., 
 Created `apps/backend/scripts/seed_manual_account_positions.py` + `apps/backend/scripts/sample_manual_positions.csv`. Idempotent DELETE+INSERT keyed on `(account_id, ticker, as_of_date)`. Validates account is non-IBKR. `--dry-run` flag. Accounts already exist in `trading_account_config` (Schwab id=71, LeumiIRA id=72). Jony must supply actual holdings CSV and run with correct `--account-id`.
 
 **Decisions filed:** `hockney-backend-bugs-2026-05-10.md` (processed by Scribe)
+
+---
+
+### 2026-05-10: Manual Stock Positions CRUD API (Hockney-9)
+
+**Commit:** `6adf8e7`
+**Date:** 2026-05-10
+**Files:** `apps/backend/app/api/positions.py`, `apps/backend/tests/test_manual_crud.py`
+
+Delivered four endpoints for manual account stock position management: `POST /api/accounts/{account_id}/positions`, `PATCH /api/accounts/{account_id}/positions/{position_id}`, `DELETE /api/accounts/{account_id}/positions/{position_id}`, and `POST /api/accounts/{account_id}/positions/import` (CSV bulk refresh). All endpoints block IBKR accounts with 422. CSV import implements DELETE-then-INSERT semantics in a single transaction. 23 new tests; 558 total passing. Contract documented early for parallel Fenster work. API uses `average_cost` in request bodies (maps to DB `cost_basis`); responses surface `cost_basis` for consistency.
