@@ -109,7 +109,7 @@ export default function TradingAccountsPage() {
 
   return (
     <div className="p-8">
-      <h1 className="text-3xl font-bold mb-8 text-slate-100">Trading Accounts</h1>
+      <h1 className="text-3xl font-bold mb-8 text-slate-100">Stock Positions</h1>
 
       {/* Tab Bar */}
       <div className="flex flex-wrap p-1 bg-slate-900 rounded-lg border border-slate-800 gap-1 mb-6 w-fit">

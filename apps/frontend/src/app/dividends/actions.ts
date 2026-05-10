@@ -410,6 +410,8 @@ export async function deleteDividendPosition(
 
 /**
  * Returns all dividend account names for the authenticated user's household.
+ * Queries `dividend_accounts` first; falls back to `trading_account_config`
+ * names when no dividend-specific accounts have been set up yet.
  * Returns empty array on auth failure (graceful degradation for UI).
  */
 export async function getDividendAccounts(): Promise<string[]> {
@@ -422,17 +424,39 @@ export async function getDividendAccounts(): Promise<string[]> {
 
   if (authError || !user) return [];
 
-  // RLS on dividend_accounts (is_household_member) filters by household automatically.
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) return [];
+
+  // Primary: explicit dividend_accounts for this household.
   const { data, error } = await supabase
     .from('dividend_accounts')
-    .select('name');
+    .select('name')
+    .eq('household_id', householdId)
+    .is('deleted_at', null);
 
   if (error) {
     console.error('[getDividendAccounts] query error:', error.message);
+  }
+
+  if (data && data.length > 0) {
+    return (data as Array<{ name: string }>).map((a) => a.name);
+  }
+
+  // Fallback: derive account names from trading_account_config (RLS enforces household).
+  const { data: tradingConfigs, error: tradingError } = await supabase
+    .from('trading_account_config')
+    .select('name')
+    .is('deleted_at', null)
+    .order('id', { ascending: true });
+
+  if (tradingError) {
+    console.error('[getDividendAccounts] trading config fallback error:', tradingError.message);
     return [];
   }
 
-  return (data ?? []).map((a: { name: string }) => a.name);
+  return (tradingConfigs ?? [])
+    .map((c: { name: string | null }) => c.name ?? '')
+    .filter(Boolean);
 }
 
 /**

@@ -4,13 +4,14 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
 const BOND_HOLDING_SELECT =
-  'id, ticker, issuer, currency, face_value, coupon_rate, coupon_frequency, issue_date, maturity_date, created_at, updated_at';
+  'id, cusip, ticker, issuer, currency, face_value, coupon_rate, coupon_frequency, issue_date, maturity_date, created_at, updated_at';
 const COUPON_FREQUENCIES = ['ANNUAL', 'SEMI_ANNUAL', 'QUARTERLY'] as const;
 
 export type CouponFrequency = (typeof COUPON_FREQUENCIES)[number];
 
 export interface BondHolding {
   id: string;
+  cusip: string | null;
   ticker: string | null;
   issuer: string;
   currency: string;
@@ -88,6 +89,7 @@ function isCouponFrequency(value: unknown): value is CouponFrequency {
 function normalizeHolding(row: Record<string, unknown>): BondHolding {
   return {
     id: String(row.id),
+    cusip: nullableTrim(row.cusip as string | null | undefined),
     ticker: nullableTrim(row.ticker as string | null | undefined),
     issuer: String(row.issuer ?? ''),
     currency: String(row.currency ?? ''),
@@ -195,6 +197,7 @@ export async function listBondHoldings(): Promise<BondHolding[]> {
     .select(BOND_HOLDING_SELECT)
     .eq('household_id', household.data)
     .is('deleted_at', null)
+    .order('ticker', { ascending: true, nullsFirst: false })
     .order('maturity_date', { ascending: true });
 
   if (error) {

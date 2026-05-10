@@ -80,12 +80,16 @@ describe('listBondHoldings', () => {
 
   it('lists active holdings scoped to the caller household', async () => {
     authOk();
+    const resolvedData = { data: [{ ...dbRow, face_value: '10000.000000' }], error: null };
     const holdingsQuery = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       is: vi.fn().mockReturnThis(),
-      order: vi.fn().mockResolvedValue({ data: [{ ...dbRow, face_value: '10000.000000' }], error: null }),
+      order: vi.fn().mockReturnThis(),
     };
+    // The second .order() call resolves the query
+    (holdingsQuery.order as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce({ order: vi.fn().mockResolvedValue(resolvedData) });
 
     (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
       auth: { getUser: mockGetUser },

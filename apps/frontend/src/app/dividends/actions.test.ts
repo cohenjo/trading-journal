@@ -138,15 +138,23 @@ describe('getDividendAccounts', () => {
     expect(result).toEqual([]);
   });
 
-  it('returns names as Supabase returns them (no re-ordering)', async () => {
+  it('returns names from dividend_accounts when records exist', async () => {
     authOk();
     const names = ['Brokerage', 'ESOP', 'Savings'];
     const rows = names.map((n) => ({ name: n }));
 
+    const dividendAccountsQuery = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockResolvedValue({ data: rows, error: null }),
+    };
+
     (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
       auth: { getUser: mockGetUser },
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockResolvedValue({ data: rows, error: null }),
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_accounts') return dividendAccountsQuery;
+        throw new Error(`Unexpected table: ${table}`);
       }),
     });
 
@@ -154,12 +162,56 @@ describe('getDividendAccounts', () => {
     expect(result).toEqual(names);
   });
 
-  it('returns empty array on DB error', async () => {
+  it('falls back to trading_account_config when dividend_accounts is empty', async () => {
     authOk();
+    const tradingRows = [{ name: 'InteractiveBrokers' }, { name: 'Schwab' }, { name: 'LeumiIRA' }];
+
+    const dividendAccountsQuery = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+    const tradingConfigQuery = {
+      select: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: tradingRows, error: null }),
+    };
+
     (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
       auth: { getUser: mockGetUser },
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockResolvedValue({ data: null, error: { message: 'DB error' } }),
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_accounts') return dividendAccountsQuery;
+        if (table === 'trading_account_config') return tradingConfigQuery;
+        throw new Error(`Unexpected table: ${table}`);
+      }),
+    });
+
+    const result = await getDividendAccounts();
+    expect(result).toEqual(['InteractiveBrokers', 'Schwab', 'LeumiIRA']);
+  });
+
+  it('returns empty array on DB error with no fallback data', async () => {
+    authOk();
+
+    const dividendAccountsQuery = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      is: vi.fn().mockResolvedValue({ data: null, error: { message: 'DB error' } }),
+    };
+    const tradingConfigQuery = {
+      select: vi.fn().mockReturnThis(),
+      is: vi.fn().mockReturnThis(),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
+    };
+
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table === 'household_members') return mockHouseholdMembersTable();
+        if (table === 'dividend_accounts') return dividendAccountsQuery;
+        if (table === 'trading_account_config') return tradingConfigQuery;
+        throw new Error(`Unexpected table: ${table}`);
       }),
     });
 

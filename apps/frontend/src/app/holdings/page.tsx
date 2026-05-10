@@ -104,7 +104,7 @@ export default function HoldingsPage() {
                 issuer: "",
                 currency: "USD",
                 face_value: 0,
-                coupon_rate: 0.04,
+                coupon_rate: 4.0,
                 coupon_frequency: "ANNUAL",
                 issue_date: new Date().toISOString().slice(0, 10),
                 maturity_date: new Date().toISOString().slice(0, 10),
@@ -188,11 +188,11 @@ export default function HoldingsPage() {
                     type="number"
                     step="0.01"
                     className="bg-slate-950 border border-slate-700 rounded px-1 py-0.5 w-20 text-right"
-                    value={(newRow.coupon_rate * 100).toFixed(2)}
+                    value={Number(newRow.coupon_rate).toFixed(3)}
                     onChange={(e) =>
                       setNewRow({
                         ...newRow,
-                        coupon_rate: (Number(e.target.value) || 0) / 100,
+                        coupon_rate: Number(e.target.value) || 0,
                       })
                     }
                     aria-label="Coupon rate"
@@ -298,7 +298,7 @@ export default function HoldingsPage() {
             {holdings.map((h) => (
               <tr key={h.id} className="odd:bg-slate-950 even:bg-slate-900">
                 <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
-                  {h.id}
+                  {h.cusip ?? ""}
                 </td>
                 <td className="border border-slate-800 px-2 py-1 whitespace-nowrap">
                   {h.ticker ?? ""}
@@ -319,7 +319,7 @@ export default function HoldingsPage() {
                   <span className="ml-1">{h.currency}</span>
                 </td>
                 <td className="border border-slate-800 px-2 py-1 text-right">
-                  {(h.coupon_rate * 100).toFixed(2)}%
+                  {Number(h.coupon_rate).toFixed(3)}%
                 </td>
                 <td className="border border-slate-800 px-2 py-1">
                   {h.coupon_frequency.replace("_", "/")}
