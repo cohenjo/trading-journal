@@ -440,3 +440,20 @@ New `apps/backend/app/api/positions.py`:
 - supabase db push --include-all on production (Kujan applied 2026-05-10 01:15 UTC).
 - Live Flex sync blocked by IBKR error 1001 throttle (Kujan attempted 2026-05-10, 8 retries over 43min failed). Workaround: re-save Flex query in Account Management or wait ~30min.
 - Portal fixes needed for full data completeness: accruedInterest (BOND rows), assetCategory/fxRateToBase (CashTransactions). McManus revalidation v2 verdict: YELLOW (7/12 portal items complete; pipeline ready for next sync).
+
+---
+
+## 2026-05-10 — ✅ Bug Fixes: Stale Positions + Bond Infrastructure + Manual Seed Script
+
+**Commits:** `4cbac98`, `c40c0dc`, `64c6cd6` on `main` (direct per Jony's no-PR-ceremony directive)
+
+**Bug 1 — Stale stock positions (FIXED):**
+Root cause: `DISTINCT ON (account_id, ticker) ORDER BY as_of_date DESC` resurrects sold tickers from prior snapshots. Fix: `max_flex_snap` CTE (`MAX(as_of_date) GROUP BY account_id`) filters positions to only tickers present in the latest snapshot. Manual positions use separate dedup path. Historical lookup (`as_of_date` param) correctly filters CTE too. Frontend `dedupeLatestSnapshot()` in `apps/frontend/src/app/trading/actions.ts` rewritten with same semantics: compute `latestFlexDateByAccount` per account, skip stale flex rows. Tests added: `test_flex_stale_tickers_excluded_from_latest_snapshot`, `test_flex_and_manual_mixed_accounts_no_cross_contamination` (suite 529→535). Key file: `apps/backend/app/api/positions.py`.
+
+**Bug 2 — Bond data confirmed correct in DB; frontend bugs delegated to Fenster:**
+Confirmed via live query: all 18 `bond_holdings` rows have proper CUSIPs (e.g., `91282CHT1`) in `cusip` column — not in `id`. `coupon_rate` is in percentage units (3.875 = 3.875%). Issue date infrastructure is fully in place (column, parser, sync function) but values NULL because IBKR portal FII section is not enabled. No backend code changes needed — blocked on Jony's portal config. Tests added in `test_flex_bond_parser.py`: `TestBondCouponRateStorageConvention` (2 tests), `TestFlexSecurityInfoIssueDate` (2 tests).
+
+**Bug 3 — Manual position entry scaffolded:**
+Created `apps/backend/scripts/seed_manual_account_positions.py` + `apps/backend/scripts/sample_manual_positions.csv`. Idempotent DELETE+INSERT keyed on `(account_id, ticker, as_of_date)`. Validates account is non-IBKR. `--dry-run` flag. Accounts already exist in `trading_account_config` (Schwab id=71, LeumiIRA id=72). Jony must supply actual holdings CSV and run with correct `--account-id`.
+
+**Decisions filed:** `hockney-backend-bugs-2026-05-10.md` (processed by Scribe)

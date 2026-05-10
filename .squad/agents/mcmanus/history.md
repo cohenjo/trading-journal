@@ -318,3 +318,34 @@ Pipeline structure and backfilled data are correct and production-ready. Three p
 
 **Handoff:**
 Pipeline is production-ready for next sync. Data will be fully green (12/12 §6 items) once Jony applies the 3 portal fixes and Kujan retries the sync.
+
+---
+
+## 2026-05-10 — ✅ Flex Pipeline v3 Revalidation: Verdict 🟡 YELLOW
+
+**Commit:** `5d84229` on `main` | **Scope:** Post-fix validation against live Supabase DB (DEV: `zvbwgxdg`)
+
+**Covers:** Hockney commits `4cbac98`/`c40c0dc`/`64c6cd6`, Fenster commit `11e7760`, Kujan Phases A-E backfill. XML ground truth: `reports/activity/OptionsIncomeDashboard_Master-10-may.xml` (period=LastBusinessWeek 2026-05-04→2026-05-08).
+
+**Verdict: 🟡 YELLOW** — All 8 user-flagged code bugs closed; 3 portal-gated items remain.
+
+**Bugs verified closed (§1–§5):**
+- Bug 1: Stale positions — `max_flex_snap` CTE confirmed in SQL; AMZN/ARCC/ARDC/CVS absent from 2026-05-01 snapshot ✅
+- Bug 2: Stock Positions page title ✅
+- Bug 3: Schwab/LeumiIRA seed script + accounts seeded ✅
+- Bug 4: CUSIP renders `h.cusip` not `h.id` ✅
+- Bug 5: Coupon rate display correct (no × 100) ✅; bonds sort ticker ASC nullsLast then maturity ✅
+- Bug 6: Dividends tabs fallback populated ✅
+- Bug 7: Issue date — `issueDate=""` confirmed empty in XML even with FII; blocked on IBKR portal config ⚠️
+- Bug 8: manual_positions table/seeded ✅
+
+**Permanently dropped:** `accruedInterest` — Jony confirmed will not be ingested; removed from all future checklists.
+
+**Three remaining open gaps (portal-gated, not code regressions):**
+1. §6 item 6: FII `source='fii'` distinction in `security_reference` — pending Jony portal enable
+2. §6 item 8: `assetCategory` on historical CashTx rows — 0.6% coverage; portal config change
+3. §6 item 12: XML period still LBW not YTD — no YTD backfill path yet
+
+**Spot-check evidence (canonical end-to-end pattern):** 3 tickers (AAPL/NVDA/META) in 2026-05-01 snapshot; 3 bonds with correct CUSIPs/coupons; 3 dividend transactions with correct account mapping.
+
+**Decisions filed:** `mcmanus-flex-revalidation-v3-2026-05-10.md` (processed by Scribe)

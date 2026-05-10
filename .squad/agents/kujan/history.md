@@ -48,3 +48,30 @@ DevOps/Platform engineer. Owns Supabase infrastructure, Docker/Aspire setup, CI/
 
 **Handoff:**
 Infrastructure ready (migrations applied, worker rebuilt and healthy, new schema verified). Data import pending: IBKR Flex API throttle must clear before sync can succeed. Hockney's Phase 3 backfill (commit eacd8d4) populated all 4 new tables with 5,524 + 217 + 75 + 18 rows. McManus can revalidate end-to-end once throttle clears and next sync completes.
+
+---
+
+## 2026-05-10 — ✅ Fresh XML Backfill Phases A-E + New Master XML
+
+**Scope:** Executed 5-phase XML backfill using the new May 10 master XML (`reports/activity/OptionsIncomeDashboard_Master-10-may.xml`, 374 lines, 216 KB, period=LastBusinessWeek 2026-05-04→2026-05-08).
+
+**Executed via temporary swap of Master.xml (restored after backfill):**
+
+| Phase | Operation | Result |
+|-------|-----------|--------|
+| A | stock_positions: update identifier cols + cost_basis_total | 14 rows updated |
+| B | dividend_payments: re-route from options_cash_events | 5,524 inserted |
+| C | dividend_accruals: seed from master XML | 16 inserted |
+| D | security_reference: seed from OpenPositions | 75 inserted |
+| E | bond_holdings: seed BOND rows | 18 inserted |
+
+**Final DB counts post-backfill:** stock_positions 270 (5 snapshots, max 2026-05-01), bond_holdings 18 (1 snapshot, max 2026-05-08), dividend_accruals 217, dividend_payments 5,524, security_reference 75.
+
+**Gaps identified and handed off to Hockney:**
+1. `NetStockPositionSummary` section has 57 rows in XML — no `net_stock_positions` table exists; rows silently dropped.
+2. `issueDate` field confirmed empty (`""`) in every FII row even after new export — pending Jony portal config.
+3. `underlyingSymbol` in SecurityInfo not captured.
+
+**Live sync status:** Fresh sync triggered at 10:41 UTC+3; IBKR throttle (error 1001) may still be blocking. No confirmed fresh sync completion at time of handoff.
+
+**Decisions filed:** `kujan-flex-fresh-data-2026-05-10.md` (processed by Scribe)
