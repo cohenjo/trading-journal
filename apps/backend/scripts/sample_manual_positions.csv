@@ -1,0 +1,8 @@
+# Sample CSV format for seed_manual_account_positions.py
+# Remove this comment line before using.
+# Columns: ticker (required), quantity (required, >0), cost_basis (optional per-share avg), currency (optional, default USD)
+ticker,quantity,cost_basis,currency
+SCHD,150,26.50,USD
+VYM,200,108.35,USD
+AAPL,12,182.00,USD
+MSFT,8,310.50,USD
