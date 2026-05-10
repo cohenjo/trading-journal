@@ -141,7 +141,7 @@ function LadderPage() {
           />
         </div>
 
-        {/* Right: Expected income + distributions */}
+        {/* Right: Expected income + distributions + bond holdings */}
         <div className="basis-[85%] flex flex-col min-h-0 pl-2">
           <section className="basis-2/5 bg-slate-900 text-slate-100 rounded-lg p-3 mb-3 overflow-hidden flex flex-col">
             <h2 className="text-lg font-semibold mb-2">Expected Income</h2>
@@ -154,49 +154,103 @@ function LadderPage() {
             </div>
           </section>
 
-          <section className="flex-1 min-h-0 bg-slate-900 text-slate-100 rounded-lg p-3 overflow-hidden">
-            <h2 className="text-lg font-semibold mb-2">Distributions (mock)</h2>
-            <div className="h-full overflow-y-auto text-xs">
-              <table className="w-full border-collapse">
-                <thead className="sticky top-0 bg-slate-800">
-                  <tr>
-                    <th className="text-left px-1 py-1">Date</th>
-                    <th className="text-left px-1 py-1">Type</th>
-                    <th className="text-left px-1 py-1">Ticker</th>
-                    <th className="text-left px-1 py-1">Issuer</th>
-                    <th className="text-right px-1 py-1">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {distributions.map((d) => (
-                    <tr
-                      key={d.id}
-                      className={
-                        d.rung_id === (hoveredRungId ?? selectedRungId)
-                          ? "bg-slate-700"
-                          : "hover:bg-slate-800"
-                      }
-                    >
-                      <td className="px-1 py-0.5 whitespace-nowrap">{d.date}</td>
-                      <td className="px-1 py-0.5">{d.type}</td>
-                      <td className="px-1 py-0.5 whitespace-nowrap">{d.ticker ?? ""}</td>
-                      <td className="px-1 py-0.5 whitespace-nowrap">{d.issuer}</td>
-                      <td className="px-1 py-0.5 text-right">
-                        {d.amount.toFixed(2)} {d.currency}
-                      </td>
-                    </tr>
-                  ))}
-                  {distributions.length === 0 && (
+          <div className="flex-1 min-h-0 flex gap-3">
+            {/* Bond Holdings Table */}
+            <section
+              className="basis-1/2 bg-slate-900 text-slate-100 rounded-lg p-3 overflow-hidden flex flex-col"
+              data-testid="bond-holdings-section"
+            >
+              <h2 className="text-lg font-semibold mb-2">Bond Holdings</h2>
+              <div className="flex-1 overflow-y-auto text-xs">
+                {bonds.length === 0 ? (
+                  <div
+                    className="flex flex-col items-center justify-center h-full text-slate-400 gap-2"
+                    data-testid="bond-holdings-empty"
+                  >
+                    <span className="text-2xl">🪪</span>
+                    <p className="text-sm font-medium">No bonds yet</p>
+                    <p className="text-xs text-slate-500">Add a bond to the ladder to see it here.</p>
+                  </div>
+                ) : (
+                  <table className="w-full border-collapse" data-testid="bond-holdings-table">
+                    <thead className="sticky top-0 bg-slate-800">
+                      <tr>
+                        <th className="text-left px-1 py-1">Ticker / Issuer</th>
+                        <th className="text-right px-1 py-1">Coupon</th>
+                        <th className="text-right px-1 py-1">Face Value</th>
+                        <th className="text-left px-1 py-1">Maturity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...bonds]
+                        .sort((a, b) => a.maturity_date.localeCompare(b.maturity_date))
+                        .map((bond) => (
+                          <tr key={bond.id} className="hover:bg-slate-800">
+                            <td className="px-1 py-0.5 whitespace-nowrap">
+                              {bond.ticker ?? bond.issuer}
+                            </td>
+                            <td className="px-1 py-0.5 text-right" data-testid={`coupon-${bond.id}`}>
+                              {(bond.coupon_rate * 100).toFixed(2)}%
+                            </td>
+                            <td className="px-1 py-0.5 text-right">
+                              {bond.face_value.toLocaleString()} {bond.currency}
+                            </td>
+                            <td className="px-1 py-0.5 whitespace-nowrap">
+                              {bond.maturity_date}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+
+            {/* Distributions */}
+            <section className="basis-1/2 bg-slate-900 text-slate-100 rounded-lg p-3 overflow-hidden flex flex-col">
+              <h2 className="text-lg font-semibold mb-2">Distributions (mock)</h2>
+              <div className="flex-1 overflow-y-auto text-xs">
+                <table className="w-full border-collapse">
+                  <thead className="sticky top-0 bg-slate-800">
                     <tr>
-                      <td colSpan={3} className="px-1 py-1 text-center text-slate-400">
-                        Loading distributions…
-                      </td>
+                      <th className="text-left px-1 py-1">Date</th>
+                      <th className="text-left px-1 py-1">Type</th>
+                      <th className="text-left px-1 py-1">Ticker</th>
+                      <th className="text-left px-1 py-1">Issuer</th>
+                      <th className="text-right px-1 py-1">Amount</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                  </thead>
+                  <tbody>
+                    {distributions.map((d) => (
+                      <tr
+                        key={d.id}
+                        className={
+                          d.rung_id === (hoveredRungId ?? selectedRungId)
+                            ? "bg-slate-700"
+                            : "hover:bg-slate-800"
+                        }
+                      >
+                        <td className="px-1 py-0.5 whitespace-nowrap">{d.date}</td>
+                        <td className="px-1 py-0.5">{d.type}</td>
+                        <td className="px-1 py-0.5 whitespace-nowrap">{d.ticker ?? ""}</td>
+                        <td className="px-1 py-0.5 whitespace-nowrap">{d.issuer}</td>
+                        <td className="px-1 py-0.5 text-right">
+                          {d.amount.toFixed(2)} {d.currency}
+                        </td>
+                      </tr>
+                    ))}
+                    {distributions.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-1 py-1 text-center text-slate-400">
+                          Loading distributions…
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
       )}

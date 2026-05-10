@@ -12,9 +12,10 @@ import { useEffect, useRef, useState } from "react";
  * design-token file later if the project adopts a token system.
  */
 export const SERIES_COLORS = {
-  options:   "#f59e0b", // Tailwind amber-500 (Options — Cumulative Cash Flow)
-  dividends: "#10b981", // Tailwind emerald-500 (Dividends — Projected/Estimated)
-  bonds:     "#3b82f6", // Tailwind blue-500 (Bond Ladder — Scheduled)
+  options:      "#f59e0b", // Tailwind amber-500 (Options — Cumulative Cash Flow)
+  dividends:    "#10b981", // Tailwind emerald-500 (Dividends — Projected/Estimated)
+  bonds:        "#3b82f6", // Tailwind blue-500 (Bond Ladder — Scheduled)
+  bondInterest: "#a855f7", // Tailwind purple-500 (Bond Interest — Realized)
 } as const;
 
 /** Convert a hex color + alpha into an rgba() string for opacity variants. */
@@ -30,6 +31,8 @@ export type YearlyIncomeData = {
   optionsIncome: number;
   dividendsIncome: number;
   bondsIncome: number;
+  /** Realized bond coupon interest (4th stacked series). Optional for backward compat. */
+  bondInterestIncome?: number;
   isProjected: boolean;
   dividendsSource?: 'estimation' | 'projection';
 };
@@ -44,6 +47,7 @@ type TooltipData = {
   options: number;
   dividends: number;
   bonds: number;
+  bondInterest: number;
   total: number;
   isProjected: boolean;
   dividendsSource?: 'estimation' | 'projection';
@@ -55,6 +59,7 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
   const optionsSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const dividendsSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const bondsSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const bondInterestSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
   const currencyFormatter = (price: number): string =>
@@ -83,25 +88,30 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
       },
     });
 
-    // Create three histogram series for stacked bars.
+    // Create four histogram series for stacked bars.
     // Render order: the LAST series added is drawn on top.
-    // We want options (amber) on top, dividends (green) in the middle, bonds (blue) at the back.
-    // Each series holds a cumulative value from 0; later series "paint over" earlier ones, so the
-    // visible color at each height band matches the correct series.
+    // Stack bottom-to-top: bond interest (violet) → bonds (blue) → dividends (green) → options (amber).
+    // Each series holds a cumulative value from 0; later series "paint over" earlier ones.
 
-    // 1. Bonds (bottom layer — drawn first, sits behind the others)
+    // 0. Bond Interest Realized (bottommost layer)
+    bondInterestSeriesRef.current = chart.addSeries(HistogramSeries, {
+      color: SERIES_COLORS.bondInterest,
+      priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
+    });
+
+    // 1. Bonds (second layer)
     bondsSeriesRef.current = chart.addSeries(HistogramSeries, {
       color: SERIES_COLORS.bonds,
       priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
     });
 
-    // 2. Dividends (middle layer — drawn second, covers bond area up to options+dividends)
+    // 2. Dividends (third layer)
     dividendsSeriesRef.current = chart.addSeries(HistogramSeries, {
       color: SERIES_COLORS.dividends,
       priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
     });
 
-    // 3. Options (top layer — drawn last, covers the base of every bar in amber)
+    // 3. Options (top layer — drawn last)
     optionsSeriesRef.current = chart.addSeries(HistogramSeries, {
       color: SERIES_COLORS.options,
       priceFormat: { type: 'custom', formatter: currencyFormatter, minMove: 1 },
@@ -124,30 +134,39 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!chartRef.current || !optionsSeriesRef.current || !dividendsSeriesRef.current || !bondsSeriesRef.current) return;
+    if (!chartRef.current || !optionsSeriesRef.current || !dividendsSeriesRef.current || !bondsSeriesRef.current || !bondInterestSeriesRef.current) return;
 
-    // For stacked bars, we need to stack the values
-    // Bottom series shows cumulative from 0
-    // Middle series shows cumulative from 0 to (options + dividends)
-    // Top series shows total (options + dividends + bonds)
+    // Stacked bar construction (cumulative heights):
+    // Bottom series: bondInterest (violet)
+    // Layer 2: bondInterest + bonds (blue)
+    // Layer 3: bondInterest + bonds + dividends (green)
+    // Top series: bondInterest + bonds + dividends + options (amber)
 
+    const bondInterestData: HistogramData<Time>[] = [];
     const optionsData: HistogramData<Time>[] = [];
     const dividendsData: HistogramData<Time>[] = [];
     const bondsData: HistogramData<Time>[] = [];
 
     for (const point of data) {
       const time = `${point.year}-01-01` as Time;
-      const optionsValue = point.optionsIncome;
-      const dividendsValue = point.optionsIncome + point.dividendsIncome;
-      const bondsValue = point.optionsIncome + point.dividendsIncome + point.bondsIncome;
+      const bondInterestAmount = point.bondInterestIncome ?? 0;
+      const bondsValue = bondInterestAmount + point.bondsIncome;
+      const dividendsValue = bondsValue + point.dividendsIncome;
+      const optionsValue = dividendsValue + point.optionsIncome;
 
       // Projected years are dimmed to 40 % opacity; actuals use 80 %.
       const opacity = point.isProjected ? 0.4 * 0.8 : 0.8;
 
-      optionsData.push({
+      bondInterestData.push({
         time,
-        value: optionsValue,
-        color: hexToRgba(SERIES_COLORS.options, opacity),
+        value: bondInterestAmount,
+        color: hexToRgba(SERIES_COLORS.bondInterest, opacity),
+      });
+
+      bondsData.push({
+        time,
+        value: bondsValue,
+        color: hexToRgba(SERIES_COLORS.bonds, opacity),
       });
 
       dividendsData.push({
@@ -156,16 +175,17 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
         color: hexToRgba(SERIES_COLORS.dividends, opacity),
       });
 
-      bondsData.push({
+      optionsData.push({
         time,
-        value: bondsValue,
-        color: hexToRgba(SERIES_COLORS.bonds, opacity),
+        value: optionsValue,
+        color: hexToRgba(SERIES_COLORS.options, opacity),
       });
     }
 
-    optionsSeriesRef.current.setData(optionsData);
-    dividendsSeriesRef.current.setData(dividendsData);
+    bondInterestSeriesRef.current.setData(bondInterestData);
     bondsSeriesRef.current.setData(bondsData);
+    dividendsSeriesRef.current.setData(dividendsData);
+    optionsSeriesRef.current.setData(optionsData);
 
     chartRef.current.timeScale().fitContent();
 
@@ -180,12 +200,14 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
       const dataPoint = data.find(d => d.year === Number(year));
 
       if (dataPoint) {
+        const bondInterestIncome = dataPoint.bondInterestIncome ?? 0;
         setTooltip({
           year,
           options: dataPoint.optionsIncome,
           dividends: dataPoint.dividendsIncome,
           bonds: dataPoint.bondsIncome,
-          total: dataPoint.optionsIncome + dataPoint.dividendsIncome + dataPoint.bondsIncome,
+          bondInterest: bondInterestIncome,
+          total: dataPoint.optionsIncome + dataPoint.dividendsIncome + dataPoint.bondsIncome + bondInterestIncome,
           isProjected: dataPoint.isProjected,
           dividendsSource: dataPoint.dividendsSource,
         });
@@ -227,6 +249,15 @@ export default function StackedIncomeBarChart({ data, cutoffYear }: Props) {
               </span>
               <span className="font-mono">{currencyFormatter(tooltip.bonds)}</span>
             </div>
+            {tooltip.bondInterest > 0 && (
+              <div className="flex items-center justify-between gap-4">
+                <span className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: SERIES_COLORS.bondInterest }}></div>
+                  Bond Interest
+                </span>
+                <span className="font-mono">{currencyFormatter(tooltip.bondInterest)}</span>
+              </div>
+            )}
             <div className="pt-2 mt-2 border-t border-slate-600 flex justify-between font-semibold">
               <span>Total</span>
               <span className="font-mono">{currencyFormatter(tooltip.total)}</span>

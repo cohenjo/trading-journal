@@ -24,6 +24,16 @@ function householdQuery() {
   };
 }
 
+/** bond_holdings query chain used by fetchHoldingBonds — returns empty list by default. */
+function holdingsQuery(rows: unknown[] = []) {
+  return {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
+    order: vi.fn().mockResolvedValue({ data: rows, error: null }),
+  };
+}
+
 describe('ladder Server Actions', () => {
   it('loads overview using aggregate bond face values for rung current amounts', async () => {
     const rungs = [{ id: '2037', year: 2037, start_date: '2037-01-01', end_date: '2037-12-31', target_amount: 20_000, current_amount: 0 }];
@@ -33,6 +43,7 @@ describe('ladder Server Actions', () => {
       auth: { getUser: mockGetUser },
       from: vi.fn((table: string) => {
         if (table === 'household_members') return householdQuery();
+        if (table === 'bond_holdings') return holdingsQuery();
         if (table === 'ladder_rungs') return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), order: vi.fn().mockResolvedValue({ data: rungs, error: null }) };
         if (table === 'ladder_bonds') {
           bondsCall += 1;

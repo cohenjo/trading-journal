@@ -142,4 +142,54 @@ describe('buildYearlyIncomeData — estimation override semantics', () => {
     expect(point2023?.dividendsIncome).toBe(22_000);
     expect(point2023?.dividendsSource).toBe('estimation');
   });
+
+  // ─── bondInterest 4th series (#357) ────────────────────────────────────────
+
+  it('populates bondInterestIncome from the bondInterest param', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      bondInterest: [
+        { year: 2026, net_amount: 1_200 },
+        { year: 2027, net_amount: 900 },
+      ],
+    });
+
+    const byYear = Object.fromEntries(result.map(p => [p.year, p]));
+    expect(byYear[2026]?.bondInterestIncome).toBe(1_200);
+    expect(byYear[2027]?.bondInterestIncome).toBe(900);
+    // Years with no bond interest entry default to 0
+    expect(byYear[2028]?.bondInterestIncome).toBe(0);
+  });
+
+  it('bondInterest years are included in result even when not in other data', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      bondInterest: [{ year: 2024, net_amount: 500 }],
+      optionsYearly: [],          // 2024 not in options or ladder
+      ladderSeries: [],
+    });
+
+    const years = result.map(p => p.year);
+    expect(years).toContain(2024);
+    const point2024 = result.find(p => p.year === 2024);
+    expect(point2024?.bondInterestIncome).toBe(500);
+  });
+
+  it('defaults bondInterestIncome to 0 when bondInterest param is omitted', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+    });
+    result.forEach(p => {
+      expect(p.bondInterestIncome).toBe(0);
+    });
+  });
 });

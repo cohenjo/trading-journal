@@ -202,4 +202,53 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
       expect(screen.getByTestId("empty-state")).toBeInTheDocument();
     });
   });
+
+  // ── #354 regression: 3 tabs render even when 2 accounts have zero positions
+
+  it("(#354) renders all 3 account tabs even when Schwab and IRA have zero positions", async () => {
+    // getTradingConfigs returns all 3, getStockPositions returns [] for all
+    await act(async () => {
+      render(<TradingAccountsPage />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-ibkr")).toBeInTheDocument();
+      expect(screen.getByTestId("tab-schwab")).toBeInTheDocument();
+      expect(screen.getByTestId("tab-ira")).toBeInTheDocument();
+    });
+  });
+
+  it("(#354) shows manual-empty-banner on Schwab tab when no positions", async () => {
+    await act(async () => {
+      render(<TradingAccountsPage />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("tab-schwab")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("tab-schwab"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("manual-empty-banner")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("manual-empty-banner")).toHaveTextContent("No positions yet");
+  });
+
+  it("(#354) add-position-button is visible on empty Schwab tab (CTA accessible)", async () => {
+    await act(async () => {
+      render(<TradingAccountsPage />);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("tab-schwab")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("tab-schwab"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("add-position-button")).toBeInTheDocument();
+      expect(screen.getByTestId("manual-empty-banner")).toBeInTheDocument();
+    });
+  });
 });

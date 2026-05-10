@@ -15,6 +15,8 @@ export interface BuildYearlyIncomeParams {
   optionsFinalYear: number;
   optionsYearly: Array<{ year: number; amount: number }>;
   ladderSeries: IncomePoint[];
+  /** Optional realized bond interest per year. Comes from getYearlyBondInterest(). */
+  bondInterest?: Array<{ year: number; net_amount: number }>;
 }
 
 /**
@@ -38,6 +40,7 @@ export function buildYearlyIncomeData(params: BuildYearlyIncomeParams): YearlyIn
     optionsFinalYear,
     optionsYearly,
     ladderSeries,
+    bondInterest = [],
   } = params;
 
   const optionsMap = new Map(optionsYearly.map(o => [o.year, o.amount]));
@@ -47,6 +50,8 @@ export function buildYearlyIncomeData(params: BuildYearlyIncomeParams): YearlyIn
     const year = new Date(point.date).getFullYear();
     ladderMap.set(year, (ladderMap.get(year) ?? 0) + point.value);
   }
+
+  const bondInterestMap = new Map<number, number>(bondInterest.map(b => [b.year, b.net_amount]));
 
   const divMap = new Map<number, number>();
   const divSourceMap = new Map<number, 'estimation' | 'projection'>();
@@ -82,6 +87,7 @@ export function buildYearlyIncomeData(params: BuildYearlyIncomeParams): YearlyIn
   const allYears = new Set<number>();
   optionsYearly.forEach(o => allYears.add(o.year));
   ladderSeries.forEach(l => allYears.add(new Date(l.date).getFullYear()));
+  bondInterest.forEach(b => allYears.add(b.year));
   for (let year = currentYear; year <= Math.min(finalYear, optionsFinalYear); year++) {
     allYears.add(year);
   }
@@ -101,6 +107,7 @@ export function buildYearlyIncomeData(params: BuildYearlyIncomeParams): YearlyIn
     dividendsIncome: divMap.get(year) ?? 0,
     dividendsSource: divSourceMap.get(year),
     bondsIncome: ladderMap.get(year) ?? 0,
+    bondInterestIncome: bondInterestMap.get(year) ?? 0,
     isProjected: year > currentYear,
   }));
 }

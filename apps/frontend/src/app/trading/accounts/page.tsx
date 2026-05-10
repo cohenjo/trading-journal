@@ -169,6 +169,18 @@ export default function TradingAccountsPage() {
             onRefreshComplete={() => loadPositions(configs)}
             onImportSuccess={() => loadPositions(configs)}
           />
+          {isManualAccount && (positionsByAccount.get(activeConfig.id) ?? []).length === 0 && (
+            <div
+              className="mb-4 flex items-start gap-3 p-4 bg-blue-950/40 border border-blue-800/60 rounded-lg text-blue-300 text-sm"
+              data-testid="manual-empty-banner"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>
+                No positions yet — add one below using the{" "}
+                <strong className="font-semibold text-blue-200">+ Add Position</strong> button above.
+              </span>
+            </div>
+          )}
           <StockPositionsTable
             mode={isManualAccount ? "editable" : "readonly"}
             positions={positionsByAccount.get(activeConfig.id) ?? []}
