@@ -367,20 +367,51 @@ function coerceStockPosition(row: Record<string, unknown>): StockPosition {
 }
 
 /**
- * Deduplicates stock positions, keeping only the latest snapshot per
- * (account_id, ticker). Handles multi-year Flex history where the same
- * ticker appears as separate year-end snapshots (2022/2023/2024/2025).
- * Also applies defensively to manual (Schwab/LeumiIRA) rows.
+ * Deduplicates stock positions by source-aware snapshot semantics.
+ *
+ * Flex positions: only tickers present in the *latest* Flex snapshot date for
+ * each account are returned.  Tickers absent from the latest snapshot (e.g.
+ * stocks the user has sold) are excluded — not surfaced as "latest for that
+ * ticker" from an older snapshot.  This matches the max_flex_snap CTE in the
+ * backend's list_positions endpoint.
+ *
+ * Manual positions (Schwab / LeumiIRA): keep the latest entry per
+ * (account_id, ticker), since manual rows are edited in-place without
+ * snapshot semantics.
+ *
+ * Previously used latest-per-ticker for all sources, which caused stale
+ * holdings (AMZN, ARCC, ARDC, CVS etc.) to appear after Jony sold them.
+ * Fixed per Bug-1 report, 2026-05-10.
  */
 function dedupeLatestSnapshot(rows: StockPosition[]): StockPosition[] {
+  // Step 1: find the latest flex snapshot date per account.
+  const latestFlexDateByAccount = new Map<number, string>();
+  for (const row of rows) {
+    if (row.source === 'flex') {
+      const existing = latestFlexDateByAccount.get(row.account_id);
+      if (!existing || (row.as_of_date && row.as_of_date > existing)) {
+        latestFlexDateByAccount.set(row.account_id, row.as_of_date);
+      }
+    }
+  }
+
   const map = new Map<string, StockPosition>();
   for (const row of rows) {
     const key = `${row.account_id}:${row.ticker}`;
-    const existing = map.get(key);
-    if (!existing || (row.as_of_date && row.as_of_date > existing.as_of_date)) {
+    if (row.source === 'flex') {
+      const latestDate = latestFlexDateByAccount.get(row.account_id);
+      // Exclude flex rows that don't belong to the latest snapshot for this account.
+      if (row.as_of_date !== latestDate) continue;
       map.set(key, row);
+    } else {
+      // Manual: keep latest per (account_id, ticker).
+      const existing = map.get(key);
+      if (!existing || (row.as_of_date && row.as_of_date > existing.as_of_date)) {
+        map.set(key, row);
+      }
     }
   }
+
   return Array.from(map.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
 }
 

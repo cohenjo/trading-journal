@@ -535,11 +535,17 @@ def _api_stock_position_row(
 
 
 class _ListPositionsSession:
-    """Fake session that exposes pre-fix flat selects as duplicate rows.
+    """Fake session that simulates the max_flex_snap + DISTINCT ON query.
 
-    The fake deliberately returns all seeded rows unless the endpoint query uses
-    the latest-snapshot DISTINCT ON pattern. That makes these tests fail against
-    the old flat SELECT while staying independent of a live Postgres instance.
+    The fake simulates the new Bug-1 query semantics (2026-05-10):
+    - Flex rows: only those whose as_of_date equals the max flex snapshot date
+      for that account.  Stale tickers (sold positions from older snapshots)
+      are excluded, mirroring the max_flex_snap CTE in positions.py.
+    - Manual rows: latest per (account_id, ticker) via DISTINCT ON logic.
+
+    The simulation is activated when the executed SQL contains 'max_flex_snap'.
+    If that marker is absent the session falls back to the old DISTINCT ON
+    path so pre-existing schema-invariant tests continue to pass.
     """
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
@@ -562,13 +568,54 @@ class _ListPositionsSession:
             and ("as_of_date" not in self.last_params or row["as_of_date"] == self.last_params["as_of_date"])
         ]
 
-        if "distinct on (sp.account_id, sp.ticker)" not in sql:
-            return _FakeMappings(filtered)
+        if "max_flex_snap" not in sql:
+            # Legacy path: DISTINCT ON per (account_id, ticker), latest date wins.
+            if "distinct on (sp.account_id, sp.ticker)" not in sql:
+                return _FakeMappings(filtered)
+            latest_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+            for row in filtered:
+                key = (row["account_id"], row["ticker"])
+                existing = latest_by_key.get(key)
+                if existing is None or (
+                    row["as_of_date"],
+                    row["updated_at"],
+                    row["created_at"],
+                    row["id"],
+                ) > (
+                    existing["as_of_date"],
+                    existing["updated_at"],
+                    existing["created_at"],
+                    existing["id"],
+                ):
+                    latest_by_key[key] = row
+            rows = sorted(latest_by_key.values(), key=lambda r: (r["account_name"], r["ticker"]))
+            return _FakeMappings(rows)
 
-        latest_by_key: dict[tuple[int, str], dict[str, Any]] = {}
+        # New path: max_flex_snap semantics.
+        # Step 1: compute max flex as_of_date per account (mirrors max_flex_snap CTE).
+        max_flex_date: dict[int, Any] = {}
         for row in filtered:
+            if row.get("source") == "flex":
+                acc = row["account_id"]
+                if acc not in max_flex_date or row["as_of_date"] > max_flex_date[acc]:
+                    max_flex_date[acc] = row["as_of_date"]
+
+        # Step 2: filter — flex rows must be at the max snapshot date; manual
+        # rows all pass through for DISTINCT ON dedup in the next step.
+        candidates: list[dict[str, Any]] = []
+        for row in filtered:
+            if row.get("source") == "flex":
+                acc = row["account_id"]
+                if max_flex_date.get(acc) == row["as_of_date"]:
+                    candidates.append(row)
+            else:
+                candidates.append(row)
+
+        # Step 3: DISTINCT ON (account_id, ticker) — latest per key wins.
+        latest_by_key2: dict[tuple[int, str], dict[str, Any]] = {}
+        for row in candidates:
             key = (row["account_id"], row["ticker"])
-            existing = latest_by_key.get(key)
+            existing = latest_by_key2.get(key)
             if existing is None or (
                 row["as_of_date"],
                 row["updated_at"],
@@ -580,10 +627,10 @@ class _ListPositionsSession:
                 existing["created_at"],
                 existing["id"],
             ):
-                latest_by_key[key] = row
+                latest_by_key2[key] = row
 
-        rows = sorted(latest_by_key.values(), key=lambda r: (r["account_name"], r["ticker"]))
-        return _FakeMappings(rows)
+        rows2 = sorted(latest_by_key2.values(), key=lambda r: (r["account_name"], r["ticker"]))
+        return _FakeMappings(rows2)
 
 
 class TestListPositionsLatestSnapshot:
@@ -646,6 +693,8 @@ class TestListPositionsLatestSnapshot:
         assert abr_rows[0].as_of_date == date(2025, 12, 31)
         assert abr_rows[0].quantity == Decimal("30")
         assert {row.ticker for row in result} == {"ABR", "VYM"}
+        # New query uses max_flex_snap CTE; still contains DISTINCT ON as guard.
+        assert "max_flex_snap" in session.last_sql
         assert "distinct on (sp.account_id, sp.ticker)" in session.last_sql
 
     def test_manual_positions_return_latest_without_swallowing_other_tickers(self):
@@ -695,6 +744,137 @@ class TestListPositionsLatestSnapshot:
         assert len(aapl_rows) == 1, "Manual edit-like duplicates must collapse to the latest row"
         assert aapl_rows[0].as_of_date == date(2026, 5, 9)
         assert aapl_rows[0].quantity == Decimal("15")
+
+    def test_flex_stale_tickers_excluded_from_latest_snapshot(self):
+        """Sold positions must not surface when a newer Flex snapshot exists.
+
+        Bug-1 regression guard (Jony, 2026-05-10): AMZN, ARCC, ARDC, CVS etc.
+        appeared on the accounts page because they were the "latest row for that
+        ticker" even though Jony had sold them before the 2026-05-01 snapshot.
+
+        Old behavior: DISTINCT ON (account_id, ticker) ORDER BY as_of_date DESC
+        would pick AMZN from the 2025-12-31 snapshot (latest for *that ticker*).
+
+        New behavior: max_flex_snap CTE identifies the latest snapshot date per
+        account (2026-05-01).  AMZN, which has no 2026-05-01 row, is excluded.
+        Only tickers present in the latest snapshot are returned.
+        """
+        from app.api.positions import list_positions
+
+        session = _ListPositionsSession(
+            [
+                # AMZN: sold before the 2026-05-01 snapshot — only 2025-12-31 row exists.
+                _api_stock_position_row(
+                    row_id=10,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="AMZN",
+                    quantity=Decimal("5"),
+                    as_of_date=date(2025, 12, 31),
+                    source="flex",
+                    market_value=Decimal("500"),
+                ),
+                # VYM: still held — present in both snapshots.
+                _api_stock_position_row(
+                    row_id=11,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="VYM",
+                    quantity=Decimal("20"),
+                    as_of_date=date(2025, 12, 31),
+                    source="flex",
+                    market_value=Decimal("2000"),
+                ),
+                _api_stock_position_row(
+                    row_id=12,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="VYM",
+                    quantity=Decimal("22"),
+                    as_of_date=date(2026, 5, 1),
+                    source="flex",
+                    market_value=Decimal("2200"),
+                ),
+                # ABR: newly bought in the 2026-05-01 snapshot.
+                _api_stock_position_row(
+                    row_id=13,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="ABR",
+                    quantity=Decimal("100"),
+                    as_of_date=date(2026, 5, 1),
+                    source="flex",
+                    market_value=Decimal("1000"),
+                ),
+            ]
+        )
+
+        with self._patch_resolve():
+            result = list_positions(account_id=1, as_of_date=None, user_id=TEST_USER_ID, db=session)
+
+        tickers = {row.ticker for row in result}
+        assert "AMZN" not in tickers, (
+            "AMZN must be excluded: it only appears in the 2025-12-31 snapshot, "
+            "not the latest 2026-05-01 snapshot (Bug-1 regression)."
+        )
+        assert "VYM" in tickers, "VYM is in the latest snapshot and must appear"
+        assert "ABR" in tickers, "ABR is in the latest snapshot and must appear"
+        vym = next(r for r in result if r.ticker == "VYM")
+        assert vym.as_of_date == date(2026, 5, 1), "Must return the 2026-05-01 row, not the older one"
+        assert vym.quantity == Decimal("22")
+
+    def test_flex_and_manual_mixed_accounts_no_cross_contamination(self):
+        """Flex exclusion only applies to flex source; manual rows from same account survive."""
+        from app.api.positions import list_positions
+
+        session = _ListPositionsSession(
+            [
+                # Flex IBKR account: AMZN only in old snapshot (stale, should be excluded)
+                _api_stock_position_row(
+                    row_id=20,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="AMZN",
+                    quantity=Decimal("5"),
+                    as_of_date=date(2025, 12, 31),
+                    source="flex",
+                ),
+                _api_stock_position_row(
+                    row_id=21,
+                    account_id=1,
+                    account_name="InteractiveBrokers",
+                    account_type="ibkr",
+                    ticker="VYM",
+                    quantity=Decimal("10"),
+                    as_of_date=date(2026, 5, 1),
+                    source="flex",
+                ),
+                # Manual Schwab account: positions are independent of flex snapshot logic
+                _api_stock_position_row(
+                    row_id=22,
+                    account_id=2,
+                    account_name="Schwab",
+                    account_type="schwab",
+                    ticker="SCHD",
+                    quantity=Decimal("50"),
+                    as_of_date=date(2026, 5, 9),
+                    source="manual",
+                ),
+            ]
+        )
+
+        with self._patch_resolve():
+            result = list_positions(account_id=None, as_of_date=None, user_id=TEST_USER_ID, db=session)
+
+        tickers = {row.ticker for row in result}
+        assert "AMZN" not in tickers, "Stale IBKR flex position must be excluded"
+        assert "VYM" in tickers, "Current IBKR flex position must appear"
+        assert "SCHD" in tickers, "Manual Schwab position must appear regardless"
 
 
 # ---------------------------------------------------------------------------

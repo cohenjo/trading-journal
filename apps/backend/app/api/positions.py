@@ -310,11 +310,20 @@ def list_positions(
     user_id: UUID = Depends(get_current_user_id),
     db: Session = Depends(get_session),
 ) -> list[StockPositionRow]:
-    """List latest stock positions for the authenticated user's household.
+    """List current stock positions for the authenticated user's household.
 
     Joins with trading_account_config to include account name and type.
-    By default, returns one latest row per (account_id, ticker). If an
-    as_of_date is supplied, that date constrains the candidate snapshot rows.
+
+    Flex positions: only rows whose as_of_date equals the latest Flex snapshot
+    date for each account are returned.  Tickers absent from the latest
+    snapshot (e.g. stocks that were sold) are excluded — not surfaced as
+    "most recent per ticker" from an older snapshot.
+
+    Manual positions: most-recent row per (account_id, ticker) is returned,
+    matching the DISTINCT ON semantics since manual rows are edited in-place.
+
+    If as_of_date is supplied it constrains the candidate rows AND the
+    max-snapshot computation, making historical lookups work correctly.
     """
     household_id = _resolve_household(db, user_id)
 
@@ -329,11 +338,31 @@ def list_positions(
         params["as_of_date"] = as_of_date
 
     where = " and ".join(filters)
+
+    # max_flex_snap CTE: computes the latest Flex snapshot date per account.
+    # Any as_of_date / account_id params already in `filters` are mirrored here
+    # so that an explicit as_of_date=X yields max=X (historical-lookup compat).
+    cte_filters_list = ["household_id = :household_id", "source = 'flex'"]
+    if account_id is not None:
+        cte_filters_list.append("account_id = :account_id")
+    if as_of_date is not None:
+        cte_filters_list.append("as_of_date = :as_of_date")
+    cte_where = " and ".join(cte_filters_list)
+
     rows = (
         db.execute(
             text(
                 f"""
-            with latest_positions as (
+            with max_flex_snap as (
+              -- Latest Flex snapshot date per account. Positions absent from
+              -- this snapshot (e.g. sold holdings) are excluded rather than
+              -- surfaced as the "most recent" row for that ticker.
+              select account_id, max(as_of_date) as latest_date
+                from public.stock_positions
+               where {cte_where}
+               group by account_id
+            ),
+            latest_positions as (
               select distinct on (sp.account_id, sp.ticker)
                 sp.id, sp.household_id, sp.account_id,
                 tac.name as account_name, tac.account_type,
@@ -344,7 +373,14 @@ def list_positions(
                 sp.created_at, sp.updated_at
               from public.stock_positions sp
               join public.trading_account_config tac on tac.id = sp.account_id
+              -- Flex: restrict to latest snapshot date only (excludes sold positions).
+              -- Manual: all dates pass through; DISTINCT ON handles per-ticker dedup.
+              left join max_flex_snap mfs on mfs.account_id = sp.account_id
               where {where}
+                and (
+                  (sp.source = 'flex' and sp.as_of_date = mfs.latest_date)
+                  or sp.source = 'manual'
+                )
               order by
                 sp.account_id,
                 sp.ticker,
