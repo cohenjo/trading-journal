@@ -4087,3 +4087,59 @@ Every manual CRUD mutation endpoint guards with `if account_type == 'ibkr': retu
 **Action:** Once a fresh YTD export is ingested, close §6 item 12.
 
 ---
+
+## YTD Flex Ingest — 2026-05-10
+
+**Date:** 2026-05-10
+**Completed by:** Kujan (ingestion), McManus (validation), Scribe (lessons)
+**Verdict:** 🟢 GREEN — Flex pipeline complete for current sprint
+
+---
+
+### 1. **Live-sync throttle gap is self-healing**
+
+When IBKR throttles (error 1001), Phase B backfill doesn't reload missing 1-2 days from XML directly — it re-routes from `options_cash_events` instead. Trade-off is acceptable: next successful sync catches up automatically. Don't engineer a "force-from-XML" escape hatch unless multi-day gaps become a UX issue.
+
+**Evidence:** YTD backfill May 7-8 gap (worker throttled); `options_cash_events` max_date=2026-05-06; no routing error occurred.
+
+---
+
+### 2. **assetCategory/fxRateToBase columns deferred (hygiene-only)**
+
+In YTD dataset: 5524 dividend_payments rows, 34 (0.6%) carry both `assetCategory` and `fxRateToBase` in raw_payload; all 34 have `fxRateToBase=1.0` (no actual FX conversion). Promoting these to schema columns is hygiene only — defer until a non-USD position appears in production data.
+
+**Evidence:** §6.8 columns absent from `dividend_payments` schema; `raw_payload` fully populated; US-denominated portfolio typical.
+
+---
+
+### 3. **FII (FinancialInstrumentInformation) Phase F gap — non-material for current UI**
+
+YTD XML contains 272 FII rows; `backfill_flex_v2.py` Phases A–E ignore them. Phase F would gain ~197 historical-only securities (FII = all-time traded; `open_positions` = current holdings only). Current UI fully covered by `security_reference` (75 rows). No user-facing gap today — defer Phase F to future ticket.
+
+**Evidence:** `security_reference` complete with 75 rows from `open_positions`; no FII extractor built.
+
+---
+
+### 4. **Inbox files are ephemeral — merged by Scribe, not committed**
+
+`.squad/decisions/inbox/*` is gitignored by design. Scribe consumes and merges content into `decisions.md` each sprint wrap. Don't waste cycles trying to commit individual inbox files or worry about their lifecycle. They are working artifacts only.
+
+**Design note:** See `.gitignore` routing and Scribe charter.
+
+---
+
+### 5. **Backfill phase expectations reset**
+
+When master XML is swapped and `backfill_flex_v2.py` runs, dividend_payments headline count may NOT budge (Phase B re-routes from `options_cash_events`, not XML). Real value lies in Phase A identifier updates, Phase C accrual refresh, Phase D security_reference, Phase E bond_holdings. Always inspect what each phase touches before declaring victory.
+
+**Evidence:** YTD run: A=14 updated, B=5524 reinserted (from cache), C=217 inserted, D=75 upserted, E=18 inserted.
+
+---
+
+### 6. **accruedInterest on BOND positions blocked at portal**
+
+Field exists in `bond_holdings` schema but all 18 YTD rows are NULL. Root cause: IBKR Flex export does NOT emit `accruedInterest` on `<OpenPosition assetCategory="BOND">`. Non-critical for frontend (coupon_rate, price, value all present). Only re-test when Jony confirms portal-side change.
+
+**Evidence:** §6.7 validation complete; 18 bonds ingested with NULL `accrued_interest`; no portal config change observed yet.
+
+---
