@@ -267,3 +267,125 @@ class TestParseFlexFilesBondRouting:
             pytest.skip("Master XML fixture not present")
         result = parse_flex_files([master_xml])
         assert len(result.dividend_accruals) > 0, "Expected at least one dividend accrual row"
+
+
+# ---------------------------------------------------------------------------
+# Bug-2 regression guards — bond data quality (2026-05-10)
+# ---------------------------------------------------------------------------
+
+
+class TestBondCouponRateStorageConvention:
+    """Verify coupon_rate storage convention: percentage units (e.g. 4.25), not
+    decimal fraction (e.g. 0.0425).  Fenster's display layer must NOT multiply
+    by 100 to convert — the value is already in display-ready percentage form.
+
+    Ground truth (McManus v2 revalidation): all 18 live bond_holdings rows have
+    coupon_rate in the range 2.0–7.0.  A value like 0.04 would indicate a
+    parsing bug where the decimal fraction was stored instead.
+    """
+
+    def test_parse_bond_open_position_coupon_rate_is_percentage_units(self) -> None:
+        """coupon_rate=4.25 for '4 1/4' bond — percentage units, not 0.0425."""
+        attrs = {
+            "accountId": "U2515365",
+            "assetCategory": "BOND",
+            "symbol": "AAPL 4 1/4 02/09/47",
+            "conid": "264824302",
+            "position": "7000",
+            "currency": "USD",
+            "markPrice": "96.284",
+            "positionValue": "6739.88",
+            "cusip": "037833CH1",
+            "isin": "US037833CH12",
+            "reportDate": "2026-05-08",
+        }
+        pos = parse_bond_open_position(attrs, date(2026, 5, 8))
+        assert pos is not None
+        assert pos.coupon_rate == Decimal("4.25"), (
+            "coupon_rate must be stored as percentage units (4.25), not "
+            "decimal fraction (0.0425). Fenster must NOT multiply by 100. Bug-2."
+        )
+        assert 0 < pos.coupon_rate < 20, (
+            "coupon_rate out of the expected 0–20 percentage range. "
+            "Possible regression: stored as basis points or raw fraction."
+        )
+
+    def test_all_live_bond_coupon_rates_in_valid_range(self) -> None:
+        """Coupon rates from all 18 live bond symbols must be in 0–20 pct range."""
+        live_bonds = [
+            ("AAPL 4 1/4 02/09/47", Decimal("4.25")),
+            ("AMZN 4.05 08/22/47 5BJ4", Decimal("4.05")),
+            ("AMZN 5.65 03/13/46", Decimal("5.65")),
+            ("BA 3 1/2 03/01/45", Decimal("3.5")),
+            ("BCRED 6 01/29/32", Decimal("6.0")),
+            ("META 5 1/2 11/15/45", Decimal("5.5")),
+            ("NFLX 5.4 08/15/54", Decimal("5.4")),
+            ("T 3 7/8 08/15/33", Decimal("3.875")),
+            ("T 4 02/15/34", Decimal("4.0")),
+            ("T 2 1/2 02/15/45", Decimal("2.5")),
+            ("T 2 1/2 05/15/46", Decimal("2.5")),
+            ("T 2 3/4 08/15/47", Decimal("2.75")),
+            ("T 3 05/15/45", Decimal("3.0")),
+            ("T 3 1/8 08/15/44", Decimal("3.125")),
+            ("T 3 11/15/44", Decimal("3.0")),
+        ]
+
+        for symbol, expected_rate in live_bonds:
+            attrs = {
+                "accountId": "U2515365",
+                "assetCategory": "BOND",
+                "symbol": symbol,
+                "conid": "99999",
+                "position": "1000",
+                "currency": "USD",
+                "markPrice": "98",
+                "positionValue": "980",
+            }
+            pos = parse_bond_open_position(attrs, date(2026, 5, 8))
+            assert pos is not None, f"parse_bond_open_position returned None for {symbol!r}"
+            assert pos.coupon_rate == expected_rate, (
+                f"{symbol}: expected coupon_rate={expected_rate} got {pos.coupon_rate}"
+            )
+            assert 0 < pos.coupon_rate < 20, f"{symbol}: coupon_rate={pos.coupon_rate} outside valid 0–20 pct range"
+
+
+class TestFlexSecurityInfoIssueDate:
+    """Verify FlexSecurityInfo parses issueDate from FII rows (Bug-2 §3)."""
+
+    def test_parse_security_info_includes_issue_date(self) -> None:
+        """parse_security_info() extracts issueDate attribute into issue_date."""
+        from app.services.options.flex_parser import parse_security_info
+
+        attrs = {
+            "conid": "264824302",
+            "symbol": "AAPL 4 1/4 02/09/47",
+            "description": "AAPL 4.25% 02/09/2047 CORP",
+            "assetCategory": "BOND",
+            "currency": "USD",
+            "listingExchange": "NYSE",
+            "cusip": "037833CH1",
+            "isin": "US037833CH12",
+            "maturity": "2047-02-09",
+            "issueDate": "2017-02-06",
+        }
+        info = parse_security_info(attrs)
+        assert info is not None
+        assert info.issue_date == date(2017, 2, 6), (
+            "issue_date must be parsed from issueDate FII attribute. "
+            "Needed for Bug-2 §3 FII backfill once portal enables the section."
+        )
+        assert info.maturity == date(2047, 2, 9)
+
+    def test_parse_security_info_missing_issue_date_is_none(self) -> None:
+        """issueDate absent from OpenPositions source — must default to None."""
+        from app.services.options.flex_parser import parse_security_info
+
+        attrs = {
+            "conid": "264824302",
+            "symbol": "AAPL 4 1/4 02/09/47",
+            "assetCategory": "BOND",
+            "currency": "USD",
+        }
+        info = parse_security_info(attrs)
+        assert info is not None
+        assert info.issue_date is None
