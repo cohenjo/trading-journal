@@ -4143,3 +4143,70 @@ Field exists in `bond_holdings` schema but all 18 YTD rows are NULL. Root cause:
 **Evidence:** §6.7 validation complete; 18 bonds ingested with NULL `accrued_interest`; no portal config change observed yet.
 
 ---
+
+---
+
+## 3-Account Tabs + Bond Integration — 2026-05-11
+
+**Authors:** Hockney (Backend), Fenster (Frontend), McManus (Validator)
+**Date:** 2026-05-11
+**Issues Closed:** #354, #355, #356, #357
+**Commits:** d47bd6e (Hockney), 22bc12b (Fenster)
+
+---
+
+### 1. **Dual coupon_rate convention is a footgun**
+
+`bond_holdings.coupon_rate` stores PERCENTAGE units (4.25 = 4.25%). The bonds holdings page reads it raw; the ladder page normalizes via `fetchHoldingBonds` (divide by 100) to DECIMAL (0.0425) then multiplies by 100 in UI. Both correct today, but inconsistent. Future: extract `displayCouponRate()` + `toDecimalCoupon()` shared utilities to eliminate silent 100x multiplication errors.
+
+**Tracking:** Logged in McManus v5 report as Bug-2 hygiene ticket; file #358.
+
+---
+
+### 2. **Multi-source ladder data via fetchHoldingBonds + manual ladder_bonds**
+
+`getLadderOverview()` merges `bond_holdings` (IBKR flex auto-sync, 18 rows) with `ladder_bonds` (manual entries), dedup by id (holdings first). The `Bond` type is unified; sources stay separate at table level. Pattern is repeatable: future "auto + manual" aggregations use same dedup-by-id merge strategy. No schema changes needed for manual writes.
+
+**Evidence:** Commits d47bd6e §§ 4.6, 4.7; tests: 9/9 bond-holdings-ladder.test.ts pass.
+
+---
+
+### 3. **3-account tabs pattern is canonical**
+
+`TAB_LABELS = {ibkr, schwab, ira}` + `TAB_ORDER = {ibkr:0, schwab:1, ira:2}` are reusable across pages. Copied to accounts page and dividends page; any new per-account UI should mirror. Empty-state banner with `data-testid="manual-empty-banner"` (accounts) and `data-testid="div-empty-state"` (dividends) is standard for tabs without data.
+
+**Applied in:** trading/accounts/page.tsx (original), dividends/page.tsx (new). Used to filter `dividend_positions.account` and `trading_account_config.name` consistently.
+
+---
+
+### 4. **DividendDashboard prop pattern: accountNameFilter**
+
+When wrapping a flat component with per-account tabs, add optional `accountNameFilter?: string` prop. Component filters its data; parent owns tab state. Prop accepts account **name** (e.g. "InteractiveBrokers"), not tab key ("ibkr"). Keeps component reusable for both filtered and global views. Shown in dividends/page.tsx.
+
+**Signature:** `<DividendDashboard accountNameFilter={TAB_LABELS[activeTab]} />` (line 22 dividends/page.tsx).
+
+---
+
+### 5. **Bond interest realized is distinct from bond ladder scheduled**
+
+Realized = past coupon payments (from `options_cash_events.raw_payload->>'type' IN ('Bond Interest Received','Bond Interest Paid')`). Scheduled = forward projections (bond_holdings × coupon × frequency). Show as separate stacked series (violet `#a855f7` vs blue `#3b82f6`). Net realized YTD-2026: $1,203.31 (grand total all years: $4,268.34). Event category "interest" is ambiguous; always disambiguate with raw_payload type filter to exclude broker interest.
+
+**Applied in:** StackedIncomeBarChart (4 series bottom-to-top: bondInterest, bonds, dividends, options); getYearlyBondInterest() in summary/actions.ts.
+
+---
+
+### 6. **Bond interest event_category is 'interest' not 'bond_interest'**
+
+The `options_cash_events.event_category` enum bucket "interest" includes both bond AND broker interest. Always disambiguate with `raw_payload->>'type'` filter (`'Bond Interest Received'`/`'Bond Interest Paid'`). Broker interest is excluded from bond income calculations. Misuse causes silent inclusion of non-bond events.
+
+**Tests:** 8/8 bond-interest.test.ts pass; SQL spot-check validates per-year net totals.
+
+---
+
+### 7. **Fenster drop-box doc stale note — code is source of truth**
+
+Fenster's drop-box stated `getYearlyBondInterest()` reads `bond_income_history` table, but actual code (d47bd6e) reads `options_cash_events` with JS filter. The pre-existing stub reading a non-existent table was explicitly replaced. When merging drop-boxes into decisions, prefer agent **code** over agent **docs** — code is verified by tests.
+
+**Reference:** McManus v5 report §5.2 ("Fenster Drop-Box Discrepancy").
+
+---
