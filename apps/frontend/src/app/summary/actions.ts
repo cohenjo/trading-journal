@@ -113,3 +113,41 @@ export async function getMonthSummary(year: number, month: number): Promise<Dail
 
   return (data ?? []).map((row: Record<string, unknown>) => normalizeDailySummary(row));
 }
+
+const BOND_INTEREST_TYPES = new Set(['Bond Interest Received', 'Bond Interest Paid']);
+
+/**
+ * Returns yearly net realized bond interest income, aggregated from options_cash_events.
+ * Includes both 'Bond Interest Received' and 'Bond Interest Paid' rows (paid is negative).
+ * RLS-scoped to the authenticated user's household.
+ * Sorted ASC by year; years with zero net activity are excluded.
+ */
+export async function getYearlyBondInterest(): Promise<Array<{ year: number; net_amount: number }>> {
+  const householdId = await requireHouseholdId();
+  if (!householdId) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('options_cash_events')
+    .select('event_date, amount, raw_payload')
+    .eq('household_id', householdId)
+    .eq('event_category', 'interest');
+
+  if (error) {
+    console.error('[getYearlyBondInterest] query error:', error.message);
+    return [];
+  }
+
+  const byYear = new Map<number, number>();
+  for (const row of data ?? []) {
+    const txType = (row.raw_payload as Record<string, unknown>)?.type;
+    if (typeof txType !== 'string' || !BOND_INTEREST_TYPES.has(txType)) continue;
+    const year = new Date(`${row.event_date as string}T00:00:00Z`).getUTCFullYear();
+    byYear.set(year, (byYear.get(year) ?? 0) + Number(row.amount));
+  }
+
+  return [...byYear.entries()]
+    .filter(([, amount]) => amount !== 0)
+    .sort(([a], [b]) => a - b)
+    .map(([year, net_amount]) => ({ year, net_amount: Math.round(net_amount * 100) / 100 }));
+}
