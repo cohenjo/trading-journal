@@ -3,11 +3,13 @@
 import React, { useState } from "react";
 import type { TradingAccountConfig } from "@/app/trading/actions";
 import { triggerIBKRSync } from "@/app/trading/actions";
+import CSVImportButton from "@/components/trading/accounts/CSVImportButton";
 
 export interface AccountHeaderProps {
   config: TradingAccountConfig;
   onAddPosition?: () => void;
   onRefreshComplete?: () => void;
+  onImportSuccess?: (imported: number) => void;
 }
 
 const TYPE_LABELS: Record<string, { label: string; badgeClass: string }> = {
@@ -39,6 +41,7 @@ export default function AccountHeader({
   config,
   onAddPosition,
   onRefreshComplete,
+  onImportSuccess,
 }: AccountHeaderProps) {
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -114,27 +117,36 @@ export default function AccountHeader({
             {syncing ? "Syncing…" : "↻ Refresh"}
           </button>
         ) : (
-          <button
-            onClick={onAddPosition}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:border-emerald-600 hover:bg-emerald-900/20 transition-all text-sm"
-            data-testid="add-position-button"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          <>
+            <button
+              onClick={onAddPosition}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:border-emerald-600 hover:bg-emerald-900/20 transition-all text-sm"
+              data-testid="add-position-button"
             >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            + Add Position
-          </button>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              + Add Position
+            </button>
+            <CSVImportButton
+              accountId={config.id}
+              onSuccess={(imported) => {
+                onImportSuccess?.(imported);
+                onRefreshComplete?.();
+              }}
+            />
+          </>
         )}
       </div>
 

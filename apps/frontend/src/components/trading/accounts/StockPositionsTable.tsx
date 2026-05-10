@@ -1,12 +1,13 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import type { StockPosition } from "@/app/trading/actions";
 
 export interface StockPositionsTableProps {
   mode: "readonly" | "editable";
   positions: StockPosition[];
   onDelete?: (id: string) => void;
+  onEdit?: (position: StockPosition) => void;
 }
 
 /** Formats a number as currency for the given ISO currency code. */
@@ -28,6 +29,7 @@ export default function StockPositionsTable({
   mode,
   positions,
   onDelete,
+  onEdit,
 }: StockPositionsTableProps) {
   const totalMarketValue = positions.reduce((sum, p) => sum + (p.market_value ?? 0), 0);
 
@@ -63,6 +65,7 @@ export default function StockPositionsTable({
                 position={position}
                 mode={mode}
                 onDelete={onDelete}
+                onEdit={onEdit}
               />
             ))}
           </tbody>
@@ -89,15 +92,29 @@ interface PositionRowProps {
   position: StockPosition;
   mode: "readonly" | "editable";
   onDelete?: (id: string) => void;
+  onEdit?: (position: StockPosition) => void;
 }
 
-function PositionRow({ position, mode, onDelete }: PositionRowProps) {
+function PositionRow({ position, mode, onDelete, onEdit }: PositionRowProps) {
+  const [confirming, setConfirming] = useState(false);
+
   const pnlColor =
     position.unrealized_pnl == null
       ? "text-slate-400"
       : position.unrealized_pnl >= 0
         ? "text-emerald-400"
         : "text-red-400";
+
+  const handleDeleteClick = () => {
+    if (confirming) {
+      onDelete?.(position.id);
+      setConfirming(false);
+    } else {
+      setConfirming(true);
+    }
+  };
+
+  const handleCancelDelete = () => setConfirming(false);
 
   return (
     <tr
@@ -126,31 +143,74 @@ function PositionRow({ position, mode, onDelete }: PositionRowProps) {
       </td>
       {mode === "editable" && (
         <td className="px-4 py-3 text-center">
-          <button
-            onClick={() => onDelete?.(position.id)}
-            className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded"
-            title="Delete position"
-            aria-label={`Delete ${position.ticker}`}
-            data-testid="delete-position"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14H6L5 6" />
-              <path d="M10 11v6" />
-              <path d="M14 11v6" />
-              <path d="M9 6V4h6v2" />
-            </svg>
-          </button>
+          {confirming ? (
+            <span className="inline-flex items-center gap-1">
+              <button
+                onClick={handleDeleteClick}
+                className="text-xs px-2 py-0.5 rounded bg-red-800 hover:bg-red-700 text-white transition-colors"
+                data-testid="confirm-delete"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={handleCancelDelete}
+                className="text-xs px-2 py-0.5 rounded border border-slate-600 text-slate-400 hover:text-slate-200 transition-colors"
+                data-testid="cancel-delete"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-2">
+              <button
+                onClick={() => onEdit?.(position)}
+                className="text-slate-500 hover:text-blue-400 transition-colors p-1 rounded"
+                title="Edit position"
+                aria-label={`Edit ${position.ticker}`}
+                data-testid="edit-position"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+              </button>
+              <button
+                onClick={handleDeleteClick}
+                className="text-slate-500 hover:text-red-400 transition-colors p-1 rounded"
+                title="Delete position"
+                aria-label={`Delete ${position.ticker}`}
+                data-testid="delete-position"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6l-1 14H6L5 6" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                  <path d="M9 6V4h6v2" />
+                </svg>
+              </button>
+            </span>
+          )}
         </td>
       )}
     </tr>

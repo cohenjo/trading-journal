@@ -41,6 +41,24 @@ vi.mock("@/app/trading/actions", async (importOriginal) => {
         source: "manual" as const,
       },
     }),
+    updateStockPosition: vi.fn().mockResolvedValue({
+      ok: true,
+      position: {
+        id: "existing-pos",
+        account_id: 2,
+        ticker: "VYM",
+        description: null,
+        sub_category: null,
+        quantity: 75,
+        cost_basis: 110.0,
+        mark_price: null,
+        market_value: null,
+        unrealized_pnl: null,
+        currency: "USD",
+        as_of_date: "2026-05-10",
+        source: "manual" as const,
+      },
+    }),
   };
 });
 
@@ -195,5 +213,104 @@ describe("AddPositionModal", () => {
     render(<AddPositionModal account={SCHWAB_CONFIG} onClose={onClose} onSuccess={onSuccess} />);
     fireEvent.click(screen.getByTestId("cancel-button"));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+// ── Edit mode ────────────────────────────────────────────────────────────────
+
+const EXISTING_POSITION = {
+  id: "existing-pos",
+  account_id: 2,
+  ticker: "VYM",
+  description: null,
+  sub_category: null,
+  quantity: 50,
+  cost_basis: 104.2,
+  mark_price: null,
+  market_value: null,
+  unrealized_pnl: null,
+  currency: "USD",
+  as_of_date: "2026-05-09",
+  source: "manual" as const,
+};
+
+describe("AddPositionModal — edit mode", () => {
+  const onClose = vi.fn();
+  const onSuccess = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renders with Edit Position title when initialPosition provided", () => {
+    render(
+      <AddPositionModal
+        account={SCHWAB_CONFIG}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        initialPosition={EXISTING_POSITION}
+      />
+    );
+    expect(screen.getByText(/Edit Position — Schwab/)).toBeInTheDocument();
+  });
+
+  it("pre-fills form fields from initialPosition", () => {
+    render(
+      <AddPositionModal
+        account={SCHWAB_CONFIG}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        initialPosition={EXISTING_POSITION}
+      />
+    );
+    expect((screen.getByTestId("ticker-input") as HTMLInputElement).value).toBe("VYM");
+    expect((screen.getByTestId("quantity-input") as HTMLInputElement).value).toBe("50");
+    expect((screen.getByTestId("cost-basis-input") as HTMLInputElement).value).toBe("104.2");
+    expect((screen.getByTestId("date-input") as HTMLInputElement).value).toBe("2026-05-09");
+  });
+
+  it("calls updateStockPosition (not createStockPosition) on submit in edit mode", async () => {
+    const mockUpdate = vi.mocked(TradingActions.updateStockPosition);
+    const mockCreate = vi.mocked(TradingActions.createStockPosition);
+
+    render(
+      <AddPositionModal
+        account={SCHWAB_CONFIG}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        initialPosition={EXISTING_POSITION}
+      />
+    );
+
+    fireEvent.change(screen.getByTestId("quantity-input"), { target: { value: "75" } });
+    fireEvent.click(screen.getByTestId("save-button"));
+
+    await waitFor(() => {
+      expect(mockUpdate).toHaveBeenCalledWith(
+        "existing-pos",
+        expect.objectContaining({ quantity: 75 })
+      );
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  it("calls onSuccess and onClose after successful update", async () => {
+    render(
+      <AddPositionModal
+        account={SCHWAB_CONFIG}
+        onClose={onClose}
+        onSuccess={onSuccess}
+        initialPosition={EXISTING_POSITION}
+      />
+    );
+    fireEvent.click(screen.getByTestId("save-button"));
+    await waitFor(() => {
+      expect(onSuccess).toHaveBeenCalled();
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 });

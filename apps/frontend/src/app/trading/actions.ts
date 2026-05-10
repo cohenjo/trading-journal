@@ -334,12 +334,24 @@ export interface CreateStockPositionPayload {
   currency?: string;
 }
 
+export interface UpdateStockPositionPayload {
+  ticker?: string;
+  quantity?: number;
+  cost_basis?: number | null;
+  as_of_date?: string;
+  currency?: string;
+}
+
 export type StockPositionResult =
   | { ok: true; position: StockPosition }
   | { ok: false; error: string };
 
 export type DeleteStockPositionResult =
   | { ok: true }
+  | { ok: false; error: string };
+
+export type ImportStockPositionsResult =
+  | { ok: true; imported: number }
   | { ok: false; error: string };
 
 export interface DividendProjectionResult {
@@ -522,6 +534,86 @@ export async function deleteStockPosition(id: string): Promise<DeleteStockPositi
   }
 
   return { ok: true };
+}
+
+/**
+ * Updates an existing manual stock position by ID.
+ * Only fields present in the payload are modified. The row must belong to the
+ * authenticated user's household (enforced by Supabase RLS).
+ */
+export async function updateStockPosition(
+  id: string,
+  payload: UpdateStockPositionPayload,
+): Promise<StockPositionResult> {
+  if (!id) return { ok: false, error: 'Position ID is required' };
+
+  const updates: Record<string, unknown> = {};
+  if (payload.ticker !== undefined) {
+    const t = payload.ticker.trim().toUpperCase();
+    if (!t) return { ok: false, error: 'Ticker must not be empty' };
+    updates.ticker = t;
+  }
+  if (payload.quantity !== undefined) {
+    if (!Number.isFinite(payload.quantity) || payload.quantity <= 0) {
+      return { ok: false, error: 'Quantity must be greater than 0' };
+    }
+    updates.quantity = payload.quantity;
+  }
+  if ('cost_basis' in payload) updates.cost_basis = payload.cost_basis ?? null;
+  if (payload.as_of_date !== undefined) updates.as_of_date = payload.as_of_date;
+  if (payload.currency !== undefined) updates.currency = payload.currency;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return { ok: false, error: 'Not authenticated' };
+
+  const { data, error } = await supabase
+    .from('stock_positions')
+    .update(updates)
+    .eq('id', id)
+    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, unrealized_pnl, currency, as_of_date, source')
+    .single();
+
+  if (error) {
+    console.error('[updateStockPosition] update error:', error.message);
+    return { ok: false, error: 'Failed to update position' };
+  }
+
+  return { ok: true, position: coerceStockPosition(data as Record<string, unknown>) };
+}
+
+/**
+ * Imports manual stock positions from a CSV file via the FastAPI backend.
+ * Forwards the multipart upload to POST /api/accounts/{accountId}/positions/import.
+ * Degrades gracefully when the backend is unreachable.
+ */
+export async function importManualPositionsCsv(
+  accountId: number,
+  formData: FormData,
+): Promise<ImportStockPositionsResult> {
+  try {
+    const res = await fetch(`/api/accounts/${accountId}/positions/import`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => `HTTP ${res.status}`);
+      return { ok: false, error: msg || `Import failed (${res.status})` };
+    }
+    const json = await res.json() as unknown;
+    const imported =
+      typeof json === 'object' && json !== null && 'imported' in json
+        ? Number((json as Record<string, unknown>).imported)
+        : 0;
+    return { ok: true, imported };
+  } catch (err) {
+    console.error('[importManualPositionsCsv] fetch error:', err);
+    return { ok: false, error: 'Unable to reach import endpoint' };
+  }
 }
 
 /**

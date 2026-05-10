@@ -46,6 +46,7 @@ export default function TradingAccountsPage() {
   const [positionsByAccount, setPositionsByAccount] = useState<Map<number, StockPosition[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingPosition, setEditingPosition] = useState<StockPosition | null>(null);
 
   const loadConfigs = useCallback(async () => {
     const data = await getTradingConfigs();
@@ -78,6 +79,15 @@ export default function TradingAccountsPage() {
   const handleDeletePosition = async (id: string) => {
     await deleteStockPosition(id);
     // Reload just positions
+    await loadPositions(configs);
+  };
+
+  const handleEditPosition = (position: StockPosition) => {
+    setEditingPosition(position);
+  };
+
+  const handleEditSuccess = async () => {
+    setEditingPosition(null);
     await loadPositions(configs);
   };
 
@@ -157,11 +167,13 @@ export default function TradingAccountsPage() {
             config={activeConfig}
             onAddPosition={() => setShowAddModal(true)}
             onRefreshComplete={() => loadPositions(configs)}
+            onImportSuccess={() => loadPositions(configs)}
           />
           <StockPositionsTable
             mode={isManualAccount ? "editable" : "readonly"}
             positions={positionsByAccount.get(activeConfig.id) ?? []}
             onDelete={handleDeletePosition}
+            onEdit={handleEditPosition}
           />
         </div>
       ) : (
@@ -182,6 +194,16 @@ export default function TradingAccountsPage() {
           account={activeConfig}
           onClose={() => setShowAddModal(false)}
           onSuccess={handleAddSuccess}
+        />
+      )}
+
+      {/* Edit Position Modal */}
+      {editingPosition && activeConfig && (
+        <AddPositionModal
+          account={activeConfig}
+          onClose={() => setEditingPosition(null)}
+          onSuccess={handleEditSuccess}
+          initialPosition={editingPosition}
         />
       )}
     </div>

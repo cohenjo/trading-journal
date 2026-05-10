@@ -1,22 +1,30 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import type { TradingAccountConfig } from "@/app/trading/actions";
-import { createStockPosition, getTickerSymbols } from "@/app/trading/actions";
+import type { TradingAccountConfig, StockPosition } from "@/app/trading/actions";
+import { createStockPosition, updateStockPosition, getTickerSymbols } from "@/app/trading/actions";
 
 export interface AddPositionModalProps {
   account: TradingAccountConfig;
   onClose: () => void;
   onSuccess: () => void;
+  /** When provided, modal opens in edit mode pre-filled with the position data. */
+  initialPosition?: StockPosition;
 }
 
 const today = (): string => new Date().toISOString().split("T")[0];
 
-export default function AddPositionModal({ account, onClose, onSuccess }: AddPositionModalProps) {
-  const [ticker, setTicker] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [costBasis, setCostBasis] = useState("");
-  const [asOfDate, setAsOfDate] = useState(today());
+export default function AddPositionModal({ account, onClose, onSuccess, initialPosition }: AddPositionModalProps) {
+  const isEditMode = Boolean(initialPosition);
+
+  const [ticker, setTicker] = useState(initialPosition?.ticker ?? "");
+  const [quantity, setQuantity] = useState(
+    initialPosition?.quantity != null ? String(initialPosition.quantity) : ""
+  );
+  const [costBasis, setCostBasis] = useState(
+    initialPosition?.cost_basis != null ? String(initialPosition.cost_basis) : ""
+  );
+  const [asOfDate, setAsOfDate] = useState(initialPosition?.as_of_date ?? today());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,13 +79,23 @@ export default function AddPositionModal({ account, onClose, onSuccess }: AddPos
     setError(null);
     setSubmitting(true);
 
-    const result = await createStockPosition({
-      account_id: account.id,
-      ticker: ticker.trim().toUpperCase(),
-      quantity: parseFloat(quantity),
-      cost_basis: costBasis !== "" ? parseFloat(costBasis) : null,
-      as_of_date: asOfDate,
-    });
+    let result;
+    if (isEditMode && initialPosition) {
+      result = await updateStockPosition(initialPosition.id, {
+        ticker: ticker.trim().toUpperCase(),
+        quantity: parseFloat(quantity),
+        cost_basis: costBasis !== "" ? parseFloat(costBasis) : null,
+        as_of_date: asOfDate,
+      });
+    } else {
+      result = await createStockPosition({
+        account_id: account.id,
+        ticker: ticker.trim().toUpperCase(),
+        quantity: parseFloat(quantity),
+        cost_basis: costBasis !== "" ? parseFloat(costBasis) : null,
+        as_of_date: asOfDate,
+      });
+    }
 
     setSubmitting(false);
 
@@ -105,7 +123,7 @@ export default function AddPositionModal({ account, onClose, onSuccess }: AddPos
     >
       <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-md mx-4 p-6 shadow-2xl">
         <h2 id="add-position-title" className="text-lg font-semibold text-slate-100 mb-5">
-          Add Position — {accountName}
+          {isEditMode ? "Edit Position" : "Add Position"} — {accountName}
         </h2>
 
         <form data-testid="position-form" onSubmit={handleSubmit} className="space-y-4">
@@ -223,7 +241,7 @@ export default function AddPositionModal({ account, onClose, onSuccess }: AddPos
               className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-medium transition-colors text-sm disabled:opacity-50"
               data-testid="save-button"
             >
-              {submitting ? "Saving…" : "Save"}
+              {submitting ? "Saving…" : isEditMode ? "Update" : "Save"}
             </button>
           </div>
         </form>

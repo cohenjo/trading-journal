@@ -68,11 +68,16 @@ describe("StockPositionsTable", () => {
     expect(screen.getAllByTestId("delete-position")).toHaveLength(2);
   });
 
-  it("calls onDelete with correct id when delete button is clicked", () => {
+  it("calls onDelete with correct id after two-step confirmation", async () => {
     const onDelete = vi.fn();
     render(<StockPositionsTable mode="editable" positions={USD_POSITIONS} onDelete={onDelete} />);
     const deleteButtons = screen.getAllByTestId("delete-position");
+    // First click shows confirmation buttons
     fireEvent.click(deleteButtons[0]);
+    expect(onDelete).not.toHaveBeenCalled();
+    // Second click on confirm actually fires the callback
+    const confirmBtn = screen.getByTestId("confirm-delete");
+    fireEvent.click(confirmBtn);
     expect(onDelete).toHaveBeenCalledWith("pos-1");
   });
 
