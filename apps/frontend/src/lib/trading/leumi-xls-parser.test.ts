@@ -524,6 +524,53 @@ describe('parseLeumiIraXmlText — enriched fields', () => {
     expect(barc!.market_value_local).toBeCloseTo(37150.55, 1);
   });
 
+  // -------------------------------------------------------------------
+  // market_value normalisation (agorot → ILS) — regression for #407
+  // -------------------------------------------------------------------
+
+  it('computes market_value = quantity × mark_price / 100 for TASE holding לאומי', () => {
+    // לאומי: quantity=1010, mark_price=7616 agorot → market_value = 1010×7616/100 = 76921.60 ILS
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const leumi = holdings.find(h => h.tase_id === '604611');
+    expect(leumi!.market_value).toBeCloseTo(76921.60, 1);
+  });
+
+  it('market_value equals market_value_local for TASE holding לאומי (consistent snapshot)', () => {
+    // Both should represent the ILS value from the broker snapshot column.
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const leumi = holdings.find(h => h.tase_id === '604611');
+    expect(leumi!.market_value).toBeCloseTo(leumi!.market_value_local!, 0);
+  });
+
+  it('does NOT set market_value for US holding QQQI (non-TASE, stays null)', () => {
+    // Non-TASE positions have market_value=null until Yahoo worker refreshes.
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const qqqi = holdings.find(h => h.symbol === 'QQQI');
+    expect(qqqi!.market_value).toBeNull();
+  });
+
+  it('does NOT set market_value for LSE holding BARC (non-TASE, stays null)', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const barc = holdings.find(h => h.symbol === 'BARC');
+    expect(barc!.market_value).toBeNull();
+  });
+
+  it('market_value in CSV row for TASE holding is the ILS value (not agorot)', () => {
+    // Regression: the CSV that the import endpoint receives must carry the ILS value,
+    // not the raw agorot value (which would be 100× too large).
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const { csv } = holdingsToCsv(holdings);
+    const lines = csv.split('\n');
+    const leumiLine = lines.find(l => l.startsWith('604611,'));
+    expect(leumiLine).toBeDefined();
+    // header: ticker(0),quantity(1),average_cost(2),currency(3),as_of_date(4),description(5),mark_price(6),market_value(7),...
+    const fields = leumiLine!.split(',');
+    const mvField = parseFloat(fields[7]);
+    expect(mvField).toBeCloseTo(76921.60, 0);
+    // Confirm it is NOT in agorot (would be ~7,692,160)
+    expect(mvField).toBeLessThan(1_000_000);
+  });
+
   it('sets dividend_yield to null for all Leumi holdings (not in XLS)', () => {
     const holdings = parseLeumiIraXmlText(fixtureXml);
     holdings.forEach(h => expect(h.dividend_yield).toBeNull());

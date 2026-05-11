@@ -288,6 +288,16 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
     const { symbol, exchange, currency } = deriveExchange(raw_description, tase_id);
     const description = extractDescription(raw_description, tase_id);
 
+    // For TASE positions: mark_price is in ILA (agorot). Compute the canonical
+    // ILS market_value (quantity × agorot / 100) so the import endpoint stores a
+    // correct initial value before the Yahoo worker first runs.
+    // Non-TASE positions (US/LSE) report prices in their native currency; no
+    // division needed — market_value remains null until the worker refreshes.
+    const market_value: number | null =
+      exchange === 'TASE' && mark_price !== null
+        ? parseFloat(((quantity * mark_price) / 100).toFixed(2))
+        : null;
+
     holdings.push({
       symbol,
       exchange,
@@ -301,7 +311,7 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
       mark_price,
       market_value_local,
       dividend_yield: null,
-      market_value: null,
+      market_value,
       cost_basis_total: null,
       unrealized_pnl,
     });
