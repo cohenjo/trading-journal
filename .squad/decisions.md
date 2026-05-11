@@ -4,6 +4,14 @@
 
 ## Active Architectural Directives
 
+### Insurance/household scoping: `is_household_member()` (read) + `is_household_writer()` (write) — `user_id` columns removed (2026-05-12)
+
+Canonical write-scoping pattern for household-scoped tables. The `insurance_policies` table removed the `user_id` column entirely after wave2 cleanup (PR #379), enforcing `household_id NOT NULL` with RLS policies using the shared `is_household_member()`/`is_household_writer()` functions. This pattern is now the standard for all household-scoped data access control — both frontend (PostgREST + cookie-based RLS) and backend (service-role direct DB). All SELECT policies use `is_household_member(household_id)` within a `SECURITY DEFINER` context; write operations (INSERT/UPDATE/DELETE) use `is_household_writer(household_id)` to enforce role-based authorization (owner/member).
+
+**References:** PR [#379](https://github.com/cohenjo/trading-journal/pull/379), migration `20260501120000_align_insurance_policies_household_id`, issue [#335](https://github.com/cohenjo/trading-journal/issues/335) Step 5
+
+---
+
 ### RLS policies via `is_household_member(household_id)` SECURITY DEFINER function (2026-05-11)
 
 All household-scoped tables use a common RLS pattern: SELECT policies that JOIN through a bridging table (e.g., `trading_account_config`) with a `WHERE is_household_member(household_id)` predicate. The `is_household_member()` function is a SECURITY DEFINER stored procedure that evaluates the authenticated session's household membership. Examples: `stock_positions`, `dividend_payments`, `dividend_accruals` all follow this pattern. Global reference tables (e.g., `security_reference`) disable RLS entirely. No INSERT/UPDATE/DELETE policies are needed for tables updated exclusively by backend workers using service-role direct DB connections. This pattern ensures frontend (PostgREST + cookie-based auth) and backend (service role) have aligned security boundaries.
@@ -19,6 +27,76 @@ The accounts page mirrors the user's broker positions (synced via Flex Query, CS
 ---
 
 ## Decision Log
+
+### 2026-05-12: A11y & Test Alignment — htmlFor + LadderPage coupon test (#372, #376)
+
+**By:** Fenster (Frontend Dev)
+**PR:** [#378](https://github.com/cohenjo/trading-journal/pull/378) — `fix(a11y, tests): label htmlFor + LadderPage coupon test alignment (#372, #376)`
+**Issues closed:** [#372](https://github.com/cohenjo/trading-journal/issues/372), [#376](https://github.com/cohenjo/trading-journal/issues/376)
+
+**What:** Batched two small frontend fixes: (1) Added `htmlFor`/`id` attributes to TradingAccountSettings form labels (9 pairs) to resolve test accessibility issues and improve semantic HTML. (2) Updated LadderPage coupon test expectation to match new `displayCouponRate` utility default. Combined both into a single commit per best practice for logical, focused batching.
+
+**Why:** #372 (htmlFor) was flagged by Redfoot during PR #371 LURVG validation — the `getByLabel()` test utility timed out due to missing `htmlFor` attributes on label elements. #376 was the pre-existing LadderPage test failure (518/519 baseline). Batching both fixes reduces git history fragmentation while maintaining clarity of purpose.
+
+**Test results:** 519/519 passing post-merge ✅. No regressions in other routes. No backend or shared interface changes — isolated frontend-only fix.
+
+---
+
+### 2026-05-12: Insurance Wave2 Cleanup — `user_id` Dropped, `household_id` NOT NULL (#335 Step 5)
+
+**By:** Hockney (Backend Dev)
+**PR:** [#379](https://github.com/cohenjo/trading-journal/pull/379) — `chore(insurance): drop user_id, require household_id (#335 Step 5)`
+**Issue:** [#335](https://github.com/cohenjo/trading-journal/issues/335) Step 5
+**Migration:** `20260501120000_align_insurance_policies_household_id` (applied to prod 2026-05-12)
+
+**What:** Applied deferred `insurance_policies` cleanup migration that removes the legacy `user_id` column entirely, enforces `household_id NOT NULL`, and replaces all 8 pre-wave2 RLS policies with 4 canonical household-scoped policies using `is_household_member()`/`is_household_writer()` SECURITY DEFINER pattern. Pre-flight backfill included a **Step 2b fallback** that looks up `household_members` for users with null `user_profile.default_household_id`, preserving 2 test rows that would have been deleted as orphans.
+
+**Why:** Wave2 cleanup is the final step to retire the legacy `user_id` scoping pattern from the `insurance_policies` table. The canonical household-scoped pattern (read via `is_household_member()`, write via `is_household_writer()`) is now the standard across all household-scoped tables. No frontend or backend code changes required — all queries already use `household_id` exclusively (verified in `apps/frontend/src/app/insurance/actions.ts` and `insurance_models.py`).
+
+**Tests & validation:** 519/519 unit tests passing. Playwright smoke (3/3): `/insurance` route renders without error, no `user_id` column references in server response, Add Policy flow functional. Redfoot LURVG approved 🟢 (see separate decision below).
+
+**Key learning:** When backfilling `household_id` from `user_id`, include a `household_members` fallback for users with null `user_profile.default_household_id`. Standard backfill patterns (using only `user_profile.default_household_id`) silently drop orphan rows.
+
+---
+
+### 2026-05-12: Insurance Wave2 Cleanup LURVG Approved — Redfoot Validation (#379)
+
+**By:** Redfoot (Tester)
+**PR:** [#379](https://github.com/cohenjo/trading-journal/pull/379) — `chore(insurance): drop user_id, require household_id (#335 Step 5)`
+**Validation date:** 2026-05-11
+**Verdict:** 🟢 APPROVED — ready to squash-merge
+
+**What:** Comprehensive LURVG validation of PR #379 migration. Schema verified via Supabase MCP: `user_id` column absent, `household_id` NOT NULL (uuid type), 2 test rows preserved with correct backfill, 4 canonical RLS policies present (`insurance_policies_select/insert/update/delete` using `is_household_member()`/`is_household_writer()`), all 8 pre-wave2 `_own` policies removed. Unit tests 519/519 passing. UI smoke tests 3/3: `/insurance` renders clean, no `user_id` errors, Add Policy CTA visible, household-scoped RLS functional.
+
+**Why:** LURVG protocol requires comprehensive schema, unit test, and UI validation before code merge. The migration was already applied to prod; this validation confirms the migration is correct and safe as the source-of-truth commit.
+
+**Key learning:** When a user has `household_members` rows but no `user_profile.default_household_id`, standard backfill patterns fail silently. The enhanced migration in PR #379 includes a `household_members` fallback that preserves these rows. Additionally, `trg_households_add_creator` auto-inserts creator as owner in `household_members` — never insert manually or duplicate key violation occurs. The `is_household_writer` function maps to role IN ('owner', 'member') — both satisfy write RLS.
+
+---
+
+### 2026-05-12: Migration Drift Repair — Track 6 Ad-Hoc Migrations (#335 Steps 1–2)
+
+**By:** Kujan (DevOps/Platform)
+**PR:** [#377](https://github.com/cohenjo/trading-journal/pull/377) — `chore(migrations): track ad-hoc applied migrations (#335 Steps 1-2)`
+**Issue:** [#335](https://github.com/cohenjo/trading-journal/issues/335) Steps 1–2
+**Migrations tracked (tracking-only — no DDL re-run):**
+
+| Version | Name |
+|---------|------|
+| 20260510000100 | extend_stock_positions_flex_fields |
+| 20260510000200 | flex_bond_holdings_snapshot |
+| 20260510000300 | dividend_payments |
+| 20260510000400 | dividend_accruals |
+| 20260510000500 | security_reference |
+| 20260511052500 | backfill_placeholder_account_households |
+
+**What:** Executed the drift audit's Steps 1–2: inserted 6 tracking rows into `supabase_migrations.schema_migrations` for migrations that were applied ad-hoc to prod on 2026-05-10/11 (during Flex pipeline Phase 1) but had no corresponding tracking table entries. All DDL was verified present in prod before inserting rows; no DDL was re-executed. Used `ON CONFLICT (version) DO NOTHING` to make the script idempotent. Saved runbook to `supabase/scripts/track-adhoc-migrations.sql`.
+
+**Why:** Flex pipeline Phase 1 DDL was applied directly to prod outside the Supabase CLI migration flow. The tracking table had no rows for these versions, causing `supabase db push` to attempt re-runs, which would fail on the non-idempotent `ADD CONSTRAINT` in migration 000200. Tracking these versions prevents re-execution attempts and unblocks subsequent audit steps.
+
+**Handoff:** Kujan's work unblocks Hockney to proceed with Steps 3–4 (RLS policies, see PR #375) and Step 5 (insurance_policies cleanup, see PR #379). Hockney can now safely run `supabase db push` without triggering re-runs of these 6 ad-hoc migrations.
+
+---
 
 ### 2026-05-12: RLS Fix — Dividend Tables + security_reference (#375, #374)
 
