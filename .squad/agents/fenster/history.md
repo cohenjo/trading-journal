@@ -1,3 +1,32 @@
+## 2026-05-11 — #408 & #409 Summary + Estimations Source Fix
+
+**Issues:** #408 (/summary shows ~$80k instead of ~$9,200) and #409 (estimations disconnected from live holdings)
+
+### Diagnosis
+
+**#408:** `/summary/page.tsx` called `getDividendProjection()` (legacy FastAPI `/api/dividends/projection`)
+after `getDividendDashboard()`. If the legacy endpoint returned `total_annual > 0`, it overrode the
+correct ~$9,200 from `getDividendSummary()` with a stale ~$80k figure.
+
+**#409:** `/dividends/estimations/page.tsx` projected forward from `lastHistorical.amount`
+(user's last manually-entered year). No connection to live holdings — 2026 projected from old
+baseline rather than current ~$9,200.
+
+### Fix (PR #412, SHA 4250f88)
+
+- `/summary/page.tsx`: Removed `getDividendDashboard()` + `getDividendProjection()`. Replaced with
+  direct `getDividendSummary()` call. Removed `settings.mainCurrency` dep (unused after refactor).
+- `/dividends/estimations/page.tsx`: Fetch `getDividendSummary()` alongside estimations on mount.
+  Store `liveAnnualTotal`. In projection loop, anchor current year to live total unless user has
+  manually entered it. Added info banner: "Current year anchor (from /dividends): $X,XXX · based on
+  current holdings." Historical user-backfilled years preserved untouched.
+- 627/627 tests pass. No new lint errors.
+
+**Before:** /summary 2026 dividends ~$80,000; estimations 2026 grew from old baseline.
+**After:** /summary 2026 dividends ~$9,200 (matches /dividends); estimations 2026 anchored to live total.
+
+---
+
 ## 2026-05-11 — #406 Dividends Accuracy Fix
 
 **Issue:** #406 — /dividends shows only ~3 Schwab positions (~$430/yr) instead of ~21 (~$9,200/yr)
