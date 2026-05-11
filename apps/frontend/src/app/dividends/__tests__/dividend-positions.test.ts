@@ -516,6 +516,8 @@ describe('getDividendPositions', () => {
     // Simulates Schwab Joint Tenant account: CSV-imported positions have
     // dividend_yield in stock_positions but NO entries in dividend_payments.
     // Previously these were silently filtered out; now they surface with source='csv'.
+    // After the normalise_dividend_yield_to_decimal migration all values are stored
+    // as decimal fractions (0.1043 = 10.43%), not percentages.
     mockAuth();
 
     const schwabPos = {
@@ -537,10 +539,10 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ id: 71, account_id: null }], error: null }),
         dividend_payments: () => Promise.resolve({ data: [], error: null }),
         dividend_accruals: () => Promise.resolve({ data: [], error: null }),
-        // dividend_yield stored as a percentage (10.43 = 10.43%) — Yahoo Finance format
+        // dividend_yield stored as decimal fraction (0.1043 = 10.43%) — canonical format
         stock_positions: () =>
           Promise.resolve({
-            data: [{ ticker: 'JEPQ', dividend_yield: '10.43' }],
+            data: [{ ticker: 'JEPQ', dividend_yield: '0.1043' }],
             error: null,
           }),
       },
@@ -557,7 +559,7 @@ describe('getDividendPositions', () => {
     // TTM metrics are null (no payment history)
     expect(row.ttm_dividend_total).toBeNull();
     expect(row.ttm_div_per_share).toBeNull();
-    // Forward estimate: 59.705 × (10.43/100) = 6.227... → rounded = 6.23 per share
+    // Forward estimate: 59.705 × 0.1043 = 6.227... → rounded = 6.23 per share
     // forward_dividend_annual = 6.23 × 155 = 965.65
     expect(row.forward_div_per_share).toBe(6.23);
     expect(row.forward_dividend_annual).toBe(965.65);

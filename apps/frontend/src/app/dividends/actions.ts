@@ -1077,13 +1077,13 @@ export async function getDividendPositions(
   }
 
   // Yield fallback from stock_positions (Yahoo-enriched / Schwab CSV-imported).
-  // Values > 1 are stored as a percentage (e.g. 10.43 → 10.43%); values ≤ 1 are
-  // already a decimal fraction (e.g. 0.0520 → 5.20%).  Normalise to [0,1].
+  // All values are stored as decimal fractions in [0, 1] (e.g. 0.1043 for 10.43%)
+  // after the normalise_dividend_yield_to_decimal migration.
   const yieldByTicker = new Map<string, number>();
   for (const row of ((yieldDataResult.data ?? []) as YieldRow[])) {
     const raw = Number(row.dividend_yield ?? 0);
     if (raw > 0) {
-      yieldByTicker.set(row.ticker as string, raw > 1 ? raw / 100 : raw);
+      yieldByTicker.set(row.ticker as string, raw);
     }
   }
 
