@@ -164,7 +164,11 @@ jobs:
       #       "${{ steps.meta.outputs.filename }}" \
       #       "backups/${{ steps.meta.outputs.filename }}"
 
-  # ── Failure alert: open a GH issue ────────────────────────────────────────
+  # ── Failure alert: open a GH issue (deduped) ──────────────────────────────
+  # Only ONE open backup-failure issue at a time.  If prior open issues with
+  # the same title prefix exist, they are closed as "superseded" before a new
+  # one is created.  This prevents issue-spam when operators manually re-run
+  # a failing workflow multiple times while investigating.
   alert-on-failure:
     name: Open failure issue
     needs: backup
@@ -173,20 +177,59 @@ jobs:
     permissions:
       issues: write
     steps:
-      - name: Create critical failure issue
+      - name: Deduplicate and create critical failure issue
         uses: actions/github-script@v9
         with:
           script: |
+            const TITLE_PREFIX = '🚨 Nightly backup FAILED';
+
+            // ── 1. Find any existing open backup-failure issues ──────────────
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'squad:kujan',
+              per_page: 50,
+            });
+
+            const priorIssues = existing.data.filter(i =>
+              i.title.startsWith(TITLE_PREFIX)
+            );
+
+            // ── 2. Close each prior issue as "superseded" ────────────────────
+            const supersededRefs = [];
+            for (const issue of priorIssues) {
+              await github.rest.issues.createComment({
+                owner:    context.repo.owner,
+                repo:     context.repo.repo,
+                issue_number: issue.number,
+                body: `⛔ Superseded by a newer failure alert from run [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}). Closing to keep exactly one open backup-failure issue.`,
+              });
+              await github.rest.issues.update({
+                owner:    context.repo.owner,
+                repo:     context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed',
+                state_reason: 'not_planned',
+              });
+              supersededRefs.push(`#${issue.number}`);
+            }
+
+            // ── 3. Open a single fresh issue ─────────────────────────────────
+            const supersededNote = supersededRefs.length > 0
+              ? `\n> 🔁 Superseded and closed prior open issue(s): ${supersededRefs.join(', ')}\n`
+              : '';
+
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo:  context.repo.repo,
-              title: `🚨 Nightly backup FAILED — ${new Date().toISOString().split('T')[0]}`,
+              title: `${TITLE_PREFIX} — ${new Date().toISOString().split('T')[0]}`,
               body: [
                 '## Backup failure alert',
                 '',
                 `**Run:** [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
                 `**Triggered at:** ${new Date().toUTCString()}`,
-                '',
+                supersededNote,
                 '### Action required',
                 '1. Review the failed workflow run linked above.',
                 '2. Verify `SUPABASE_PROD_DB_URL` and `AGE_PUBLIC_KEY` secrets are still valid.',
