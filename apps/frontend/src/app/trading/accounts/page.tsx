@@ -29,6 +29,11 @@ const TAB_LABELS: Record<string, string> = {
 
 const TAB_ORDER: Record<string, number> = { ibkr: 0, schwab: 1, ira: 2 };
 
+/** 3 tabs, always rendered unconditionally — mirrors dividends/page.tsx pattern. */
+const ACCOUNT_TABS = (Object.keys(TAB_ORDER) as Array<keyof typeof TAB_ORDER>).sort(
+  (a, b) => TAB_ORDER[a] - TAB_ORDER[b],
+);
+
 function sortConfigs(configs: TradingAccountConfig[]): TradingAccountConfig[] {
   return [...configs].sort((a, b) => {
     const aKey = normalizeType(a.account_type);
@@ -104,14 +109,7 @@ export default function TradingAccountsPage() {
     positions: positionsByAccount.get(cfg.id) ?? [],
   }));
 
-  const phase2Configs = configs.filter((c) =>
-    ["ibkr", "schwab", "ira"].includes(normalizeType(c.account_type))
-  );
 
-  const tabs = [
-    ...phase2Configs.map((c) => normalizeType(c.account_type)),
-    "settings",
-  ];
 
   const isManualAccount = activeConfig
     ? ["schwab", "ira"].includes(normalizeType(activeConfig.account_type))
@@ -123,24 +121,20 @@ export default function TradingAccountsPage() {
 
       {/* Tab Bar */}
       <div className="flex flex-wrap p-1 bg-slate-900 rounded-lg border border-slate-800 gap-1 mb-6 w-fit">
-        {phase2Configs.map((cfg) => {
-          const typeKey = normalizeType(cfg.account_type);
-          const isActive = activeTab === typeKey;
-          return (
-            <button
-              key={cfg.id}
-              onClick={() => setActiveTab(typeKey)}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
-                isActive
-                  ? "bg-slate-800 text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-              data-testid={`tab-${typeKey}`}
-            >
-              {TAB_LABELS[typeKey] ?? typeKey.toUpperCase()}
-            </button>
-          );
-        })}
+        {ACCOUNT_TABS.map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
+              activeTab === tab
+                ? "bg-slate-800 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+            data-testid={`tab-${tab}`}
+          >
+            {TAB_LABELS[tab] ?? tab.toUpperCase()}
+          </button>
+        ))}
         <button
           onClick={() => setActiveTab("settings")}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
@@ -189,14 +183,25 @@ export default function TradingAccountsPage() {
           />
         </div>
       ) : (
-        <div className="text-center py-20 bg-slate-900/50 rounded-2xl border border-dashed border-slate-800">
-          <p className="text-slate-400 mb-2">No accounts configured for this tab.</p>
-          <p className="text-sm text-slate-500">Go to Settings to configure your accounts.</p>
+        <div
+          className="text-center py-20 bg-slate-900/50 rounded-2xl border border-dashed border-slate-800"
+          data-testid="account-not-configured"
+        >
+          <p className="text-slate-300 mb-3 text-base font-medium">
+            Account not configured — visit Settings to set up your{" "}
+            {TAB_LABELS[activeTab] ?? activeTab.toUpperCase()} broker.
+          </p>
+          <button
+            onClick={() => setActiveTab("settings")}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Go to Settings
+          </button>
         </div>
       )}
 
-      {/* Aggregate Footer — always visible */}
-      {!loading && tabs.length > 1 && (
+      {/* Aggregate Footer — visible when at least one account is configured */}
+      {!loading && configs.length > 0 && (
         <AggregatePortfolioFooter accounts={accountBalances} />
       )}
 

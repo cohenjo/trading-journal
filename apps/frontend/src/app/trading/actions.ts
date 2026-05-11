@@ -97,10 +97,6 @@ async function resolveHouseholdId(userId: string): Promise<string | null> {
   return data.household_id as string;
 }
 
-function normalizeAccountType(value: string): TradingAccountType {
-  return value === 'SCHWAB' ? 'SCHWAB' : 'IBKR';
-}
-
 function normalizeText(value: string | null | undefined, fallback: string): string {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || fallback;
@@ -119,7 +115,8 @@ function normalizeNumber(value: number | string | null | undefined, fallback: nu
 function normalizeConfigInput(input: TradingAccountConfigInput, householdId: string) {
   return {
     name: normalizeText(input.name, 'My Trading Account'),
-    account_type: normalizeAccountType(input.account_type),
+    // Lowercase enforced — chk_account_type allows only 'ibkr'|'schwab'|'ira'
+    account_type: (input.account_type ?? '').toLowerCase(),
     host: normalizeText(input.host, '127.0.0.1'),
     port: normalizeNumber(input.port, 4001),
     client_id: normalizeNumber(input.client_id, 1),

@@ -21,11 +21,17 @@ type FinanceAccountOption = {
     category?: string;
 };
 
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  ibkr: "InteractiveBrokers",
+  schwab: "Schwab",
+  ira: "LeumiIRA",
+};
+
 export default function TradingAccountSettings() {
     const [configs, setConfigs] = useState<TradingAccountConfig[]>([]);
     const [editingConfig, setEditingConfig] = useState<TradingAccountFormState>({
         name: "My Broker",
-        account_type: "IBKR",
+        account_type: "ibkr",
         host: "127.0.0.1",
         port: 4001,
         client_id: 1,
@@ -35,7 +41,8 @@ export default function TradingAccountSettings() {
     const [financeAccounts, setFinanceAccounts] = useState<FinanceAccountOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [message, setMessage] = useState("");
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [saveSuccess, setSaveSuccess] = useState(false);
 
     useEffect(() => {
         fetchConfigs();
@@ -73,11 +80,12 @@ export default function TradingAccountSettings() {
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         setSaving(true);
-        setMessage("");
+        setSaveError(null);
+        setSaveSuccess(false);
         try {
             const result = await saveTradingConfig({
                 name: editingConfig.name ?? "My Broker",
-                account_type: editingConfig.account_type ?? "IBKR",
+                account_type: editingConfig.account_type ?? "ibkr",
                 id: editingConfig.id,
                 host: editingConfig.host,
                 port: editingConfig.port,
@@ -86,14 +94,14 @@ export default function TradingAccountSettings() {
                 compute_options_income: editingConfig.compute_options_income ?? true,
             });
             if (result.ok) {
-                setMessage("Settings saved successfully!");
+                setSaveSuccess(true);
                 setEditingConfig(result.config);
                 fetchConfigs();
             } else {
-                setMessage(result.error || "Error saving settings.");
+                setSaveError(result.error || "Error saving settings.");
             }
         } catch {
-            setMessage("Error saving settings.");
+            setSaveError("Error saving settings.");
         } finally {
             setSaving(false);
         }
@@ -102,7 +110,7 @@ export default function TradingAccountSettings() {
     const handleAddNew = () => {
         setEditingConfig({
             name: "New Account",
-            account_type: "IBKR",
+            account_type: "ibkr",
             host: "127.0.0.1",
             port: 4001,
             client_id: 1,
@@ -113,7 +121,9 @@ export default function TradingAccountSettings() {
 
     if (loading) return <div className="text-slate-500">Loading settings...</div>;
 
-    const isIBKR = editingConfig.account_type === "IBKR";
+    const normalizedType = (editingConfig.account_type ?? "ibkr").toLowerCase();
+    const isIBKR = normalizedType === "ibkr";
+    const accountTypeLabel = ACCOUNT_TYPE_LABELS[normalizedType] ?? normalizedType.toUpperCase();
 
     return (
         <div className="space-y-6">
@@ -144,8 +154,28 @@ export default function TradingAccountSettings() {
             <div className="max-w-2xl bg-slate-900 p-6 rounded-xl border border-slate-800 shadow-xl">
                 <h2 className="text-xl font-bold mb-6 text-slate-100 flex items-center gap-2">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1-2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-                    {isIBKR ? "IBKR" : "Schwab"} Connection Settings
+                    {accountTypeLabel} Connection Settings
                 </h2>
+
+                {/* Save error banner */}
+                {saveError && (
+                    <div
+                        className="mb-4 p-3 bg-red-950/60 border border-red-700 rounded-lg text-red-300 text-sm font-medium"
+                        data-testid="settings-save-error"
+                    >
+                        {saveError}
+                    </div>
+                )}
+
+                {/* Save success banner */}
+                {saveSuccess && (
+                    <div
+                        className="mb-4 p-3 bg-green-950/60 border border-green-700 rounded-lg text-green-300 text-sm font-medium"
+                        data-testid="settings-save-success"
+                    >
+                        Settings saved successfully!
+                    </div>
+                )}
 
                 <form onSubmit={handleSave} className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -165,12 +195,13 @@ export default function TradingAccountSettings() {
                             <label className="block text-sm font-medium text-slate-400 mb-2">Account Type</label>
                             <select
                                 title="Account Type"
-                                value={editingConfig.account_type ?? "IBKR"}
+                                value={editingConfig.account_type ?? "ibkr"}
                                 onChange={(e) => setEditingConfig({ ...editingConfig, account_type: e.target.value as TradingAccountConfig['account_type'] })}
                                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-slate-100 focus:outline-none focus:border-blue-500 transition-colors"
                             >
-                                <option value="IBKR">Interactive Brokers</option>
-                                <option value="SCHWAB">Charles Schwab</option>
+                                <option value="ibkr">InteractiveBrokers</option>
+                                <option value="schwab">Schwab</option>
+                                <option value="ira">LeumiIRA</option>
                             </select>
                         </div>
 
@@ -275,9 +306,7 @@ export default function TradingAccountSettings() {
                     </label>
 
                     <div className="pt-4 flex items-center justify-between">
-                        <p className={`text-sm ${message.includes("Error") ? "text-red-400" : "text-green-400"}`}>
-                            {message}
-                        </p>
+                        <div />
                         <button
                             type="submit"
                             disabled={saving}

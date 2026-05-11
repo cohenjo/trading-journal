@@ -102,6 +102,32 @@ describe('getTradingConfigs', () => {
     expect(is).toHaveBeenCalledWith('deleted_at', null);
     expect(result).toEqual(rows);
   });
+
+  it('returns all 3 seeded accounts when household_id is populated', async () => {
+    authOk();
+    const rows = [
+      { id: 1,  name: 'InteractiveBrokers', account_type: 'ibkr',   host: '', port: 0, client_id: 0, linked_account_id: null, account_id: 'U2515365', last_synced: null, compute_options_income: true },
+      { id: 71, name: 'Schwab',             account_type: 'schwab', host: '', port: 0, client_id: 0, linked_account_id: null, account_id: null,       last_synced: null, compute_options_income: false },
+      { id: 72, name: 'LeumiIRA',           account_type: 'ira',    host: '', port: 0, client_id: 0, linked_account_id: null, account_id: null,       last_synced: null, compute_options_income: false },
+    ];
+    const order = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const is = vi.fn().mockReturnValue({ order });
+    const select = vi.fn().mockReturnValue({ is });
+    const from = vi.fn().mockReturnValue({ select });
+
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+      auth: { getUser: mockGetUser },
+      from,
+    });
+
+    const result = await getTradingConfigs();
+
+    expect(result.length).toBeGreaterThanOrEqual(3);
+    const types = result.map((r) => r.account_type);
+    expect(types).toContain('ibkr');
+    expect(types).toContain('schwab');
+    expect(types).toContain('ira');
+  });
 });
 
 describe('getTradingConfig', () => {
@@ -177,7 +203,7 @@ describe('saveTradingConfig', () => {
     const [row] = insert.mock.calls[0] as [Record<string, unknown>];
     expect(row).toMatchObject({
       name: 'New Broker',
-      account_type: 'IBKR',
+      account_type: 'ibkr',
       host: '127.0.0.1',
       port: 4002,
       client_id: 2,
@@ -217,6 +243,32 @@ describe('saveTradingConfig', () => {
     expect(row.compute_options_income).toBe(false);
     expect(eqId).toHaveBeenCalledWith('id', 5);
     expect(eqHousehold).toHaveBeenCalledWith('household_id', MOCK_HOUSEHOLD_ID);
+  });
+
+  it('normalizes uppercase account_type to lowercase before insert', async () => {
+    authOk();
+    const inserted = { id: 11, name: 'Schwab', account_type: 'schwab' };
+    const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
+    const selectAfterInsert = vi.fn().mockReturnValue({ single });
+    const insert = vi.fn().mockReturnValue({ select: selectAfterInsert });
+    const actionClient = {
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table !== 'trading_account_config') throw new Error(`Unexpected table: ${table}`);
+        return { insert };
+      }),
+    };
+
+    (createClient as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(actionClient)
+      .mockResolvedValueOnce(householdClient());
+
+    // Caller sends uppercase — chk_account_type only allows lowercase
+    const result = await saveTradingConfig({ name: 'Schwab', account_type: 'SCHWAB' });
+
+    expect(result.ok).toBe(true);
+    const [row] = insert.mock.calls[0] as [Record<string, unknown>];
+    expect(row.account_type).toBe('schwab');
   });
 });
 
