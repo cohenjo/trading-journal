@@ -9,8 +9,7 @@ import type {
   PaymentFrequency,
 } from '@/types/dividends';
 
-// Re-export shared types so consumers can import from one place.
-export type { DividendPosition, DividendSummaryResult, PaymentFrequency } from '@/types/dividends';
+// Consumers should import DividendPosition, DividendSummaryResult, PaymentFrequency directly from '@/types/dividends'.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,11 +28,11 @@ export interface DividendPositionPayload {
 
 export type DividendPositionPatch = Partial<DividendPositionPayload>;
 
-export interface DividendPosition extends DividendPositionPayload {
+export interface DividendPositionRecord extends DividendPositionPayload {
   id: number;
 }
 
-export interface EnrichedDividendPosition extends DividendPosition {
+export interface EnrichedDividendPosition extends DividendPositionRecord {
   price: number;
   dividend_yield: number;
   annual_income: number;
@@ -55,7 +54,7 @@ export interface DividendDashboardData {
 }
 
 export type DividendPositionResult =
-  | { ok: true; position: DividendPosition }
+  | { ok: true; position: DividendPositionRecord }
   | { ok: false; error: string };
 
 export type DeleteDividendPositionResult =
@@ -160,7 +159,7 @@ function normalizePositionPatch(
   return updates;
 }
 
-function toDividendPosition(row: DividendPositionRow): DividendPosition {
+function toDividendPositionRecord(row: DividendPositionRow): DividendPositionRecord {
   return {
     id: Number(row.id),
     account: row.account,
@@ -228,7 +227,7 @@ export async function getDividendDashboard(
     return emptyDashboard(targetCurrency);
   }
 
-  const positions = ((positionRows ?? []) as DividendPositionRow[]).map(toDividendPosition);
+  const positions = ((positionRows ?? []) as DividendPositionRow[]).map(toDividendPositionRecord);
 
   const tickers = [...new Set(positions.map((p) => p.ticker))];
   const { data: tickerRows, error: tickerError } = tickers.length > 0
@@ -336,7 +335,7 @@ export async function createDividendPosition(
     return { ok: false, error: 'Failed to create position. Please try again.' };
   }
 
-  return { ok: true, position: toDividendPosition(data as DividendPositionRow) };
+  return { ok: true, position: toDividendPositionRecord(data as DividendPositionRow) };
 }
 
 /** Updates a dividend position in the authenticated user's household. */
@@ -383,7 +382,7 @@ export async function updateDividendPosition(
   }
   if (!data) return { ok: false, error: 'Position not found' };
 
-  return { ok: true, position: toDividendPosition(data as DividendPositionRow) };
+  return { ok: true, position: toDividendPositionRecord(data as DividendPositionRow) };
 }
 
 /** Deletes a dividend position from the authenticated user's household. */
