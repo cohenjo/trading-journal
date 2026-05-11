@@ -2,6 +2,7 @@
 
 import React from "react";
 import type { StockPosition, TradingAccountConfig } from "@/app/trading/actions";
+import { convertCurrency } from "@/lib/currency";
 
 export interface AccountBalance {
   config: TradingAccountConfig;
@@ -29,7 +30,17 @@ function formatCurrency(value: number, currency = "USD"): string {
 }
 
 function accountMarketValue(positions: StockPosition[]): number {
-  return positions.reduce((sum, p) => sum + (p.market_value ?? 0), 0);
+  return positions.reduce((sum, p) => {
+    // Use market_value_local as fallback for positions the Yahoo worker hasn't
+    // refreshed yet (market_value=null).
+    const mv = p.market_value ?? p.market_value_local ?? 0;
+    // TASE positions (currency='ILA') store market_value in ILS.
+    // Convert to USD for a consistent portfolio-wide display currency.
+    if (p.currency.toUpperCase() === "ILA") {
+      return sum + convertCurrency(mv, "ILS", "USD");
+    }
+    return sum + mv;
+  }, 0);
 }
 
 function getAccountLabel(config: TradingAccountConfig): string {
@@ -40,7 +51,11 @@ function topFiveHoldings(accounts: AccountBalance[]): string {
   const valueByTicker = new Map<string, number>();
   for (const { positions } of accounts) {
     for (const p of positions) {
-      valueByTicker.set(p.ticker, (valueByTicker.get(p.ticker) ?? 0) + (p.market_value ?? 0));
+      const mv = p.market_value ?? p.market_value_local ?? 0;
+      const usdValue = p.currency.toUpperCase() === "ILA"
+        ? convertCurrency(mv, "ILS", "USD")
+        : mv;
+      valueByTicker.set(p.ticker, (valueByTicker.get(p.ticker) ?? 0) + usdValue);
     }
   }
   return Array.from(valueByTicker.entries())

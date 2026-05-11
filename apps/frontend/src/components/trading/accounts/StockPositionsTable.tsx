@@ -21,6 +21,25 @@ function formatCurrency(value: number | null | undefined, currency = "USD"): str
   }).format(value);
 }
 
+/**
+ * Normalises 'ILA' (Israeli agorot) to 'ILS' for display purposes.
+ * market_value is stored in ILS even when currency='ILA'; using 'ILA' as the
+ * Intl currency code is misleading so we always render as ILS.
+ */
+function toDisplayCurrency(currency: string): string {
+  return currency.toUpperCase() === "ILA" ? "ILS" : currency;
+}
+
+/**
+ * Converts a per-share mark_price to its display value.
+ * TASE positions store mark_price in agorot (ILA = 1/100 ILS), so divide by
+ * 100 before rendering to show the familiar ILS per-share price.
+ */
+function toDisplayMarkPrice(price: number | null, currency: string): number | null {
+  if (price == null) return null;
+  return currency.toUpperCase() === "ILA" ? price / 100 : price;
+}
+
 function formatQuantity(value: number): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 }).format(value);
 }
@@ -31,7 +50,7 @@ export default function StockPositionsTable({
   onDelete,
   onEdit,
 }: StockPositionsTableProps) {
-  const totalMarketValue = positions.reduce((sum, p) => sum + (p.market_value ?? 0), 0);
+  const totalMarketValue = positions.reduce((sum, p) => sum + (p.market_value ?? p.market_value_local ?? 0), 0);
 
   if (positions.length === 0) {
     return (
@@ -77,7 +96,7 @@ export default function StockPositionsTable({
               >
                 Total Market Value:{" "}
                 <span className="text-slate-100 ml-2">
-                  {formatCurrency(totalMarketValue, positions[0]?.currency ?? "USD")}
+                  {formatCurrency(totalMarketValue, toDisplayCurrency(positions[0]?.currency ?? "USD"))}
                 </span>
               </td>
             </tr>
@@ -139,13 +158,13 @@ function PositionRow({ position, mode, onDelete, onEdit }: PositionRowProps) {
       <td className="px-4 py-3 text-slate-400">{position.sub_category ?? "—"}</td>
       <td className="px-4 py-3 text-right text-slate-200">{formatQuantity(position.quantity)}</td>
       <td className="px-4 py-3 text-right text-slate-300">
-        {formatCurrency(position.cost_basis, position.currency)}
+        {formatCurrency(toDisplayMarkPrice(position.cost_basis, position.currency), toDisplayCurrency(position.currency))}
       </td>
       <td className="px-4 py-3 text-right text-slate-300">
-        {formatCurrency(position.mark_price, position.currency)}
+        {formatCurrency(toDisplayMarkPrice(position.mark_price, position.currency), toDisplayCurrency(position.currency))}
       </td>
       <td className="px-4 py-3 text-right text-slate-200 font-medium">
-        {formatCurrency(position.market_value, position.currency)}
+        {formatCurrency(position.market_value ?? position.market_value_local, toDisplayCurrency(position.currency))}
       </td>
       <td className={`px-4 py-3 text-right font-medium ${pnlColor}`}>
         {position.unrealized_pnl == null
