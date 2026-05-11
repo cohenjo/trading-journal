@@ -622,7 +622,7 @@ export async function updateStockPosition(
  *
  * Expected CSV header (enriched format produced by holdingsToCsv / parseSchwabCsv):
  *   ticker,quantity,average_cost,currency,as_of_date,description,mark_price,
- *   market_value,market_value_local,dividend_yield,cost_basis_total
+ *   market_value,market_value_local,dividend_yield,cost_basis_total,unrealized_pnl
  *
  * RLS policy is satisfied by the user-scoped createClient() — the calling user
  * must be a household writer for the target account's household_id.
@@ -681,6 +681,7 @@ export async function importManualPositionsCsv(
     const idxMktValLocal = col('market_value_local');
     const idxDivYld = col('dividend_yield');
     const idxCostBasis = col('cost_basis_total');
+    const idxUnrealizedPnl = col('unrealized_pnl');
 
     if (idxTicker === -1 || idxQty === -1) {
       return { ok: false, error: 'CSV is missing required columns (ticker, quantity)' };
@@ -749,6 +750,7 @@ export async function importManualPositionsCsv(
       const market_value_local = idxMktValLocal !== -1 ? parseOptionalNumber(parseField(fields, idxMktValLocal)) : null;
       const dividend_yield = idxDivYld !== -1 ? parseOptionalNumber(parseField(fields, idxDivYld)) : null;
       const cost_basis_total = idxCostBasis !== -1 ? parseOptionalNumber(parseField(fields, idxCostBasis)) : null;
+      const unrealized_pnl = idxUnrealizedPnl !== -1 ? parseOptionalNumber(parseField(fields, idxUnrealizedPnl)) : null;
 
       return {
         ticker,
@@ -762,6 +764,7 @@ export async function importManualPositionsCsv(
         market_value_local,
         dividend_yield,
         cost_basis_total,
+        unrealized_pnl,
         account_id: accountId,
         household_id: householdId,
         source: 'manual' as const,

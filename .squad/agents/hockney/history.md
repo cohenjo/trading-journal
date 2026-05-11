@@ -726,3 +726,26 @@ Rewrote `importManualPositionsCsv` to skip HTTP entirely — parse CSV text in t
 - Schwab CSV has a preamble row with the as-of date in `YYYY/MM/DD` — skip rows 0–1 before the real header.
 - `isSchwabCsv()` content-sniff (first 256 bytes) is more reliable than file extension for broker CSV routing.
 - New DB columns should always have a migration file even when added via `execute_sql` directly.
+
+---
+
+## 2026-05-11 — Parser fixes: cost basis + unrealized P&L + Leumi ticker contamination (PR squad/parser-fixes-cost-basis-leumi-ticker)
+
+**Scope:** Three targeted parser/schema fixes flagged by Jony after using the import flow built in PR #394.
+
+**Changes:**
+1. **`apps/frontend/src/lib/trading/leumi-xls-parser.ts`** — Added `unrealized_pnl` field to `ParsedHolding` interface; fixed `tase_id` extraction to strip Hebrew from col 0; reads col 10 (`רווח ב ₪`) → `unrealized_pnl`; `holdingsToCsv()` emits `unrealized_pnl` column.
+2. **`apps/frontend/src/lib/trading/schwab-csv-parser.ts`** — Maps `Gain $ (Gain/Loss $)` column → `unrealized_pnl` (USD).
+3. **`apps/frontend/src/app/trading/actions.ts`** — Parses `unrealized_pnl` from enriched CSV and writes it to `stock_positions` on import.
+4. **Tests:** 619 → 625 (+6). All green.
+
+**Schema:** No migration needed — `unrealized_pnl` and `cost_basis_total` columns already existed in `stock_positions`.
+
+**Tests:** 619 → 625/625 (+6). Build: ✅ green. LURVG: 🟡 recommended — Redfoot should upload actual Leumi IRA export to validate ticker fix and unrealized_pnl population end-to-end.
+
+## Learnings
+
+- **Leumi ticker contamination root cause:** In the real Leumi SpreadsheetML export, col 0 (`מספר נייר`) contains `"PAPERNUM Hebrew description"` as a combined string (not just the number). The hand-crafted fixture had clean numeric-only cells. Fix: take only the leading whitespace-delimited token from col 0 as `tase_id`. Regression test uses synthetic XML with contaminated col 0.
+- **Fixture fidelity:** Hand-crafted test fixtures can silently diverge from real broker export formats. Always validate parser against a real file (LURVG) before closing a parser PR. If LURVG finds a schema mismatch, update the fixture to match real-world output.
+- **Column coverage on parsers:** When adding a new column to a parser, also check: (1) `ParsedHolding` interface, (2) `holdingsToCsv()` CSV header + row, (3) `importManualPositionsCsv()` column index + insert object. All three must be updated together.
+- **Schema pre-check:** Always query `information_schema.columns` before applying a migration — `unrealized_pnl` and `cost_basis_total` were already in the schema from a previous migration, saving unnecessary DDL.

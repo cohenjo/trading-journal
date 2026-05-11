@@ -166,6 +166,7 @@ export function parseSchwabCsv(text: string): ParsedHolding[] {
   const idxPrice  = col('price');
   const idxMktVal = col('mkt val');
   const idxCostBasis = col('cost basis');
+  const idxGainDollar = col('gain $');
   const idxDivYld = col('div yld');
 
   if (idxSymbol < 0 || idxQty < 0) return [];
@@ -188,6 +189,7 @@ export function parseSchwabCsv(text: string): ParsedHolding[] {
     const mark_price = idxPrice >= 0 ? parseNum((fields[idxPrice] ?? '')) : null;
     const market_value = idxMktVal >= 0 ? parseCurrency((fields[idxMktVal] ?? '')) : null;
     const cost_basis_total = idxCostBasis >= 0 ? parseCurrency((fields[idxCostBasis] ?? '')) : null;
+    const unrealized_pnl = idxGainDollar >= 0 ? parseCurrency((fields[idxGainDollar] ?? '')) : null;
     const dividend_yield = idxDivYld >= 0 ? parsePct((fields[idxDivYld] ?? '')) : null;
 
     holdings.push({
@@ -205,6 +207,7 @@ export function parseSchwabCsv(text: string): ParsedHolding[] {
       market_value_local: null,   // USD-only account, no local-currency value
       dividend_yield,
       cost_basis_total,
+      unrealized_pnl,
     });
   }
 
