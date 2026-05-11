@@ -7,6 +7,7 @@ import {
   parseLeumiIraXmlText,
   holdingsToCsv,
   extractRowsFromSpreadsheetML,
+  extractDescription,
   type ParsedHolding,
 } from './leumi-xls-parser';
 
@@ -354,7 +355,7 @@ describe('holdingsToCsv', () => {
   it('produces CSV with correct header row', () => {
     const { csv } = holdingsToCsv(holdings);
     const lines = csv.split('\n');
-    expect(lines[0]).toBe('ticker,quantity,average_cost,currency,as_of_date');
+    expect(lines[0]).toBe('ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total');
   });
 
   it('includes mappable holdings (US, LSE, TASE) in CSV', () => {
@@ -390,6 +391,7 @@ describe('holdingsToCsv', () => {
         as_of_date: baseDateIso,
       },
     ]);
+    // ticker,qty,avg_cost,currency,date,description,mark_price,...
     expect(csv).toContain('QQQI,100,,USD,2026-05-11');
   });
 
@@ -400,7 +402,143 @@ describe('holdingsToCsv', () => {
 
   it('produces only header for empty input', () => {
     const { csv, unmappable } = holdingsToCsv([]);
-    expect(csv).toBe('ticker,quantity,average_cost,currency,as_of_date');
+    expect(csv).toBe('ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total');
     expect(unmappable).toHaveLength(0);
+  });
+
+  it('includes description in double-quotes when present', () => {
+    const { csv } = holdingsToCsv([
+      {
+        symbol: 'QQQI',
+        exchange: 'US',
+        quantity: 700,
+        average_cost: 54.57,
+        currency: 'USD',
+        raw_description: '(ניאוס נאסד"ק 100 הכנסה גבוהה) QQQI',
+        tase_id: '60398411',
+        as_of_date: baseDateIso,
+        description: 'ניאוס נאסד"ק 100 הכנסה גבוהה',
+        mark_price: 56.50,
+        market_value_local: 114971.85,
+      },
+    ]);
+    expect(csv).toContain('"ניאוס נאסד"');
+    expect(csv).toContain('56.5');
+    expect(csv).toContain('114971.85');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractDescription — new helper (Directive 2026-05-11-1745)
+// ---------------------------------------------------------------------------
+
+describe('extractDescription', () => {
+  it('returns Hebrew name as-is for TASE securities', () => {
+    expect(extractDescription('לאומי', '604611')).toBe('לאומי');
+  });
+
+  it('extracts English name from parens for US foreign security', () => {
+    expect(extractDescription('(JPMORGAN EQUITY PREMIUM INCOME ETF) JEPI', '60157418'))
+      .toBe('JPMORGAN EQUITY PREMIUM INCOME ETF');
+  });
+
+  it('extracts English name from parens for LSE security', () => {
+    expect(extractDescription('(BARCLAYS PLC) BARC LN', '60007751'))
+      .toBe('BARCLAYS PLC');
+  });
+
+  it('extracts Hebrew description from parens for Hebrew-named US security', () => {
+    expect(extractDescription('(ניאוס נאסד"ק 100 הכנסה גבוהה) QQQI', '60398411'))
+      .toBe('ניאוס נאסד"ק 100 הכנסה גבוהה');
+  });
+
+  it('returns raw_description when 8-digit-6 but no parens', () => {
+    expect(extractDescription('SOME FOREIGN NO PARENS', '60999999'))
+      .toBe('SOME FOREIGN NO PARENS');
+  });
+
+  it('preserves multi-word Hebrew name for TASE ETF', () => {
+    expect(extractDescription('ניו-מד אנרג יהש', '475020')).toBe('ניו-מד אנרג יהש');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseLeumiIraXmlText — enriched fields (description, mark_price, market_value_local)
+// ---------------------------------------------------------------------------
+
+describe('parseLeumiIraXmlText — enriched fields', () => {
+  const fixturePath = join(__dirname, '__tests__', 'fixtures', 'leumi-ira-sample.xls');
+  const fixtureXml = readFileSync(fixturePath, 'utf-8');
+
+  it('sets description for TASE holding לאומי as the Hebrew name', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const leumi = holdings.find(h => h.tase_id === '604611');
+    expect(leumi!.description).toBe('לאומי');
+  });
+
+  it('sets description for US holding JPXN from parens', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const jpxn = holdings.find(h => h.symbol === 'JPXN');
+    expect(jpxn!.description).toBe('איי-שיירס JPX ניקיי 400');
+  });
+
+  it('sets description for LSE holding BARC as BARCLAYS PLC', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const barc = holdings.find(h => h.symbol === 'BARC');
+    expect(barc!.description).toBe('BARCLAYS PLC');
+  });
+
+  it('sets mark_price (שער אחרון) for TASE holding לאומי', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const leumi = holdings.find(h => h.tase_id === '604611');
+    expect(leumi!.mark_price).toBe(7616);
+  });
+
+  it('sets mark_price for US holding QQQI (USD)', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const qqqi = holdings.find(h => h.symbol === 'QQQI');
+    expect(qqqi!.mark_price).toBe(56.5);
+  });
+
+  it('sets mark_price for LSE holding RIO', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const rio = holdings.find(h => h.symbol === 'RIO');
+    expect(rio!.mark_price).toBe(77.04);
+  });
+
+  it('sets market_value_local (שווי אחזקה ב ₪) for TASE holding לאומי', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const leumi = holdings.find(h => h.tase_id === '604611');
+    expect(leumi!.market_value_local).toBeCloseTo(76921.60, 1);
+  });
+
+  it('sets market_value_local for US holding QQQI (ILS equivalent)', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const qqqi = holdings.find(h => h.symbol === 'QQQI');
+    expect(qqqi!.market_value_local).toBeCloseTo(114971.85, 1);
+  });
+
+  it('sets market_value_local for LSE holding BARC', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const barc = holdings.find(h => h.symbol === 'BARC');
+    expect(barc!.market_value_local).toBeCloseTo(37150.55, 1);
+  });
+
+  it('sets dividend_yield to null for all Leumi holdings (not in XLS)', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    holdings.forEach(h => expect(h.dividend_yield).toBeNull());
+  });
+
+  it('Hebrew description survives round-trip (לאומי)', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const leumi = holdings.find(h => h.tase_id === '604611');
+    expect(leumi!.description).toBe('לאומי');
+  });
+
+  it('Hebrew description inside parens survives round-trip (QQQI)', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const qqqi = holdings.find(h => h.symbol === 'QQQI');
+    // The Hebrew inside parens
+    expect(qqqi!.description).toContain('ניאוס');
   });
 });

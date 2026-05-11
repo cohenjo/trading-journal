@@ -121,7 +121,18 @@ function PositionRow({ position, mode, onDelete, onEdit }: PositionRowProps) {
       className="border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors"
       data-testid="position-row"
     >
-      <td className="px-4 py-3 font-medium text-slate-100">{position.ticker}</td>
+      <td className="px-4 py-3 font-medium text-slate-100">
+        {/^\d+$/.test(position.ticker) && position.description ? (
+          <span className="flex flex-col gap-0.5">
+            <span>{position.ticker}</span>
+            <span className="block text-xs text-slate-500 mt-0.5 font-normal" dir="rtl">
+              {position.description}
+            </span>
+          </span>
+        ) : (
+          position.ticker
+        )}
+      </td>
       <td className="px-4 py-3 text-slate-400 max-w-[180px] truncate" title={position.description ?? undefined}>
         {position.description ?? "—"}
       </td>

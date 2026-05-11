@@ -3,6 +3,7 @@
 import React, { useRef, useState } from "react";
 import { importManualPositionsCsv } from "@/app/trading/actions";
 import { parseLeumiIraXls, holdingsToCsv } from "@/lib/trading/leumi-xls-parser";
+import { parseSchwabCsv, isSchwabCsv } from "@/lib/trading/schwab-csv-parser";
 
 export interface CSVImportButtonProps {
   accountId: number;
@@ -27,7 +28,7 @@ function isExcelFile(name: string): boolean {
 
 /**
  * Reads the uploaded Leumi IRA Excel file, parses it, converts valid holdings
- * to the CSV format expected by the FastAPI import endpoint, and returns FormData
+ * to the enriched CSV format expected by the import server action, and returns FormData
  * ready to POST.  Also surfaces holdings that could not be exchange-mapped.
  */
 async function buildFormDataFromXls(
@@ -53,12 +54,34 @@ async function buildFormDataFromXls(
 }
 
 /**
+ * Reads a Schwab CSV positions export, parses it into the enriched CSV format,
+ * and returns FormData ready to POST.
+ */
+async function buildFormDataFromSchwabCsv(
+  file: File,
+): Promise<{ formData: FormData; unmappable: Array<{ raw_description: string; tase_id: string }> }> {
+  const text = await file.text();
+  const holdings = parseSchwabCsv(text);
+  const { csv } = holdingsToCsv(holdings);
+
+  const csvBlob = new Blob([csv], { type: "text/csv" });
+  const csvFile = new File([csvBlob], "schwab-positions-import.csv", { type: "text/csv" });
+
+  const formData = new FormData();
+  formData.append("file", csvFile);
+
+  return { formData, unmappable: [] };
+}
+
+/**
  * Button that triggers a hidden file input accepting CSV, XLS, and XLSX.
  *
- * - **CSV files** are forwarded directly to the FastAPI import endpoint.
+ * - **CSV files** (Schwab format detected by preamble) are parsed via Schwab parser,
+ *   enriched, then forwarded to the import server action.
+ * - **CSV files** (generic) are forwarded directly to the import server action.
  * - **XLS / XLSX files** (Leumi IRA SpreadsheetML format) are parsed in the
- *   browser, converted to the expected CSV schema, then forwarded to the same
- *   endpoint.  Holdings that cannot be mapped to a known exchange are surfaced
+ *   browser, converted to the expected enriched CSV schema, then forwarded to the same
+ *   server action.  Holdings that cannot be mapped to a known exchange are surfaced
  *   as warnings after a successful import.
  */
 export default function CSVImportButton({ accountId, onSuccess }: CSVImportButtonProps) {
@@ -102,8 +125,19 @@ export default function CSVImportButton({ accountId, onSuccess }: CSVImportButto
         return;
       }
     } else {
-      formData = new FormData();
-      formData.append("file", file);
+      // CSV: sniff for Schwab format by reading file header
+      try {
+        const headerText = await file.slice(0, 256).text();
+        if (isSchwabCsv(headerText)) {
+          ({ formData, unmappable } = await buildFormDataFromSchwabCsv(file));
+        } else {
+          formData = new FormData();
+          formData.append("file", file);
+        }
+      } catch {
+        formData = new FormData();
+        formData.append("file", file);
+      }
     }
 
     const result = await importManualPositionsCsv(accountId, formData);
