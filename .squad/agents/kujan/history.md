@@ -92,3 +92,21 @@ Infrastructure ready (migrations applied, worker rebuilt and healthy, new schema
 **Live sync status:** Fresh sync triggered at 10:41 UTC+3; IBKR throttle (error 1001) may still be blocking. No confirmed fresh sync completion at time of handoff.
 
 **Decisions filed:** `kujan-flex-fresh-data-2026-05-10.md` (processed by Scribe)
+
+---
+
+## 2026-05-11 — ✅ Nightly Backup Hardening: Issue Dedup (PR #370)
+
+**Scope:** Add deduplication guard to the `alert-on-failure` job to prevent repeated backup failures from spamming multiple GitHub issues.
+
+**Root cause:** pg_dump version mismatch (v15 installed, v17 binary path referenced) caused all nightly backups to fail from 2026-05-05 onward. On 2026-05-09, operator manually re-triggered the workflow 6 times while investigating. The `alert-on-failure` job created a new critical GitHub issue on each failure, producing 6 identical issues (#344–#349) in 31 minutes with no deduplication.
+
+**Executed:**
+- ✅ pg_dump fix already merged (commits `04d3558`, `fa6b75c`, `1e9e011`) — updated to `postgresql-client-17`, set explicit binary path
+- ✅ Last successful backup: run [25654224589](https://github.com/cohenjo/trading-journal/actions/runs/25654224589) (2026-05-11T06:35:26Z)
+- ✅ Deduplication logic added: `alert-on-failure` searches for open `🚨 Nightly backup FAILED` issues, closes any found as "superseded", then opens exactly one fresh issue
+- ✅ Decisions folded into shared decisions.md (processed by Scribe)
+
+**PR:** [#370](https://github.com/cohenjo/trading-journal/pull/370) — `chore(infra): backup workflow hardening + dedupe (#344-#349)`
+
+**Outcome:** One open backup-failure issue at any given time; repeated manual re-triggers no longer spam issue tracker.

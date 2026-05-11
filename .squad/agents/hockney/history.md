@@ -1,3 +1,25 @@
+## 2026-05-11 — #335 Migration drift audit (branch `squad/335-migration-drift-audit`)
+
+**Scope:** Full audit of Supabase migration drift — local repo vs prod `schema_migrations`. Audit-only dispatch; no schema changes applied.
+
+**Findings:**
+- Local: 62 migration files; Prod tracked: 55 — delta of 7 files
+- **No prod-only migrations** (zero backward drift)
+- **5 forward migrations applied ad-hoc but not tracked:** `20260510000100–000500` — all DDL verified present in prod (tables, columns, indexes, constraints match), but Supabase `schema_migrations` has no record
+- **2 forward migrations genuinely not applied:** `20260501120000` (insurance_policies cleanup — user_id still present, household_id still nullable) and `20260511052500` (backfill already a no-op)
+- **3 tables with RLS enabled + zero policies** (silent deny-all): `dividend_payments`, `dividend_accruals` (known from #367, admin-client workaround active), `security_reference` (new finding — no current caller, will silently fail when parser wires up)
+- CRITICAL × 2 (RLS zero-policy tables), HIGH × 1 (broken `db push` workflow), MEDIUM × 2 (insurance cleanup, backfill untracked), LOW × 1 (non-idempotent constraint in 000200)
+
+**Key learnings:**
+- `supabase migration repair --status applied <version>` is the correct path to codify ad-hoc DDL without re-running migrations (Kujan owns execution)
+- `security_reference` RLS issue is a latent bomb: no current caller, but zero policies means the flex parser will silently get nothing when it reads via `createClient()`
+- Always check `pg_policies` count for newly created tables before shipping; `enable row level security` without policies = silent empty set
+- `ADD CONSTRAINT` without `IF NOT EXISTS` in migration 000200 makes it non-idempotent; future migrations should always use `DROP CONSTRAINT IF EXISTS` + `ADD CONSTRAINT` pair
+
+**Output:** `.squad/decisions/inbox/hockney-migration-drift-audit-2026-05-11.md`
+
+---
+
 ## 2026-05-12 — #359 Broker-form fix: normalize account_type + duplicate guard (PR #371, commit `3f49540`)
 
 **Scope:** Settings "Add Broker" silently failed — uppercase `account_type` values violated `chk_account_type CHECK (account_type IN ('ibkr','schwab','ira'))`.
@@ -547,3 +569,33 @@ Delivered hotfix for RLS default-deny on dividend tables. Three root causes fixe
 **Tests:** 471 → 473 (+2 regression tests added for each fix). All unit tests pass post-fix. LURVG Reproduce-Before-Fix validated: bug confirmed on main (RLS blocks query), fix confirmed on branch (admin client + fallback logic → JEPI/O/GS visible, $2,662 annual income).
 
 **Secondary finding (not fixed in this PR):** `dividend_payments` query lacks `account_id` filter — currently symbol-only. Harmless for single IBKR account. Multi-account users could see combined data. Follow-up issue #369 filed; assigned to future sprint.
+
+---
+
+## 2026-05-12 — ✅ Settings Form Fix: Broker-Account Type Normalization + Duplicate Prevention (PR #371, Issue #359)
+
+**PR:** [#371](https://github.com/cohenjo/trading-journal/pull/371) — `fix(settings): normalize account_type to lowercase + surface save errors`
+
+**Scope:** Fix silent form failures when adding broker accounts. Root cause chain: (1) DB constraint `chk_account_type` requires lowercase tokens, (2) historical code had uppercase defaults (partially fixed via `.toLowerCase()` in prior commits), (3) no backend normalizer/validator to catch all uppercase paths, (4) no duplicate-prevention check allowed silent re-adds.
+
+**Delivered — 3-Layer Fix:**
+
+1. **Frontend** — Renamed tab testids for scope clarity: `tab-{type}` → `account-tab-{type}`. Confirmed error/success banners present with `data-testid` attributes for Playwright.
+
+2. **Backend Module** — Created `src/lib/trading/account-type.ts` (sync helper, **must live in `lib/`, not `'use server'` files** per Next.js 15 rules). Module exports `normalizeAccountType(type: string): string | null` — lowercases + validates, returns null for unknown values.
+
+3. **Backend Action** — Updated `saveTradingConfig()` action:
+   - Calls `normalizeAccountType()` before any DB operation; returns `{ ok: false, error: '...' }` for invalid types.
+   - Runs RLS-scoped duplicate check via SELECT before INSERT; prevents silent re-adds with friendly error.
+   - `normalizeConfigInput()` now accepts pre-validated type from caller.
+
+**Tests:** 17 new unit tests (`account-type.test.ts`) + 2 new Playwright e2e specs (`add-broker-form.spec.ts` — happy path + negative). All tests passing (492/492).
+
+**Open Follow-ups (deferred to avoid scope creep):**
+1. Clean up `TradingAccountType` union to remove uppercase variants (type-system inconsistency, no runtime impact).
+2. Normalize `seedOptionsDashboard` inserts in `seed-data.ts` from uppercase to lowercase.
+3. Add `htmlFor`/`id` pairing to label+input in `TradingAccountSettings.tsx` (Fenster domain; Redfoot identified during LURVG validation — spec limitation, not code bug).
+
+**Learning:** The `normalizeAccountType` pattern (lib module, not `'use server'`) is the correct template for any future account-type validation or similar sync utilities.
+
+**LURVG Validation:** Redfoot validated PR pre-fix (duplicate-add bug reproduced on main) → post-fix (fix confirmed, error banner working, duplicate prevention working). Spec defect found: label missing `htmlFor` attribute; fixed in test with `getByTitle()` fallback. All smoke tests pass (3/3). Decisions folded into shared decisions.md.

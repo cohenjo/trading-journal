@@ -12,6 +12,49 @@ The accounts page mirrors the user's broker positions (synced via Flex Query, CS
 
 ## Decision Log
 
+### 2026-05-12: Broker-Form Fix Validated — LURVG Closure (#371 + #359)
+
+**By:** Redfoot (Tester)
+**PR:** [#371](https://github.com/cohenjo/trading-journal/pull/371) — `fix(settings): normalize account_type to lowercase + surface save errors`
+**Issue:** [#359](https://github.com/cohenjo/trading-journal/issues/359)
+**Verdict:** 🟢 APPROVED
+
+**What:** LURVG validation confirms Hockney's fix for the broker-account form. Pre-fix bug reproduced on main: adding a duplicate account type silently succeeds (no duplicate-prevention check). Post-fix validation passes: second Schwab add now rejected with "already configured" error; all DOM assertions pass (tabs visible, error/success banners functional). Spec issue identified: `getByLabel` timeout in `add-broker-form.spec.ts` due to missing `htmlFor` attribute on label element; Redfoot applied fix (`getByTitle()` instead). Smoke tests pass (3/3).
+
+**Why:** LURVG protocol requires test reproduction before & validation after to confirm fix resolves the issue without introducing regressions. Pre-fix reproduction verified the silent-duplicate bug existed on main. Post-fix validation confirmed the fix works and doesn't break other routes.
+
+**Follow-ups (deferred):** Add `htmlFor`/`id` pairing to `TradingAccountSettings.tsx` labels (Fenster domain) so `getByLabel` works in future specs.
+
+---
+
+### 2026-05-12: Settings Form Fix — Broker-Account Normalization + Duplicate Prevention (#371, #359)
+
+**By:** Hockney (Backend Dev)
+**PR:** [#371](https://github.com/cohenjo/trading-journal/pull/371) — `fix(settings): normalize account_type to lowercase + surface save errors`
+**Issue closed:** [#359](https://github.com/cohenjo/trading-journal/issues/359)
+
+**What:** Implemented 3-layer fix to the Settings "Add Broker" form: (1) Frontend testid hardening (`account-tab-{type}`), (2) Backend `normalizeAccountType()` utility in `src/lib/trading/account-type.ts` (sync helper, must live in `lib/` not `'use server'` files per Next.js 15 rules), (3) Backend duplicate-check via RLS-scoped SELECT before INSERT + friendly error surface. Root cause: DB constraint `chk_account_type` requires lowercase; no validator existed for uppercase inputs; no duplicate-prevention check existed.
+
+**Why:** Form was silently failing on broker adds. Users submitted uppercase account types (from partial prior fixes), and re-adding an already-configured account type produced constraint violations swallowed by the backend. The fix enforces lowercase normalization upstream + surfaces errors to the user via `saveError` state and error banner. Tested: 17 unit tests + 2 e2e Playwright specs (all green).
+
+**Follow-ups (deferred):** (1) Clean up `TradingAccountType` union to remove uppercase variants. (2) Normalize `seedOptionsDashboard` to use lowercase account_type. (3) Add `htmlFor`/`id` pairing to label+input in `TradingAccountSettings.tsx` (Fenster domain; Redfoot identified spec limitation during LURVG validation).
+
+---
+
+### 2026-05-11: Nightly Backup Workflow Hardening + Issue Deduplication (#370, #344–#349)
+
+**By:** Kujan (DevOps/Platform)
+**PR:** [#370](https://github.com/cohenjo/trading-journal/pull/370) — `chore(infra): backup workflow hardening + dedupe (#344-#349)`
+**Issues closed:** [#344](https://github.com/cohenjo/trading-journal/issues/344), [#345](https://github.com/cohenjo/trading-journal/issues/345), [#346](https://github.com/cohenjo/trading-journal/issues/346), [#347](https://github.com/cohenjo/trading-journal/issues/347), [#348](https://github.com/cohenjo/trading-journal/issues/348), [#349](https://github.com/cohenjo/trading-journal/issues/349)
+
+**What:** Root cause: Commit `870a253` (2026-05-05) added PGDG APT repo but kept installing `postgresql-client-15`. Supabase runs PostgreSQL 17; the workflow's `PG_DUMP` env var pointed to `/usr/lib/postgresql/17/bin/pg_dump`, which didn't exist, causing every nightly cron run to fail immediately (2026-05-05 onward). Fix already merged (commits `04d3558`, `fa6b75c`, `1e9e011`): bumped to `postgresql-client-17`, set explicit `PG_DUMP` path. Last successful backup verified: run [25654224589](https://github.com/cohenjo/trading-journal/actions/runs/25654224589) (2026-05-11T06:35:26Z). Backup hardening (this PR): `alert-on-failure` job now deduplicates — searches for open `🚨 Nightly backup FAILED` issues before creating new ones; closes prior issues as "superseded" before opening a single fresh issue.
+
+**Why:** On 2026-05-09, operator manually triggered the workflow 6 times while investigating. The `alert-on-failure` job had no deduplication check, producing 6 near-identical critical GitHub issues (#344–#349) in 31 minutes. Result: repeated failures or manual re-triggers now produce exactly **one open issue** at a time, preventing issue spam and false escalation signals.
+
+**Recommendations:** (1) Document that `postgresql-client-XY` version must match Supabase Postgres major version; add comment to workflow. (2) Implement external health check (healthchecks.io) for backup failures. (3) Upgrade Supabase tier to eliminate free-tier inactivity pauses.
+
+---
+
 ## Executive recommendation
 
 Use **one revised Activity Flex Query** as the operational source for `/trading/accounts`, `/dividends`, and bond ladder ingestion. Do **not** replace it with Trade Confirm Flex, Cash Activity-only reports, or PortfolioAnalyst as the primary feed.
