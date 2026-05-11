@@ -1,4 +1,27 @@
-## 2026-05-09 — #340 follow-up: stock_positions dedup (bypass-API antipattern)
+## 2026-05-12 — #358 Extract displayCouponRate() utility
+
+**Issue:** #358 "Bonds: extract displayCouponRate() utility to remove Bug-2 footgun"
+
+**Root cause addressed:** Bug-2 (sprint #356) occurred because `coupon_rate` flows through two conventions: PERCENTAGE units in `bond_holdings` (DB-native, 4.25 = 4.25%) vs DECIMAL units in the `Bond` type used by Ladder components (normalised by `/100` in `actions.ts`). Inline `* 100` and `.toFixed(2)` calls were scattered across three files, making it easy to re-introduce the footgun.
+
+**Fix:** Extracted `apps/frontend/src/lib/bonds/coupon-rate.ts`:
+- `displayCouponRate(raw, { kind?, decimals? })` — formats coupon rate for display. Kind `'percentage'` (default, 3dp) or `'decimal'` (multiplies by 100 internally). Returns "—" for null/undefined/NaN/Infinity.
+- `parseCouponRate(raw)` — parses unknown input to number | null; empty string → null.
+
+**Call sites replaced:**
+- `apps/frontend/src/app/holdings/page.tsx` (line 322): `{Number(h.coupon_rate).toFixed(3)}%` → `{displayCouponRate(h.coupon_rate)}`
+- `apps/frontend/src/app/ladder/page.tsx` (line 258): `{(bond.coupon_rate * 100).toFixed(2)}%` → `{displayCouponRate(bond.coupon_rate, { kind: 'decimal' })}`
+- `apps/frontend/src/components/Ladder/RungDetails.tsx` (line 220): same decimal-kind swap
+
+**Tests:** 28 new unit tests in `src/lib/bonds/__tests__/coupon-rate.test.ts`. All 519 tests pass.
+
+**Build:** ✅ Next.js build succeeds.
+
+**Commit:** (see PR #<to-be-updated>) on `squad/358-coupon-rate-utility`.
+
+---
+
+
 
 **Issue:** `/trading/accounts` showed duplicate rows for the same ticker — e.g. `ABR` appeared 4× with stale 2022/2023/2024 quantities. Root cause: `getStockPositions()` in `actions.ts` fetched **all** `stock_positions` rows ordered by ticker with no latest-snapshot filter. Flex imports store year-end snapshots (2022/2023/2024/2025) as separate rows, so 55 tickers × avg 3.4 snapshots ≈ 213 raw rows were rendered verbatim.
 

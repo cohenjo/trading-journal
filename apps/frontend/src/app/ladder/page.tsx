@@ -8,6 +8,7 @@ import { Ladder } from "@/components/Ladder/Ladder";
 import { ExpectedIncomeChart } from "@/components/Ladder/ExpectedIncomeChart";
 import type { RungData, IncomePoint, DistributionRow, Bond } from "@/components/Ladder/types";
 import { addLadderBond, getLadderIncome, getLadderOverviewByAccount, updateLadderRung } from "./actions";
+import { displayCouponRate } from "@/lib/bonds/coupon-rate";
 
 // ── Tab config ─────────────────────────────────────────────────────────────────
 
@@ -255,7 +256,7 @@ function LadderPage() {
                               {bond.ticker ?? bond.issuer}
                             </td>
                             <td className="px-1 py-0.5 text-right" data-testid={`coupon-${bond.id}`}>
-                              {(bond.coupon_rate * 100).toFixed(2)}%
+                              {displayCouponRate(bond.coupon_rate, { kind: 'decimal' })}
                             </td>
                             <td className="px-1 py-0.5 text-right">
                               {bond.face_value.toLocaleString()} {bond.currency}
