@@ -116,6 +116,19 @@ describe('parseSchwabCsv — fixture', () => {
     expect(positions[2].cost_basis_total).toBeCloseTo(8321.65);
   });
 
+  it('parses unrealized_pnl (Gain $) from $-prefixed string (positive, negative, small)', () => {
+    // ABR: -$1,177.00
+    expect(positions[0].unrealized_pnl).toBeCloseTo(-1177.0);
+    // ADC: $1,331.50
+    expect(positions[1].unrealized_pnl).toBeCloseTo(1331.5);
+    // JEPQ: $928.53
+    expect(positions[2].unrealized_pnl).toBeCloseTo(928.53);
+    // WMT: $25,601.33
+    expect(positions[3].unrealized_pnl).toBeCloseTo(25601.33);
+    // SGOV: -$7.99
+    expect(positions[4].unrealized_pnl).toBeCloseTo(-7.99);
+  });
+
   it('sets exchange to US for all positions', () => {
     positions.forEach(p => expect(p.exchange).toBe('US'));
   });

@@ -355,7 +355,7 @@ describe('holdingsToCsv', () => {
   it('produces CSV with correct header row', () => {
     const { csv } = holdingsToCsv(holdings);
     const lines = csv.split('\n');
-    expect(lines[0]).toBe('ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total');
+    expect(lines[0]).toBe('ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total,unrealized_pnl');
   });
 
   it('includes mappable holdings (US, LSE, TASE) in CSV', () => {
@@ -402,7 +402,7 @@ describe('holdingsToCsv', () => {
 
   it('produces only header for empty input', () => {
     const { csv, unmappable } = holdingsToCsv([]);
-    expect(csv).toBe('ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total');
+    expect(csv).toBe('ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total,unrealized_pnl');
     expect(unmappable).toHaveLength(0);
   });
 
@@ -540,5 +540,90 @@ describe('parseLeumiIraXmlText — enriched fields', () => {
     const qqqi = holdings.find(h => h.symbol === 'QQQI');
     // The Hebrew inside parens
     expect(qqqi!.description).toContain('ניאוס');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseLeumiIraXmlText — unrealized P&L extraction (Fix 3)
+// ---------------------------------------------------------------------------
+
+describe('parseLeumiIraXmlText — unrealized_pnl', () => {
+  const fixturePath = join(__dirname, '__tests__', 'fixtures', 'leumi-ira-sample.xls');
+  const fixtureXml = readFileSync(fixturePath, 'utf-8');
+
+  it('extracts unrealized_pnl (רווח ב ₪) for TASE holding לאומי', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const leumi = holdings.find(h => h.tase_id === '604611');
+    expect(leumi!.unrealized_pnl).toBeCloseTo(40627.90, 1);
+  });
+
+  it('extracts unrealized_pnl for TASE holding ניו-מד', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const newmed = holdings.find(h => h.tase_id === '475020');
+    expect(newmed!.unrealized_pnl).toBeCloseTo(11462.16, 1);
+  });
+
+  it('extracts unrealized_pnl for US holding JPXN (ILS equivalent)', () => {
+    const holdings = parseLeumiIraXmlText(fixtureXml);
+    const jpxn = holdings.find(h => h.symbol === 'JPXN');
+    expect(jpxn!.unrealized_pnl).toBeCloseTo(97.68, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ticker contamination regression (Fix 2)
+// ---------------------------------------------------------------------------
+
+describe('parseLeumiIraXmlText — ticker contamination regression', () => {
+  it('strips Hebrew description from tase_id when paper number cell contains combined text', () => {
+    // Simulates a real Leumi export where col 0 = "1081843 מיטב השקעות" (number + name concatenated)
+    const xml = `
+      <Row><Cell><Data ss:Type="String">title</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">תאריך:</Data></Cell><Cell><Data ss:Type="String">11.05.26</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">summary1</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">summary2</Data></Cell></Row>
+      <Row><Cell><Data ss:Type="String">מספר נייר</Data></Cell></Row>
+      <Row>
+        <Cell><Data ss:Type="String">1081843 מיטב השקעות</Data></Cell>
+        <Cell><Data ss:Type="String">מיטב השקעות</Data></Cell>
+        <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+        <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+        <Cell><Data ss:Type="Number">1000.00</Data></Cell>
+        <Cell><Data ss:Type="Number">500.00</Data></Cell>
+        <Cell><Data ss:Type="Number">1200.00</Data></Cell>
+        <Cell><Data ss:Type="Number">60000.00</Data></Cell>
+        <Cell><Data ss:Type="Number">0.01</Data></Cell>
+        <Cell><Data ss:Type="Number">0.20</Data></Cell>
+        <Cell><Data ss:Type="Number">10000.00</Data></Cell>
+      </Row>
+    `;
+    const holdings = parseLeumiIraXmlText(xml);
+    expect(holdings).toHaveLength(1);
+    // Symbol must be ONLY the numeric paper number — NOT "1081843 מיטב השקעות"
+    expect(holdings[0].symbol).toBe('1081843');
+    expect(holdings[0].tase_id).toBe('1081843');
+    // Description is correctly taken from col 1
+    expect(holdings[0].description).toBe('מיטב השקעות');
+    // unrealized_pnl from col 10
+    expect(holdings[0].unrealized_pnl).toBeCloseTo(10000.00, 1);
+  });
+
+  it('clean numeric paper number in col 0 still works correctly', () => {
+    const holdings = parseLeumiIraXmlText(`
+      <Row><Cell><Data>title</Data></Cell></Row>
+      <Row><Cell><Data>תאריך:</Data></Cell><Cell><Data>11.05.26</Data></Cell></Row>
+      <Row><Cell><Data>s</Data></Cell></Row>
+      <Row><Cell><Data>s</Data></Cell></Row>
+      <Row><Cell><Data>header</Data></Cell></Row>
+      <Row>
+        <Cell><Data ss:Type="Number">1081843</Data></Cell>
+        <Cell><Data ss:Type="String">מיטב השקעות</Data></Cell>
+        <Cell><Data>לא קיים</Data></Cell>
+        <Cell><Data>לא קיים</Data></Cell>
+        <Cell><Data ss:Type="Number">1000.00</Data></Cell>
+        <Cell><Data ss:Type="Number">500.00</Data></Cell>
+      </Row>
+    `);
+    expect(holdings[0].symbol).toBe('1081843');
   });
 });

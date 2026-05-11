@@ -83,6 +83,11 @@ export interface ParsedHolding {
   market_value?: number | null;
   /** Total cost basis (Schwab: Cost Basis column). */
   cost_basis_total?: number | null;
+  /**
+   * Unrealized P&L in the holding's native currency.
+   * For Leumi: רווח ב ₪ (ILS). For Schwab: Gain $ (Gain/Loss $, USD).
+   */
+  unrealized_pnl?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,13 +256,17 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
     // Minimum: tase_id (col 0), description (col 1), avg_cost (col 4), qty (col 5)
     if (row.length < 6) continue;
 
-    const tase_id = row[0]?.trim() ?? '';
+    // Col 0 may contain "PAPERNUM Hebrew description" in some Leumi exports.
+    // Extract ONLY the leading non-whitespace token as the canonical paper number.
+    const tase_id = (row[0]?.trim() ?? '').split(/\s+/)[0];
     const raw_description = row[1]?.trim() ?? '';
     const avg_cost_raw = row[4]?.trim() ?? '';
     const qty_raw = row[5]?.trim() ?? '';
     // Col 6: שער אחרון (last price); Col 7: שווי אחזקה ב ₪ (holding value in ILS)
+    // Col 10: רווח ב ₪ (unrealized P&L in ILS)
     const mark_price_raw = row[6]?.trim() ?? '';
     const market_value_local_raw = row[7]?.trim() ?? '';
+    const unrealized_pnl_raw = row[10]?.trim() ?? '';
 
     if (!tase_id || !raw_description) continue;
 
@@ -272,6 +281,9 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
 
     const market_value_local_val = parseNumber(market_value_local_raw);
     const market_value_local = isNaN(market_value_local_val) ? null : market_value_local_val;
+
+    const unrealized_pnl_val = parseNumber(unrealized_pnl_raw);
+    const unrealized_pnl = isNaN(unrealized_pnl_val) ? null : unrealized_pnl_val;
 
     const { symbol, exchange, currency } = deriveExchange(raw_description, tase_id);
     const description = extractDescription(raw_description, tase_id);
@@ -291,6 +303,7 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
       dividend_yield: null,
       market_value: null,
       cost_basis_total: null,
+      unrealized_pnl,
     });
   }
 
@@ -313,7 +326,7 @@ export function holdingsToCsv(holdings: ParsedHolding[]): {
   csv: string;
   unmappable: ParsedHolding[];
 } {
-  const header = 'ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total';
+  const header = 'ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total,unrealized_pnl';
   const mappable: ParsedHolding[] = [];
   const unmappable: ParsedHolding[] = [];
 
@@ -333,7 +346,8 @@ export function holdingsToCsv(holdings: ParsedHolding[]): {
     const mktValLocal = (h.market_value_local ?? null) !== null ? String(h.market_value_local) : '';
     const divYld = (h.dividend_yield ?? null) !== null ? String(h.dividend_yield) : '';
     const costBasisTotal = (h.cost_basis_total ?? null) !== null ? String(h.cost_basis_total) : '';
-    return `${h.symbol},${h.quantity},${avg},${h.currency},${h.as_of_date},${desc},${markPr},${mktVal},${mktValLocal},${divYld},${costBasisTotal}`;
+    const unrealizedPnl = (h.unrealized_pnl ?? null) !== null ? String(h.unrealized_pnl) : '';
+    return `${h.symbol},${h.quantity},${avg},${h.currency},${h.as_of_date},${desc},${markPr},${mktVal},${mktValLocal},${divYld},${costBasisTotal},${unrealizedPnl}`;
   });
 
   return { csv: [header, ...rows].join('\n'), unmappable };
