@@ -1,6 +1,7 @@
 /**
- * Tests for the Bond Ladder page — Issue #356.
+ * Tests for the Bond Ladder page — Issue #356 / #364.
  * Verifies that bond_holdings data renders correctly in the Bond Holdings table.
+ * Updated to use getLadderOverviewByAccount (per-account view, Issue #364).
  */
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -8,7 +9,7 @@ import type { Bond, RungData, IncomePoint, DistributionRow } from '@/components/
 
 // --- mock server actions -------------------------------------------------------
 vi.mock('../actions', () => ({
-  getLadderOverview: vi.fn(),
+  getLadderOverviewByAccount: vi.fn(),
   getLadderIncome: vi.fn(),
   addLadderBond: vi.fn(),
   updateLadderRung: vi.fn(),
@@ -19,6 +20,13 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => ({ get: () => null }),
 }));
 
+// next/link stub
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
 // Ladder sub-components are not under test here; keep them lightweight
 vi.mock('@/components/Ladder/Ladder', () => ({
   Ladder: () => <div data-testid="ladder-stub" />,
@@ -27,7 +35,7 @@ vi.mock('@/components/Ladder/ExpectedIncomeChart', () => ({
   ExpectedIncomeChart: () => <div data-testid="income-chart-stub" />,
 }));
 
-import { getLadderOverview, getLadderIncome } from '../actions';
+import { getLadderOverviewByAccount, getLadderIncome } from '../actions';
 import LadderPageWrapper from '../page';
 
 // ---------------------------------------------------------------------------
@@ -72,9 +80,9 @@ const EMPTY_INCOME: { ok: true; data: { income_series: IncomePoint[]; distributi
 
 // ---------------------------------------------------------------------------
 
-describe('LadderPage — Bond Holdings table (#356)', () => {
+describe('LadderPage — Bond Holdings table (#356 / #364)', () => {
   it('renders the Bond Holdings section heading', async () => {
-    (getLadderOverview as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (getLadderOverviewByAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       data: { rungs: [makeRung(2030)], bonds: make18Bonds() },
     });
@@ -87,7 +95,7 @@ describe('LadderPage — Bond Holdings table (#356)', () => {
   });
 
   it('renders all 18 bonds in the table', async () => {
-    (getLadderOverview as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (getLadderOverviewByAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       data: { rungs: [makeRung(2030)], bonds: make18Bonds() },
     });
@@ -106,7 +114,7 @@ describe('LadderPage — Bond Holdings table (#356)', () => {
       makeBond('early', { maturity_date: '2029-01-01' }),
       makeBond('mid', { maturity_date: '2032-06-15' }),
     ];
-    (getLadderOverview as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (getLadderOverviewByAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       data: { rungs: [makeRung(2030)], bonds },
     });
@@ -122,7 +130,7 @@ describe('LadderPage — Bond Holdings table (#356)', () => {
 
   it('displays coupon_rate as percentage string, not raw decimal', async () => {
     const bond = makeBond('b1', { coupon_rate: 0.0425 });
-    (getLadderOverview as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (getLadderOverviewByAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       data: { rungs: [makeRung(2030)], bonds: [bond] },
     });
@@ -134,8 +142,8 @@ describe('LadderPage — Bond Holdings table (#356)', () => {
     expect(couponCell.textContent).toBe('4.25%');
   });
 
-  it('shows empty state when there are no bonds', async () => {
-    (getLadderOverview as ReturnType<typeof vi.fn>).mockResolvedValue({
+  it('shows bond-holdings-empty when IBKR has rungs but no bonds', async () => {
+    (getLadderOverviewByAccount as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       data: { rungs: [makeRung(2030)], bonds: [] },
     });
