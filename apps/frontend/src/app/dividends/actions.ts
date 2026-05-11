@@ -940,6 +940,11 @@ type AccrualRow = {
   ex_date: string;
 };
 
+type YieldRow = {
+  ticker: string;
+  dividend_yield: string | number | null;
+};
+
 /**
  * Returns dividend-enriched positions for one account tab.
  *
@@ -1006,7 +1011,11 @@ export async function getDividendPositions(
   // 20260511102251) scope reads to the authenticated user's household via
   // trading_account_config.account_id → is_household_member(). Standard client
   // is correct here; admin client workaround from #368 is no longer needed.
-  const [paymentsResult, accrualsResult] = await Promise.all([
+  //
+  // yieldDataResult fetches dividend_yield from stock_positions so that
+  // Schwab/IRA positions with no payment history (CSV-imported, no Flex export)
+  // are still surfaced via the Yahoo-enriched yield stored on each row.
+  const [paymentsResult, accrualsResult, yieldDataResult] = await Promise.all([
     supabase
       .from('dividend_payments')
       .select('symbol, amount, ex_date, report_date, type')
@@ -1019,6 +1028,11 @@ export async function getDividendPositions(
       .select('symbol, gross_rate, ex_date')
       .in('symbol', tickers)
       .order('ex_date', { ascending: false }),
+    supabase
+      .from('stock_positions')
+      .select('ticker, dividend_yield')
+      .eq('account_id', config.id)
+      .not('dividend_yield', 'is', null),
   ]);
 
   // Build per-ticker maps from payment rows.
@@ -1062,6 +1076,17 @@ export async function getDividendPositions(
     }
   }
 
+  // Yield fallback from stock_positions (Yahoo-enriched / Schwab CSV-imported).
+  // Values > 1 are stored as a percentage (e.g. 10.43 → 10.43%); values ≤ 1 are
+  // already a decimal fraction (e.g. 0.0520 → 5.20%).  Normalise to [0,1].
+  const yieldByTicker = new Map<string, number>();
+  for (const row of ((yieldDataResult.data ?? []) as YieldRow[])) {
+    const raw = Number(row.dividend_yield ?? 0);
+    if (raw > 0) {
+      yieldByTicker.set(row.ticker as string, raw > 1 ? raw / 100 : raw);
+    }
+  }
+
   const result: DividendPosition[] = [];
 
   for (const pos of positions) {
@@ -1071,9 +1096,12 @@ export async function getDividendPositions(
 
     const hasTTM = ttmTotal !== undefined && ttmTotal > 0;
     const hasAccrual = accrual !== undefined && accrual.gross_rate > 0;
+    // Yield fallback: use stock_positions.dividend_yield when no payment history
+    const yieldFraction = yieldByTicker.get(ticker) ?? 0;
+    const hasYield = yieldFraction > 0;
 
-    // Filter to dividend-bearing only
-    if (!hasTTM && !hasAccrual) continue;
+    // Include position only when at least one dividend signal is present
+    if (!hasTTM && !hasAccrual && !hasYield) continue;
 
     const qty = pos.quantity;
     const price = pos.mark_price;
@@ -1092,12 +1120,16 @@ export async function getDividendPositions(
         ? roundDecimal((ttmDivPerShare / price) * 100, 4)
         : null;
 
-    // Forward yield: prefer accruals.gross_rate × frequency; else use TTM (already annualised)
+    // Forward yield: prefer accruals.gross_rate × frequency; else use TTM (already annualised);
+    // fall back to stock_positions.dividend_yield (Yahoo/CSV) when no payment history at all.
     let forwardDivPerShare: number | null = null;
     if (hasAccrual) {
       forwardDivPerShare = roundCurrency(accrual!.gross_rate * ppy);
-    } else if (ttmDivPerShare !== null) {
+    } else if (hasTTM && ttmDivPerShare !== null) {
       forwardDivPerShare = ttmDivPerShare;
+    } else if (hasYield && price !== null && price > 0) {
+      // Estimate: annualised dividend per share = price × yield fraction
+      forwardDivPerShare = roundCurrency(price * yieldFraction);
     }
 
     const forwardDividendAnnual =
@@ -1129,7 +1161,7 @@ export async function getDividendPositions(
       forward_yield_pct: forwardYieldPct,
       last_payment_date: lastPayDateByTicker.get(ticker) ?? null,
       payment_frequency: freq,
-      source: (hasTTM || hasAccrual) ? 'flex' : null,
+      source: (hasTTM || hasAccrual) ? 'flex' : (hasYield ? 'csv' : null),
     });
   }
 
