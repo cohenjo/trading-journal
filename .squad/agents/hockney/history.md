@@ -1,3 +1,23 @@
+## 2026-05-11 — #363/#364 Dividends positions-mirror + Bonds per-account (PR #365, commit `fb74195`)
+
+**Scope:** Add `getDividendPositions(accountKey)` + `getDividendSummary()` to dividends backend so UI tabs consume live `stock_positions` data instead of the legacy empty `dividend_positions` table. Add `getLadderOverviewByAccount(accountKey)` for bonds tab filtering.
+
+**Key learnings:**
+- `trading_account_config.account_type` = lowercase 'ibkr'/'schwab'/'ira' is the canonical tab key.
+  Resolution: `account_type → config.id (int) → stock_positions.account_id (int FK)`. Source: `trading/actions.ts:435`.
+- `dividend_payments.account_id` is TEXT (IBKR string "U2515365") — never integer. Join by symbol instead.
+- `dedupeLatestSnapshot()` in `trading/actions.ts` is sacred and unexported. Call `getStockPositions(configId)` to avoid duplication.
+- `dividend_accruals.gross_rate` = per-payment per-share amount (multiply by `paymentsPerYear(frequency)` for annual forward yield).
+- Withholding Tax rows in `dividend_payments.type` must be excluded before TTM aggregation.
+- TTM window anchor = server-side `new Date()`. All payment `ex_date` comparisons in JS (no DB-side date filter in current implementation — filter is post-fetch in JS).
+- Schwab/IRA `dividend_positions` and `bond_holdings` are empty by construction (no data rows). This is expected, not a bug.
+- When refactoring `getDividendDashboard()`, the legacy `positions` field still reads from the old `dividend_positions` table. Only `annual_income` stat was updated. Full deprecation deferred.
+- Test mock pattern: must mock `@/app/trading/actions` when testing `dividends/actions.ts` because `getDividendDashboard` now calls `getStockPositions`.
+
+**Files touched:** `src/types/dividends.ts` (new), `src/app/dividends/actions.ts`, `src/app/dividends/actions.test.ts`, `src/app/dividends/__tests__/dividend-positions.test.ts` (new), `src/app/ladder/actions.ts`
+
+---
+
 ## 2026-05-09 — #335 Migration Drift Resolution (Option B — Pragmatic Prune)
 
 **Scope:** Reconcile 47 local migration files vs 46 remote-applied. Align timestamps,
