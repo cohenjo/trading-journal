@@ -10,6 +10,7 @@ import {
   type BondHolding,
   type BondHoldingPayload,
 } from './actions';
+import { displayCouponRate } from '@/lib/bonds/coupon-rate';
 
 type Holding = BondHolding;
 type HoldingDraft = BondHoldingPayload;
@@ -319,7 +320,7 @@ export default function HoldingsPage() {
                   <span className="ml-1">{h.currency}</span>
                 </td>
                 <td className="border border-slate-800 px-2 py-1 text-right">
-                  {Number(h.coupon_rate).toFixed(3)}%
+                  {displayCouponRate(h.coupon_rate)}
                 </td>
                 <td className="border border-slate-800 px-2 py-1">
                   {h.coupon_frequency.replace("_", "/")}

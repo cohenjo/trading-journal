@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import "../../styles/Ladder.css";
+import { displayCouponRate } from "@/lib/bonds/coupon-rate";
 
 type BondWithCoupon = {
   id: string;
@@ -217,7 +218,7 @@ export const RungDetails: React.FC<RungDetailsProps> = ({
                     {bond.amount.toLocaleString()} {bond.currency}
                   </td>
                   <td>
-                    {((bond.coupon_rate ?? 0) * 100).toFixed(2)}%
+                    {displayCouponRate(bond.coupon_rate, { kind: 'decimal' })}
                   </td>
                   <td>
                     {(bond.amount * (bond.coupon_rate ?? 0)).toLocaleString(
