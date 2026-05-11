@@ -1,4 +1,34 @@
+## 2026-05-11 — #372 & #376 Batch Frontend Fixes
+
+**Issues:** #372 (label htmlFor accessibility), #376 (LadderPage coupon test alignment)
+
+### #372 — Label htmlFor accessibility on TradingAccountSettings
+
+**Problem:** PR #371 LURVG found that `getByLabel('Account Type')` timed out in Playwright tests because the form label had no `htmlFor` attribute, preventing screen readers and test tools from associating the label with its form control.
+
+**Fix:** Added `htmlFor`/`id` pairs to all 9 form labels in `TradingAccountSettings.tsx`:
+- `account-name`, `account-type`, `linked-account` (always shown)
+- `host`, `port`, `client-id` (IBKR-specific)
+- `app-key`, `app-secret`, `account-hash` (Schwab/LeumiIRA)
+
+**Impact:** Improves accessibility compliance and enables reliable Playwright label-based queries.
+
+### #376 — LadderPage coupon test alignment
+
+**Problem:** PR #373 introduced `displayCouponRate()` utility with default `decimals: 3`. Production renders 3-decimal coupons (e.g., "4.250%"), but the LadderPage test expected 2 decimals ("4.25%"), causing test failure (518/519 → 519/519).
+
+**Fix:** Updated test expectation in `LadderPage.test.tsx` line 142: `"4.25%"` → `"4.250%"` to match production behavior.
+
+**Rationale:** No need to modify `displayCouponRate` defaults (used elsewhere correctly); test alignment is the right fix.
+
+**Tests:** All 519 tests pass ✅
+
+**Commit:** `2ee7637` on `squad/372-376-fenster-batch` → PR #378.
+
+---
+
 ## 2026-05-12 — #358 Extract displayCouponRate() utility
+
 
 **Issue:** #358 "Bonds: extract displayCouponRate() utility to remove Bug-2 footgun"
 

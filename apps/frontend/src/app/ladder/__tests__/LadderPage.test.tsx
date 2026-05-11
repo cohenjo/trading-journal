@@ -138,8 +138,8 @@ describe('LadderPage — Bond Holdings table (#356 / #364)', () => {
 
     render(<LadderPageWrapper />);
     const couponCell = await screen.findByTestId('coupon-b1');
-    // Should show "4.25%" not "425.00%"
-    expect(couponCell.textContent).toBe('4.25%');
+    // Should show "4.250%" (3 decimals per displayCouponRate utility)
+    expect(couponCell.textContent).toBe('4.250%');
   });
 
   it('shows bond-holdings-empty when IBKR has rungs but no bonds', async () => {
