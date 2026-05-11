@@ -197,6 +197,23 @@ class TestFetchYahooData:
 
         assert result is None
 
+    @patch("app.worker.yahoo_refresh.time.sleep")
+    def test_normalises_percentage_yield_to_decimal(self, _mock_sleep: MagicMock) -> None:
+        """Yahoo's `dividendYield` info field sometimes returns percentage (e.g. 10.43
+        for 10.43%) instead of a decimal fraction (0.1043).  The worker must normalise
+        values > 1 to [0, 1] before writing to stock_positions.dividend_yield.
+        """
+        mock_tkr = _make_yfinance_mock(close=59.68, div_yield=None)
+        # Simulate the `dividendYield` fallback returning a percentage value
+        mock_tkr.info = {"dividendYield": 10.43}
+        with patch("yfinance.Ticker", return_value=mock_tkr):
+            result = _fetch_yahoo_data("JEPQ")
+
+        assert result is not None
+        assert result["dividend_yield"] is not None
+        # 10.43 / 100 = 0.1043 (stored as decimal)
+        assert abs(float(result["dividend_yield"]) - 0.1043) < 1e-9
+
 
 # ---------------------------------------------------------------------------
 # refresh_stock_positions unit tests (mocked DB + yfinance)

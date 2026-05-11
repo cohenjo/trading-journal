@@ -185,7 +185,13 @@ def _fetch_yahoo_data(yahoo_ticker: str) -> dict[str, Any] | None:
             dividend_yield: Decimal | None = None
             if raw_yield is not None:
                 try:
-                    dividend_yield = Decimal(str(float(raw_yield)))
+                    raw_float = float(raw_yield)
+                    # Yahoo's `dividendYield` field occasionally returns a percentage
+                    # (e.g. 10.43 for 10.43%) rather than a decimal fraction (0.1043).
+                    # Normalise to [0, 1] so the DB always stores the decimal form.
+                    if raw_float > 1:
+                        raw_float = raw_float / 100
+                    dividend_yield = Decimal(str(raw_float))
                 except (InvalidOperation, ValueError):
                     pass
 
