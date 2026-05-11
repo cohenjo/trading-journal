@@ -53,10 +53,36 @@ export interface ParsedHolding {
   currency: string;
   /** Original Hebrew security name preserved for audit/debugging. */
   raw_description: string;
-  /** Original TASE paper number (numeric string). */
+  /** Original TASE paper number (numeric string). Empty string for non-TASE sources. */
   tase_id: string;
   /** ISO 8601 date parsed from the report header (row 2). */
   as_of_date: string;
+  /**
+   * Human-readable security name. For TASE: Hebrew name as-is.
+   * For foreign securities: extracted from parentheses in raw_description.
+   * Populated by Leumi parser (Directive 2026-05-11-1745).
+   */
+  description?: string | null;
+  /**
+   * Point-in-time market price from the broker export snapshot.
+   * For Leumi: שער אחרון (last price). For Schwab: Price column.
+   * Yahoo Finance worker refreshes this going forward.
+   */
+  mark_price?: number | null;
+  /**
+   * Holdings value in ILS (Leumi only: שווי אחזקה ב ₪).
+   * null for non-ILS sources.
+   */
+  market_value_local?: number | null;
+  /**
+   * Dividend yield as a decimal fraction (e.g. 0.0742 = 7.42%).
+   * Populated from Schwab's Div Yld column; null for Leumi.
+   */
+  dividend_yield?: number | null;
+  /** Market value in the security's native currency (Schwab: Mkt Val column). */
+  market_value?: number | null;
+  /** Total cost basis (Schwab: Cost Basis column). */
+  cost_basis_total?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +168,22 @@ function parseNumber(raw: string): number {
   return parseFloat(raw.replace(/,/g, ''));
 }
 
+/**
+ * Extracts the human-readable security name from a raw Leumi description.
+ *
+ * - For TASE securities (non-6-digit-8 paper numbers): the raw_description IS the name.
+ * - For foreign securities on TASE (8-digit starting with 6): name is inside parens,
+ *   e.g. "(JPMORGAN EQUITY PREMIUM INCOME ETF) JEPI" → "JPMORGAN EQUITY PREMIUM INCOME ETF".
+ * - If no parens present (edge case): returns raw_description unchanged.
+ */
+export function extractDescription(rawDescription: string, tasePaperId: string): string {
+  if (/^6\d{7}$/.test(tasePaperId.trim())) {
+    const match = rawDescription.trim().match(/^\((.+?)\)/);
+    if (match) return match[1].trim();
+  }
+  return rawDescription.trim();
+}
+
 // ---------------------------------------------------------------------------
 // XML extraction (SpreadsheetML)
 // ---------------------------------------------------------------------------
@@ -213,6 +255,9 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
     const raw_description = row[1]?.trim() ?? '';
     const avg_cost_raw = row[4]?.trim() ?? '';
     const qty_raw = row[5]?.trim() ?? '';
+    // Col 6: שער אחרון (last price); Col 7: שווי אחזקה ב ₪ (holding value in ILS)
+    const mark_price_raw = row[6]?.trim() ?? '';
+    const market_value_local_raw = row[7]?.trim() ?? '';
 
     if (!tase_id || !raw_description) continue;
 
@@ -222,7 +267,14 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
     const avg_cost_val = parseNumber(avg_cost_raw);
     const average_cost = isNaN(avg_cost_val) ? null : avg_cost_val;
 
+    const mark_price_val = parseNumber(mark_price_raw);
+    const mark_price = isNaN(mark_price_val) ? null : mark_price_val;
+
+    const market_value_local_val = parseNumber(market_value_local_raw);
+    const market_value_local = isNaN(market_value_local_val) ? null : market_value_local_val;
+
     const { symbol, exchange, currency } = deriveExchange(raw_description, tase_id);
+    const description = extractDescription(raw_description, tase_id);
 
     holdings.push({
       symbol,
@@ -233,6 +285,12 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
       raw_description,
       tase_id,
       as_of_date,
+      description,
+      mark_price,
+      market_value_local,
+      dividend_yield: null,
+      market_value: null,
+      cost_basis_total: null,
     });
   }
 
@@ -245,10 +303,9 @@ export function parseLeumiIraXmlText(xmlText: string): ParsedHolding[] {
 
 /**
  * Converts an array of ParsedHolding objects to a CSV string matching the
- * FastAPI /positions/import endpoint expected format:
- *   ticker, quantity, average_cost, currency, as_of_date
+ * import endpoint expected format.
  *
- * Holdings with exchange='UNKNOWN' are excluded.
+ * Holdings with exchange='UNKNOWN' are excluded and returned in `unmappable`.
  *
  * @returns { csv, unmappable } where unmappable is the list of excluded holdings.
  */
@@ -256,7 +313,7 @@ export function holdingsToCsv(holdings: ParsedHolding[]): {
   csv: string;
   unmappable: ParsedHolding[];
 } {
-  const header = 'ticker,quantity,average_cost,currency,as_of_date';
+  const header = 'ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total';
   const mappable: ParsedHolding[] = [];
   const unmappable: ParsedHolding[] = [];
 
@@ -270,7 +327,13 @@ export function holdingsToCsv(holdings: ParsedHolding[]): {
 
   const rows = mappable.map((h) => {
     const avg = h.average_cost !== null ? String(h.average_cost) : '';
-    return `${h.symbol},${h.quantity},${avg},${h.currency},${h.as_of_date}`;
+    const desc = h.description ? `"${h.description.replace(/"/g, '""')}"` : '';
+    const markPr = (h.mark_price ?? null) !== null ? String(h.mark_price) : '';
+    const mktVal = (h.market_value ?? null) !== null ? String(h.market_value) : '';
+    const mktValLocal = (h.market_value_local ?? null) !== null ? String(h.market_value_local) : '';
+    const divYld = (h.dividend_yield ?? null) !== null ? String(h.dividend_yield) : '';
+    const costBasisTotal = (h.cost_basis_total ?? null) !== null ? String(h.cost_basis_total) : '';
+    return `${h.symbol},${h.quantity},${avg},${h.currency},${h.as_of_date},${desc},${markPr},${mktVal},${mktValLocal},${divYld},${costBasisTotal}`;
   });
 
   return { csv: [header, ...rows].join('\n'), unmappable };

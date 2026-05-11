@@ -617,32 +617,185 @@ export async function updateStockPosition(
 }
 
 /**
- * Imports manual stock positions from a CSV file via the FastAPI backend.
- * Forwards the multipart upload to POST /api/accounts/{accountId}/positions/import.
- * Degrades gracefully when the backend is unreachable.
+ * Imports manual stock positions from a CSV file (Leumi enriched or Schwab format)
+ * directly into Supabase — no FastAPI proxy required.
+ *
+ * Expected CSV header (enriched format produced by holdingsToCsv / parseSchwabCsv):
+ *   ticker,quantity,average_cost,currency,as_of_date,description,mark_price,
+ *   market_value,market_value_local,dividend_yield,cost_basis_total
+ *
+ * RLS policy is satisfied by the user-scoped createClient() — the calling user
+ * must be a household writer for the target account's household_id.
  */
 export async function importManualPositionsCsv(
   accountId: number,
   formData: FormData,
 ): Promise<ImportStockPositionsResult> {
   try {
-    const res = await fetch(`/api/accounts/${accountId}/positions/import`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (!res.ok) {
-      const msg = await res.text().catch(() => `HTTP ${res.status}`);
-      return { ok: false, error: msg || `Import failed (${res.status})` };
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) return { ok: false, error: 'Not authenticated' };
+
+    const householdId = await resolveHouseholdId(user.id);
+    if (!householdId) return { ok: false, error: 'No active household found' };
+
+    // Get account's household_id to confirm access (RLS enforces this on write too,
+    // but an early check gives a clear error message).
+    const { data: acct, error: acctErr } = await supabase
+      .from('trading_account_config')
+      .select('id')
+      .eq('id', accountId)
+      .single();
+
+    if (acctErr || !acct) return { ok: false, error: 'Account not found or access denied' };
+
+    const fileEntry = formData.get('file');
+    if (!fileEntry || typeof fileEntry === 'string') {
+      return { ok: false, error: 'No file provided' };
     }
-    const json = await res.json() as unknown;
-    const imported =
-      typeof json === 'object' && json !== null && 'imported' in json
-        ? Number((json as Record<string, unknown>).imported)
-        : 0;
-    return { ok: true, imported };
+
+    const csvText = await (fileEntry as File).text();
+    const lines = csvText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return { ok: false, error: 'CSV is empty or has no data rows' };
+
+    const headerLine = lines[0];
+    const hasEnrichedHeader = headerLine.includes('description');
+
+    // Parse header to determine column positions dynamically.
+    const headers = headerLine.split(',').map(h => h.trim().toLowerCase());
+    const col = (name: string) => headers.indexOf(name);
+
+    const idxTicker = col('ticker');
+    const idxQty = col('quantity');
+    const idxAvgCost = col('average_cost');
+    const idxCurrency = col('currency');
+    const idxDate = col('as_of_date');
+    const idxDesc = col('description');
+    const idxMarkPrice = col('mark_price');
+    const idxMktVal = col('market_value');
+    const idxMktValLocal = col('market_value_local');
+    const idxDivYld = col('dividend_yield');
+    const idxCostBasis = col('cost_basis_total');
+
+    if (idxTicker === -1 || idxQty === -1) {
+      return { ok: false, error: 'CSV is missing required columns (ticker, quantity)' };
+    }
+
+    const ext = hasEnrichedHeader ? 'enriched CSV' : 'CSV';
+    console.log('[trading-import] received', ext, 'file, size=', csvText.length, 'account=', accountId);
+
+    /**
+     * Minimal RFC-4180 field extractor — handles double-quoted fields with
+     * embedded commas and escaped double-quotes.
+     */
+    function parseField(fields: string[], idx: number): string {
+      if (idx === -1 || idx >= fields.length) return '';
+      const raw = fields[idx].trim();
+      if (raw.startsWith('"') && raw.endsWith('"')) {
+        return raw.slice(1, -1).replace(/""/g, '"');
+      }
+      return raw;
+    }
+
+    /**
+     * Split a CSV line respecting double-quoted fields that may contain commas.
+     */
+    function splitCsvLine(line: string): string[] {
+      const result: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            current += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+            current += ch;
+          }
+        } else if (ch === ',' && !inQuotes) {
+          result.push(current);
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+      result.push(current);
+      return result;
+    }
+
+    function parseOptionalNumber(s: string): number | null {
+      if (!s) return null;
+      const n = Number(s);
+      return Number.isFinite(n) ? n : null;
+    }
+
+    const rows = lines.slice(1).map(line => {
+      const fields = splitCsvLine(line);
+      const ticker = parseField(fields, idxTicker);
+      const quantity = parseOptionalNumber(parseField(fields, idxQty)) ?? 0;
+      const average_cost = parseOptionalNumber(parseField(fields, idxAvgCost));
+      const currency = parseField(fields, idxCurrency) || 'USD';
+      const as_of_date = parseField(fields, idxDate) || new Date().toISOString().slice(0, 10);
+      const description = idxDesc !== -1 ? parseField(fields, idxDesc) || null : null;
+      const mark_price = idxMarkPrice !== -1 ? parseOptionalNumber(parseField(fields, idxMarkPrice)) : null;
+      const market_value = idxMktVal !== -1 ? parseOptionalNumber(parseField(fields, idxMktVal)) : null;
+      const market_value_local = idxMktValLocal !== -1 ? parseOptionalNumber(parseField(fields, idxMktValLocal)) : null;
+      const dividend_yield = idxDivYld !== -1 ? parseOptionalNumber(parseField(fields, idxDivYld)) : null;
+      const cost_basis_total = idxCostBasis !== -1 ? parseOptionalNumber(parseField(fields, idxCostBasis)) : null;
+
+      return {
+        ticker,
+        quantity,
+        cost_basis: average_cost,
+        currency,
+        as_of_date,
+        description,
+        mark_price,
+        market_value,
+        market_value_local,
+        dividend_yield,
+        cost_basis_total,
+        account_id: accountId,
+        household_id: householdId,
+        source: 'manual' as const,
+      };
+    }).filter(r => r.ticker && r.quantity > 0);
+
+    if (rows.length === 0) return { ok: false, error: 'No valid positions found in CSV' };
+
+    // Delete existing manual positions for this account before re-inserting.
+    const { error: deleteErr } = await supabase
+      .from('stock_positions')
+      .delete()
+      .eq('account_id', accountId)
+      .eq('household_id', householdId)
+      .eq('source', 'manual');
+
+    if (deleteErr) {
+      console.error('[importManualPositionsCsv] delete error:', deleteErr.message);
+      return { ok: false, error: 'Failed to clear existing positions' };
+    }
+
+    const { error: insertErr } = await supabase
+      .from('stock_positions')
+      .insert(rows);
+
+    if (insertErr) {
+      console.error('[importManualPositionsCsv] insert error:', insertErr.message);
+      return { ok: false, error: `Import failed: ${insertErr.message}` };
+    }
+
+    return { ok: true, imported: rows.length };
   } catch (err) {
-    console.error('[importManualPositionsCsv] fetch error:', err);
-    return { ok: false, error: 'Unable to reach import endpoint' };
+    console.error('[importManualPositionsCsv] unexpected error:', err);
+    return { ok: false, error: 'Import failed unexpectedly' };
   }
 }
 

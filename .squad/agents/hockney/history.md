@@ -697,3 +697,32 @@ Delivered hotfix for RLS default-deny on dividend tables. Three root causes fixe
 
 ## 2026-05-11: PR #381 — Leumi IRA Excel Import
 PR #381 merged at `9d70f69`. Skill extracted: `.squad/skills/leumi-xls-import/SKILL.md`. 30 IRA positions live in prod (18 TASE + 4 US + 8 LSE). Tests: 519 → 568 (+49).
+
+---
+
+## 2026-05-11 — P0 Import Fix + Schwab CSV + Leumi Field Enrichment (PR squad/import-endpoint-p0-schwab-leumi)
+
+**Scope:** Three coordinated changes: (1) fix P0 "Unable to reach import endpoint" on Vercel, (2) add Schwab CSV import support, (3) enrich Leumi XLS with description/mark_price/market_value_local.
+
+**P0 Root Cause:**
+`importManualPositionsCsv` (marked `'use server'`) called `fetch('/api/...')` with a relative URL. Node.js native `fetch` requires absolute URLs — on Vercel this threw `TypeError: Invalid URL`, caught → "Unable to reach import endpoint". Additionally the API route proxied to FastAPI which isn't deployed on Vercel.
+
+**Fix:**
+Rewrote `importManualPositionsCsv` to skip HTTP entirely — parse CSV text in the server action and upsert directly via `createClient()` (user-scoped, RLS-gated). No admin client needed.
+
+**Enriched CSV format** (11 columns):
+`ticker,quantity,average_cost,currency,as_of_date,description,mark_price,market_value,market_value_local,dividend_yield,cost_basis_total`
+
+**Schwab detection:** `isSchwabCsv()` checks preamble `"Positions for account`; `CSVImportButton` sniffs first 256 bytes to dispatch Schwab vs generic CSV.
+
+**Schema changes:** Added `dividend_yield NUMERIC(8,6)` and `market_value_local NUMERIC(18,4)` to `stock_positions` (migration `20260511200000`).
+
+**UI:** Numeric TASE tickers now show Hebrew description as subtitle (`dir="rtl"`) in the Ticker column.
+
+**Tests:** 568 → 619 (+51). Build: ✅ green.
+
+**Learnings:**
+- Server actions cannot use relative `fetch`. Always use absolute URLs or bypass HTTP with direct Supabase calls.
+- Schwab CSV has a preamble row with the as-of date in `YYYY/MM/DD` — skip rows 0–1 before the real header.
+- `isSchwabCsv()` content-sniff (first 256 bytes) is more reliable than file extension for broker CSV routing.
+- New DB columns should always have a migration file even when added via `execute_sql` directly.

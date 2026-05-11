@@ -418,3 +418,23 @@ Executed full LURVG validation suite for #363 (Dividends positions-mirror) + #36
 **One non-blocking doc error:** PR body claims "22 TASE" — actual is 18 TASE (real file has 30 holdings: rows 6–35, not rows 5–35). Algorithm is correct; only PR description is wrong.
 
 **Learnings banked:** SpreadsheetML XML from Leumi IRA fails ET parser on malformed `& ` entity (e.g., `LEGAL & GEN`) at line 278 — regex extraction is the correct approach and matches TS implementation. Jony (account_id=72) uses Google OAuth so no JWT can be programmatically obtained; FastAPI import must be DB-simulated via service role for LURVG. `activeTab` on accounts page defaults to `"ibkr"` and has no URL-param sync — Playwright tests must click `data-testid="account-tab-ira"` explicitly. Jony's 30 IRA positions now live in production (source='manual', as_of_date=2026-05-11) — this is the intended final state.
+
+## 2026-05-11: LURVG — PR #394 Import endpoint P0 fix + Schwab CSV + Leumi enrichment
+
+**Verdict: 🟢 GREEN.** All 4 LURVG tests passed (P0 code inspection, UI testids, Schwab CSV import, Leumi XLS import). 619 unit tests pass. Build green. Schema confirmed.
+
+**Evidence:**
+- Phase 0: 619 tests, build green, migration `20260511200000` confirmed
+- Phase 1: `description`, `mark_price`, `dividend_yield`, `market_value_local` all nullable in prod
+- Phase 3 (Leumi): 30 positions, 15/18 TASE numeric tickers with Hebrew description (e.g. "מיטב השקעות"), 30/30 mark_price, 30/30 market_value_local, 18 `dir="rtl"` subtitle spans in UI
+- Phase 4 (Schwab): 21 positions, 21/21 description+mark_price+dividend_yield, all USD, cash rows correctly skipped
+- Phase 6: IBKR 270 rows unchanged, production Leumi/Schwab data untouched
+
+**Learnings:**
+- **Import endpoint P0 pattern:** The bug was `fetch('/api/...')` in a `'use server'` action — Node's native fetch requires absolute URLs. Fix pattern: replace fetch+API route with direct `createClient()` + `supabase.from(...).insert()`. This eliminates the HTTP roundtrip and is more secure (RLS enforced).
+- **Broker file import validation strategy (schema assertion + DB post-state diff):** For validating broker CSV/XLS imports without disrupting production data: (1) provision ephemeral user + household + account config via admin client; (2) upload file via Playwright on the provisioned account; (3) assert DB post-state via admin client for enriched fields; (4) cleanup in finally block. This gives full end-to-end coverage without touching real accounts.
+- **`holdingsToCsv()` does NOT emit `exchange`:** The Leumi parser computes exchange (TASE/US/LSE) but `holdingsToCsv()` omits it from the CSV header. `listing_exchange` in `stock_positions` remains NULL for Leumi imports. Future work: add exchange to CSV and map to `listing_exchange` in server action.
+- **`trading_account_config` required columns:** `host`, `port`, `client_id`, `compute_options_income` are NOT NULL. Admin-provisioned test configs must include these: `host: 'e2e-test-host', port: 9999, client_id: 0, compute_options_income: false`.
+- **`stock_positions` column is `listing_exchange` not `exchange`:** Any DB query or insert using `exchange` will fail — use `listing_exchange`.
+- **Accounts page tab init:** `activeTab` defaults to `"ibkr"`, URL query param `?account=schwab` has no effect. Playwright tests must explicitly click `getByTestId('account-tab-schwab')` to switch tabs before triggering file upload.
+- **Schwab CSV sentinel rows:** Parser correctly skips "Cash & Cash Investments", "Positions Total", "--", and blank symbols. Validated by absence of cash rows in DB post-state.
