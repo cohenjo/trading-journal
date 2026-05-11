@@ -1,3 +1,32 @@
+## 2026-05-12 — Leumi TASE currency tagging + market_value normalisation (issue #407 Round 2)
+
+**Scope:** Fix the Leumi XLS parser's `market_value=null` for TASE rows, and repair
+existing DB rows where the old Yahoo worker had stored agorot values under `currency='ILS'`.
+PR #410 (worker fix) was correct but only affected rows the worker could refresh;
+rows with no Yahoo ticker mapping kept their inflated agorot values.
+
+**Changes:**
+1. **`apps/frontend/src/lib/trading/leumi-xls-parser.ts`** — TASE rows now compute
+   `market_value = quantity × mark_price / 100` at parse time so the CSV import stores
+   a correct ILS value from day one, before the Yahoo worker first runs.
+2. **`supabase/migrations/20260512000000_fix_leumi_currency_tagging.sql`** — NEW: idempotent
+   UPDATE that re-tags `currency='ILS'` → `'ILA'` and divides `market_value` by 100 for
+   numeric-ticker rows.
+3. **`supabase/migrations/20260512000001_fix_leumi_market_value_local_agorot.sql`** — NEW:
+   follow-up migration dividing `market_value_local` by 100 for rows where the ratio
+   `market_value_local / market_value ≈ 100` (agorot leftover from old Yahoo worker runs).
+4. **`apps/frontend/src/lib/trading/leumi-xls-parser.test.ts`** — 6 new tests: market_value
+   computed correctly, US/LSE stays null, CSV carries ILS not agorot.
+5. **`.squad/decisions/inbox/hockney-leumi-parser-2026-05-12.md`** — canonical storage contract.
+
+**Before/After (account 72):**
+- Before: ILS rows total = 77,191,808 (agorot, inflated 100×)
+- After: TASE (ILA) positions total = 1,181,114 ILS ✓ (expected 1.23M–1.34M)
+
+**Tests:** 632/632 frontend + 622/622 backend passing. Closes #407.
+
+---
+
 ## 2026-05-11 — dividend_yield canonical decimal format (PR #413)
 
 **Scope:** Standardise `stock_positions.dividend_yield` to decimal fraction `[0, 1]`.
