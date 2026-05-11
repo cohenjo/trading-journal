@@ -280,3 +280,97 @@ function expandRungIds(id: string): string[] {
 function synthesizeBondId(issuer: string, maturityDate: string): string {
   return `bond-${maturityDate.slice(0, 4)}-${issuer.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
 }
+
+// ── Per-account bond filtering — Issue #364 ──────────────────────────────────
+// bond_holdings.account_id is a text field (IBKR account string, e.g. "U2515365").
+// Mapping: trading_account_config.account_type → trading_account_config.account_id (text).
+// Schwab/IRA have account_id = NULL in trading_account_config → returns [] as expected.
+
+/**
+ * Returns bond holdings for one account tab, filtered by account_id text mapping.
+ * Reuses the same account-type → account_id mapping as stock_positions (via
+ * trading_account_config.account_type). See apps/frontend/src/app/trading/actions.ts.
+ *
+ * @param accountKey - lowercase account type token: 'ibkr' | 'schwab' | 'ira'
+ */
+export async function getLadderOverviewByAccount(
+  accountKey: 'ibkr' | 'schwab' | 'ira',
+): Promise<ActionResult<{ rungs: RungData[]; bonds: Bond[] }>> {
+  const supabase = await createClient();
+  const auth = await requireUserAndHousehold(supabase);
+  if (!auth.ok) return auth;
+
+  // Resolve the IBKR account_id string for this tab
+  const { data: configRows, error: configError } = await supabase
+    .from('trading_account_config')
+    .select('id, account_id')
+    .eq('account_type', accountKey)
+    .is('deleted_at', null)
+    .limit(1);
+
+  if (configError || !configRows || configRows.length === 0) {
+    return { ok: true, data: { rungs: [], bonds: [] } };
+  }
+  const ibkrAccountId = (configRows[0] as { id: number; account_id: string | null }).account_id;
+  if (!ibkrAccountId) {
+    // Schwab/IRA: account_id is NULL → no bond holdings for this account
+    return { ok: true, data: { rungs: [], bonds: [] } };
+  }
+
+  const [rungsResult, holdingBonds] = await Promise.all([
+    supabase
+      .from('ladder_rungs')
+      .select('id,year,start_date,end_date,target_amount,current_amount')
+      .eq('household_id', auth.householdId)
+      .order('year', { ascending: true }),
+    fetchHoldingBondsByAccountId(supabase, auth.householdId, ibkrAccountId),
+  ]);
+
+  if (rungsResult.error) {
+    console.error('[getLadderOverviewByAccount] rungs query error:', rungsResult.error.message);
+    return { ok: false, error: 'Failed to load ladder rungs' };
+  }
+
+  const currentAmountByRung = computeCurrentAmountByRung(holdingBonds);
+  return {
+    ok: true,
+    data: buildOverview((rungsResult.data ?? []) as RungData[], holdingBonds, currentAmountByRung),
+  };
+}
+
+/**
+ * Reads live bond positions from bond_holdings filtered to one IBKR account_id string.
+ * Mirrors fetchHoldingBonds but adds the account_id text filter.
+ */
+async function fetchHoldingBondsByAccountId(
+  supabase: SupabaseLike,
+  householdId: string,
+  accountId: string,
+): Promise<Bond[]> {
+  const { data, error } = await supabase
+    .from('bond_holdings')
+    .select('id,ticker,issuer,currency,face_value,coupon_rate,coupon_frequency,maturity_date')
+    .eq('household_id', householdId)
+    .eq('account_id', accountId)
+    .is('deleted_at', null)
+    .order('maturity_date', { ascending: true });
+
+  if (error) {
+    console.error('[fetchHoldingBondsByAccountId] query error:', error.message);
+    return [];
+  }
+  return ((data ?? []) as BondHoldingRow[]).map((row) => {
+    const maturityYear = new Date(`${row.maturity_date}T00:00:00Z`).getUTCFullYear();
+    return {
+      id: row.id,
+      ticker: row.ticker ?? null,
+      issuer: row.issuer ?? row.ticker ?? row.id,
+      currency: row.currency ?? 'USD',
+      face_value: Number(row.face_value),
+      coupon_rate: Number(row.coupon_rate ?? 0) / 100,
+      coupon_frequency: row.coupon_frequency ?? 'SEMI_ANNUAL',
+      maturity_date: String(row.maturity_date),
+      rung_id: rungIdForYear(maturityYear),
+    };
+  });
+}
