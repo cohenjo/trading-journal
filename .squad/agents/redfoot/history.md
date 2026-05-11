@@ -438,3 +438,31 @@ Executed full LURVG validation suite for #363 (Dividends positions-mirror) + #36
 - **`stock_positions` column is `listing_exchange` not `exchange`:** Any DB query or insert using `exchange` will fail — use `listing_exchange`.
 - **Accounts page tab init:** `activeTab` defaults to `"ibkr"`, URL query param `?account=schwab` has no effect. Playwright tests must explicitly click `getByTestId('account-tab-schwab')` to switch tabs before triggering file upload.
 - **Schwab CSV sentinel rows:** Parser correctly skips "Cash & Cash Investments", "Positions Total", "--", and blank symbols. Validated by absence of cash rows in DB post-state.
+
+---
+
+## LURVG Validation — PR #399 + PR #400 (2026-05-11)
+
+**PRs validated:**
+- **#399** `squad/parser-fixes-cost-basis-leumi-ticker` — Schwab cost_basis/gain, Leumi ticker contamination, Leumi unrealized P&L
+- **#400** `squad/yahoo-finance-worker-issue-395` — Yahoo Finance worker, APScheduler, yfinance, 11 TASE overrides
+
+**Verdicts:**
+- PR #399: 🟢 **GREEN** — 625 tests pass, build green, tsx direct parser validation confirms all three fixes correct
+- PR #400: 🟡 **YELLOW/PASS** — 613 tests pass, Docker healthy, idempotency confirmed (Run 1 + Run 2 both 300/321 refreshed, timestamps advanced); two flags for Jony re: TASE price units and tase_yahoo_map correctness
+
+**Key findings:**
+- Leumi parser fix: `col 0 .split(/\s+/)[0]` correctly strips Hebrew names from TASE paper IDs. Zero contaminated tickers in 30-position real file.
+- Leumi unrealized_pnl: col 10 extraction confirmed; 18/18 ILS rows populated.
+- Schwab unrealized_pnl: `gain $` header maps to `unrealized_pnl`; 21/21 positions populated (ABR=-1177, ADC=+1331.5, JEPQ=+928.53 match PR table exactly).
+- Yahoo worker: `{'total': 321, 'refreshed': 300, 'skipped': 13, 'failed': 8}` on both runs. 13 skipped = EUR tickers without listing_exchange (expected). 8 failed = delisted/no-data (graceful, no crash).
+- Worker regression: `description` and `cost_basis_total` preserved after worker run.
+
+**Learnings:**
+- **Two-PR LURVG coordination:** When two PRs in sequence share a DB schema (PR #400 adds columns consumed by PR #399 server action), validate schema on PR #400 branch and parser on PR #399 branch independently. No need to merge first since schema was already in prod.
+- **Direct tsx parser fallback:** Playwright ephemeral account upload flow blocked when UI requires full account config beyond just a `trading_account_config` row. Fallback: `npx tsx` direct validation of parser functions with real broker files — covers all parser logic without UI ceremony.
+- **Ephemeral account limitation (account-not-configured state):** The UI file-upload input only appears when the account is fully configured + active. Admin-provisioned accounts with minimal config show empty-state CTA ("Account not configured"), not the upload input. Future workaround: seed all NOT NULL columns in `trading_account_config` AND set a valid `account_status`/`is_active` value if required.
+- **Idempotency pattern:** Run worker twice with `--run-once`, compare `max(prices_refreshed_at)` before and after run 2. Timestamps must advance and row counts must be stable.
+- **PR comment EMU restriction:** `gh pr comment` blocked by Enterprise Managed User policy. Verdicts must be delivered via other channels (drop note in `.squad/decisions/inbox/`, direct message to team).
+- **TASE price unit ambiguity:** Yahoo Finance returns TASE prices in ILS; broker exports use agorot (ILA = 1/100 ILS). If mark_price is stored raw from Yahoo, the units differ from broker values. Always flag this for the developer to confirm conversion is handled.
+- **`trading_account_config` required columns (update):** In addition to previously learned columns, `account_status` or `is_active` may also be required for the UI to render the upload input.

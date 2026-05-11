@@ -749,3 +749,40 @@ Rewrote `importManualPositionsCsv` to skip HTTP entirely — parse CSV text in t
 - **Fixture fidelity:** Hand-crafted test fixtures can silently diverge from real broker export formats. Always validate parser against a real file (LURVG) before closing a parser PR. If LURVG finds a schema mismatch, update the fixture to match real-world output.
 - **Column coverage on parsers:** When adding a new column to a parser, also check: (1) `ParsedHolding` interface, (2) `holdingsToCsv()` CSV header + row, (3) `importManualPositionsCsv()` column index + insert object. All three must be updated together.
 - **Schema pre-check:** Always query `information_schema.columns` before applying a migration — `unrealized_pnl` and `cost_basis_total` were already in the schema from a previous migration, saving unnecessary DDL.
+## 2026-05-11 — #395 Yahoo Finance worker for stock_positions daily price refresh (PR squad/yahoo-finance-worker-issue-395)
+
+**Scope:** Build a background worker that daily refreshes `mark_price`, `dividend_yield`, and `market_value` for all `stock_positions` rows via Yahoo Finance.
+
+**Changes:**
+1. **`apps/backend/app/worker/yahoo_refresh.py`** — NEW: core worker module
+   - `resolve_yahoo_ticker(ticker, currency, listing_exchange, tase_map)` — exchange detection
+   - `_fetch_yahoo_data(yahoo_ticker)` — yfinance with 3-attempt retry + 200ms throttle
+   - `refresh_stock_positions()` — full DB sweep, row-level fault isolation
+   - Registers `yahoo_price_refresh` cron (default: `0 22 * * MON-FRI`) via JOB_SCHEDULES side-effect
+2. **`apps/backend/app/worker/yahoo_refresh_cli.py`** — NEW: `--run-once` CLI entrypoint
+3. **`apps/backend/app/worker/runtime.py`** — import yahoo_refresh as side-effect
+4. **`apps/backend/tests/test_yahoo_refresh.py`** — NEW: 34 unit tests, 3 integration tests (skipped by default)
+5. **`apps/backend/alembic/versions/a1b2c3d4e5f6_add_yahoo_worker_schema.py`** — migration:
+   - `stock_positions.prices_refreshed_at TIMESTAMPTZ`
+   - `stock_positions.yahoo_ticker TEXT`
+   - `tase_yahoo_map` table with 11 seed entries
+6. **`docker-compose.backend.yml`** — YAML_REFRESH_CRON env passthrough
+7. **Schema applied to prod via `execute_sql`** before migration file.
+
+**Manual run result:** 300/321 positions refreshed, 13 skipped (EUR no-listing_exchange, TASE bonds), 8 failed (delisted/no-data tickers like some fund codes).
+
+**Docker rebuild:** Confirmed — scheduler started with 11 jobs (was 10), `yahoo_price_refresh` visible in startup log.
+
+**Tests:** 34 passed, 3 skipped (integration). All existing tests green.
+
+## Learnings
+
+- **Yahoo Finance + SQLAlchemy text()**: Use `CAST(:id AS UUID)` not `:id::uuid` — the `::` conflicts with SQLAlchemy's parameter binding syntax (psycopg2 sends it literally).
+- **session.exec() vs session.execute()**: SQLModel's `Session.exec()` takes only a statement (no params dict). Use `session.execute(text(...), params_dict)` for parameterized raw SQL in workers.
+- **TASE map via DB table**: Prefer DB table over Python dict for TASE→Yahoo override map — allows ops to add new overrides without code changes. Pattern: load at job start, pass as dict.
+- **Bloomberg slash in LSE tickers**: Leumi exports LSE tickers with trailing `/` (e.g. `NG/`, `RR/`). Strip before appending `.L` suffix. See `_clean_lse_ticker()`.
+- **Exchange detection fallback**: When `listing_exchange` is NULL (Leumi IRA imports), use currency as proxy: GBP=LSE, ILA/ILS=TASE, USD=US, EUR=skip (ambiguous without listing_exchange).
+- **Worker pattern**: Follow `ndx_daily_sync` pattern for new scheduled jobs — side-effect module import in runtime.py, JOB_SCHEDULES append with guard, no direct scheduler manipulation.
+- **TASE price unit reality (confirmed 2026-05-11)**: Yahoo Finance returns TASE prices with `info.currency == 'ILA'` (Israeli agorot). LUMI.TA → 7550 ILA = ₪75.50. The canonical unit for all TASE `stock_positions` rows in this system is **ILA (agorot)**. Do NOT set `currency='ILS'` after a Yahoo write — the raw Yahoo value is already in ILA.
+- **TASE map verification method**: Always validate paper_id → company mapping at `https://www.bizportal.co.il/capitalmarket/quote/shares/<paper_id>`. The page title shows the company name in Hebrew. Never assume — ALL 11 original seed entries in migration `a1b2c3d4e5f6` were wrong. Corrected to 7 entries (4 ETF entries deleted, no confirmed Yahoo ticker for index funds).
+- **ETF/fund paper IDs**: Israeli ETF/mutual fund paper IDs (Kasam, MTF, iShares-TASE) should NOT be in `tase_yahoo_map` unless a specific Yahoo ticker is confirmed. They skip gracefully with `WARN [no-yahoo-resolution]` and retain their broker-imported prices.
