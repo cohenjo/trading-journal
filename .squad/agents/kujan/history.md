@@ -11,6 +11,39 @@ DevOps/Platform engineer. Owns Supabase infrastructure, Docker/Aspire setup, CI/
 
 ---
 
+## 2026-05-11 — ✅ Migration Drift Repair: Track Ad-Hoc Migrations (#335 Steps 1–2)
+
+**Scope:** Register 6 ad-hoc-applied migrations in `supabase_migrations.schema_migrations` so `supabase db push` no longer treats them as pending.
+
+**Background:** On 2026-05-10, Flex pipeline Phase 1 DDL was applied directly to prod outside the Supabase CLI migration flow. All schema objects exist in prod but the tracking table had no rows for these versions, causing `db push` to attempt re-runs (which would fail on the non-idempotent `ADD CONSTRAINT` in 000200).
+
+**Executed:**
+- ✅ Verified all 5 DDL migration objects exist in prod (columns, tables, indexes)
+- ✅ Verified 000600 (`bond_holdings_add_listing_exchange`) was already tracked — only 000100–000500 + backfill needed insertion
+- ✅ Dry-run `BEGIN/ROLLBACK` confirmed correct INSERT shape
+- ✅ Applied tracking INSERTs via `supabase_migrations.schema_migrations` with `ON CONFLICT (version) DO NOTHING`
+- ✅ Verification `SELECT` confirmed all 6 rows present
+
+**Versions tracked (tracking only — no DDL re-run):**
+| Version | Name |
+|---------|------|
+| 20260510000100 | extend_stock_positions_flex_fields |
+| 20260510000200 | flex_bond_holdings_snapshot |
+| 20260510000300 | dividend_payments |
+| 20260510000400 | dividend_accruals |
+| 20260510000500 | security_reference |
+| 20260511052500 | backfill_placeholder_account_households |
+
+**Artifacts:**
+- Runbook: `supabase/scripts/track-adhoc-migrations.sql`
+- Decisions inbox: `.squad/decisions/inbox/kujan-migration-tracking-2026-05-11.md`
+
+**PR:** `squad/335-migration-tracking` — `chore(migrations): track ad-hoc applied migrations (#335 Steps 1-2)`
+
+**Handoff:** Hockney can now safely run Step 5 (apply `20260501120000` insurance_policies cleanup). Steps 3+4 (RLS policies) also remain for Hockney.
+
+---
+
 ## 2026-05-11 — ✅ Nightly Backup Triage: #344–#349 (pg_dump v17 mismatch + issue-spam dedupe)
 
 **Scope:** Root-cause the 6× backup failure issues filed 2026-05-09 and harden the workflow.
