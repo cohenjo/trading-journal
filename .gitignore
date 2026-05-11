@@ -156,3 +156,4 @@ yarn-error.log*
 
 # worker runtime heartbeat (local artifact)
 apps/backend/worker_heartbeat
+.env*.local
