@@ -1,3 +1,31 @@
+## 2026-05-11 — #374 RLS policies: dividend tables + security_reference (PR squad/374-rls-policies)
+
+**Scope:** Fix 3 tables with RLS enabled + zero policies (silent deny-all). Executes Steps 3–4 of #335 reconciliation plan.
+
+**Changes:**
+1. **Migration `20260511102251_add_rls_policies_dividend_disable_security_reference`** — applied to prod:
+   - `ALTER TABLE security_reference DISABLE ROW LEVEL SECURITY` — global reference data, no household scope needed; service role writes only
+   - `CREATE POLICY "dividend_payments_select"` — SELECT via `account_id IN (SELECT account_id FROM trading_account_config WHERE is_household_member(household_id))` — canonical pattern matching `stock_positions`/`trading_account_config`
+   - `CREATE POLICY "dividend_accruals_select"` — same pattern
+2. **`apps/frontend/src/app/dividends/actions.ts`** — removed `createAdminClient()` workaround from `getDividendPositions()` (#368); switched to standard `createClient()` (cookie-based, RLS-gated)
+3. **`apps/frontend/src/app/dividends/__tests__/dividend-positions.test.ts`** — updated mocks: removed admin-client mock split, merged dividend tables into userTables; updated stale workaround comment
+
+**Architectural decisions:**
+- `security_reference`: RLS disabled (not household-scoped; all authenticated users may read all tickers)
+- `dividend_payments`/`dividend_accruals`: household-scoped via `trading_account_config.account_id` JOIN + `is_household_member()` SECURITY DEFINER function — consistent with all other household-scoped tables
+- No INSERT/UPDATE/DELETE policies needed — backend worker (options_sync.py) uses SQLAlchemy direct DB connection which bypasses PostgREST/RLS entirely
+
+**Before/After policy snapshot:**
+- `dividend_payments`: 0 policies → 1 (SELECT, household-scoped)
+- `dividend_accruals`: 0 policies → 1 (SELECT, household-scoped)
+- `security_reference`: rowsecurity=true, 0 policies → rowsecurity=false
+
+**Tests:** 518/519 passing (1 pre-existing LadderPage coupon_rate formatting failure, not introduced by this PR). Build: ✅ green.
+
+**Related:** #374, #335, #367, #368
+
+---
+
 ## 2026-05-11 — #335 Migration drift audit (branch `squad/335-migration-drift-audit`)
 
 **Scope:** Full audit of Supabase migration drift — local repo vs prod `schema_migrations`. Audit-only dispatch; no schema changes applied.

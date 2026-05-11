@@ -22,10 +22,6 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/admin', () => ({
-  createAdminClient: vi.fn(),
-}));
-
 // ── trading/actions mock (provides getStockPositions with deduplication) ──────
 
 vi.mock('@/app/trading/actions', () => ({
@@ -38,7 +34,6 @@ import {
 } from '../actions';
 import { detectPaymentFrequency } from '@/lib/dividends/payment-frequency';
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import { getStockPositions } from '@/app/trading/actions';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -192,20 +187,17 @@ function mockSupabaseFrom(
 }
 
 /**
- * Sets up both user-scoped and admin-scoped Supabase client mocks.
- * - userTables: tables queried via createClient() — auth, household_members, trading_account_config
- * - adminTables: tables queried via createAdminClient() — dividend_payments, dividend_accruals
+ * Sets up the user-scoped Supabase client mock.
+ * All tables — including dividend_payments and dividend_accruals — are now
+ * queried via createClient() after RLS policies were added in migration
+ * 20260511102251 (issue #374). The admin-client split is no longer needed.
  */
 function setupMocks(
   userTables: Record<string, () => Promise<{ data: unknown; error: unknown }>>,
-  adminTables: Record<string, () => Promise<{ data: unknown; error: unknown }>> = {},
 ) {
   (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
     auth: { getUser: mockGetUser },
     from: mockSupabaseFrom(userTables),
-  });
-  (createAdminClient as ReturnType<typeof vi.fn>).mockReturnValue({
-    from: mockSupabaseFrom(adminTables),
   });
 }
 
@@ -266,7 +258,6 @@ describe('getDividendPositions', () => {
       auth: { getUser: mockGetUser },
       from: vi.fn(),
     });
-    (createAdminClient as ReturnType<typeof vi.fn>).mockReturnValue({ from: vi.fn() });
 
     const result = await getDividendPositions('ibkr');
     expect(result).toEqual([]);
@@ -327,8 +318,6 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-      },
-      {
         dividend_payments: () => Promise.resolve({ data: payments, error: null }),
         dividend_accruals: () => Promise.resolve({ data: [], error: null }),
       },
@@ -374,8 +363,6 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-      },
-      {
         dividend_payments: () => Promise.resolve({ data: payments, error: null }),
         dividend_accruals: () => Promise.resolve({ data: accruals, error: null }),
       },
@@ -419,8 +406,6 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-      },
-      {
         dividend_payments: () => Promise.resolve({ data: payments, error: null }),
         dividend_accruals: () => Promise.resolve({ data: [], error: null }),
       },
@@ -454,8 +439,6 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-      },
-      {
         dividend_payments: () => Promise.resolve({ data: [], error: null }),
         dividend_accruals: () => Promise.resolve({ data: [], error: null }),
       },
@@ -481,8 +464,6 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-      },
-      {
         dividend_payments: () => Promise.resolve({ data: payments, error: null }),
         dividend_accruals: () => Promise.resolve({ data: [], error: null }),
       },
@@ -516,8 +497,6 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-      },
-      {
         dividend_payments: () => Promise.resolve({ data: payments, error: null }),
         dividend_accruals: () => Promise.resolve({ data: [], error: null }),
       },
@@ -534,10 +513,10 @@ describe('getDividendPositions', () => {
   });
 
   it('[regression] surfaces positions via accruals when payments table is empty (RLS gate regression)', async () => {
-    // Simulates the prod situation: dividend_payments returns [] (blocked by RLS/no policies),
-    // but dividend_accruals has a live gross_rate entry for the ticker.
-    // Fix: admin client bypasses RLS on both tables; this test ensures the accruals-only
-    // code path still works even when payments come back empty.
+    // Simulates early production state where dividend_payments was empty.
+    // Even when payments come back empty, accruals-only code path must still surface positions.
+    // RLS SELECT policies added in migration 20260511102251 (#374) — this test verifies
+    // the accruals-only logic itself is intact.
     mockAuth();
 
     const accruals = [
@@ -559,8 +538,6 @@ describe('getDividendPositions', () => {
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-      },
-      {
         dividend_payments: () => Promise.resolve({ data: [], error: null }),
         dividend_accruals: () => Promise.resolve({ data: accruals, error: null }),
       },
@@ -607,14 +584,10 @@ describe('getDividendSummary', () => {
             error: null,
           });
         },
-      }),
-    }));
-    (createAdminClient as ReturnType<typeof vi.fn>).mockReturnValue({
-      from: mockSupabaseFrom({
         dividend_payments: () => Promise.resolve({ data: payments, error: null }),
         dividend_accruals: () => Promise.resolve({ data: [], error: null }),
       }),
-    });
+    }));
 
     (getStockPositions as ReturnType<typeof vi.fn>).mockImplementation(async (accountId?: number | null) => {
       if (accountId === 1) return [IBKR_POS_JEPI];
