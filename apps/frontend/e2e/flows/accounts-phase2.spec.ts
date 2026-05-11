@@ -24,13 +24,13 @@ test.describe('Phase 2 — accounts tab / header @auth', () => {
       await page.goto('/trading/accounts', { waitUntil: 'networkidle', timeout: 20_000 });
 
       // All three tabs visible with correct display labels
-      await expect(page.getByTestId('tab-ibkr')).toBeVisible();
-      await expect(page.getByTestId('tab-schwab')).toBeVisible();
-      await expect(page.getByTestId('tab-ira')).toBeVisible();
+      await expect(page.getByTestId('account-tab-ibkr')).toBeVisible();
+      await expect(page.getByTestId('account-tab-schwab')).toBeVisible();
+      await expect(page.getByTestId('account-tab-ira')).toBeVisible();
 
-      await expect(page.getByTestId('tab-ibkr')).toHaveText('InteractiveBrokers');
-      await expect(page.getByTestId('tab-schwab')).toHaveText('Schwab');
-      await expect(page.getByTestId('tab-ira')).toHaveText('LeumiIRA');
+      await expect(page.getByTestId('account-tab-ibkr')).toHaveText('InteractiveBrokers');
+      await expect(page.getByTestId('account-tab-schwab')).toHaveText('Schwab');
+      await expect(page.getByTestId('account-tab-ira')).toHaveText('LeumiIRA');
     } finally {
       await cleanupHouseholdData(householdId);
     }
@@ -42,7 +42,8 @@ test.describe('Phase 2 — accounts tab / header @auth', () => {
     try {
       await page.goto('/trading/accounts', { waitUntil: 'networkidle', timeout: 20_000 });
 
-      // IBKR is the default active tab — refresh-button must be visible
+      // Click IBKR tab explicitly before asserting — active tab determines which AccountHeader renders
+      await page.getByTestId('account-tab-ibkr').click();
       await expect(page.getByTestId('refresh-button')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('add-position-button')).not.toBeVisible();
     } finally {
@@ -58,7 +59,7 @@ test.describe('Phase 2 — accounts tab / header @auth', () => {
       await page.goto('/trading/accounts', { waitUntil: 'networkidle', timeout: 20_000 });
 
       // Switch to Schwab tab
-      await page.getByTestId('tab-schwab').click();
+      await page.getByTestId('account-tab-schwab').click();
 
       await expect(page.getByTestId('add-position-button')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('refresh-button')).not.toBeVisible();
@@ -74,7 +75,7 @@ test.describe('Phase 2 — accounts tab / header @auth', () => {
     try {
       await page.goto('/trading/accounts', { waitUntil: 'networkidle', timeout: 20_000 });
 
-      await page.getByTestId('tab-ira').click();
+      await page.getByTestId('account-tab-ira').click();
 
       await expect(page.getByTestId('add-position-button')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByTestId('refresh-button')).not.toBeVisible();
