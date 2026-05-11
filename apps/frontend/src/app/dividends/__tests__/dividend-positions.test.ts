@@ -8,6 +8,8 @@
  *  4. Frequency detection heuristic
  *  5. Schwab / IRA returns [] (expected empty state)
  *  6. Unauthenticated caller returns []
+ *  7. [regression] NULL ex_date rows counted via report_date fallback
+ *  8. [regression] Accruals-only path (no payments) still surfaces positions
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -18,6 +20,10 @@ const mockGetUser = vi.fn();
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
+}));
+
+vi.mock('@/lib/supabase/admin', () => ({
+  createAdminClient: vi.fn(),
 }));
 
 // ── trading/actions mock (provides getStockPositions with deduplication) ──────
@@ -32,6 +38,7 @@ import {
 } from '../actions';
 import { detectPaymentFrequency } from '@/lib/dividends/payment-frequency';
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { getStockPositions } from '@/app/trading/actions';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -77,7 +84,7 @@ function mockAuthFail() {
 /** Builds a fluent Supabase chain mock with configurable final resolvers. */
 function buildChain(resolver: () => Promise<unknown>) {
   const chain: Record<string, unknown> = {};
-  const methods = ['select', 'eq', 'neq', 'is', 'in', 'gte', 'not', 'order', 'limit', 'maybeSingle'];
+  const methods = ['select', 'eq', 'neq', 'is', 'in', 'gte', 'or', 'not', 'order', 'limit', 'maybeSingle'];
   for (const m of methods) {
     chain[m] = vi.fn(() => chain);
   }
@@ -158,6 +165,7 @@ function mockSupabaseFrom(
         is: () => makeFluentChain(promise),
         in: () => makeFluentChain(promise),
         gte: () => makeFluentChain(promise),
+        or: () => makeFluentChain(promise),
         not: () => makeFluentChain(promise),
         order: () => makeFluentChain(promise),
         limit: () => makeFluentChain(promise),
@@ -180,6 +188,24 @@ function mockSupabaseFrom(
     }
 
     return makeFluentChain(result);
+  });
+}
+
+/**
+ * Sets up both user-scoped and admin-scoped Supabase client mocks.
+ * - userTables: tables queried via createClient() — auth, household_members, trading_account_config
+ * - adminTables: tables queried via createAdminClient() — dividend_payments, dividend_accruals
+ */
+function setupMocks(
+  userTables: Record<string, () => Promise<{ data: unknown; error: unknown }>>,
+  adminTables: Record<string, () => Promise<{ data: unknown; error: unknown }>> = {},
+) {
+  (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
+    auth: { getUser: mockGetUser },
+    from: mockSupabaseFrom(userTables),
+  });
+  (createAdminClient as ReturnType<typeof vi.fn>).mockReturnValue({
+    from: mockSupabaseFrom(adminTables),
   });
 }
 
@@ -240,6 +266,7 @@ describe('getDividendPositions', () => {
       auth: { getUser: mockGetUser },
       from: vi.fn(),
     });
+    (createAdminClient as ReturnType<typeof vi.fn>).mockReturnValue({ from: vi.fn() });
 
     const result = await getDividendPositions('ibkr');
     expect(result).toEqual([]);
@@ -247,12 +274,9 @@ describe('getDividendPositions', () => {
 
   it('returns [] when household cannot be resolved', async () => {
     mockAuth();
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
-        household_members: () =>
-          Promise.resolve({ data: null, error: null }),
-      }),
+    setupMocks({
+      household_members: () =>
+        Promise.resolve({ data: null, error: null }),
     });
 
     const result = await getDividendPositions('ibkr');
@@ -261,18 +285,11 @@ describe('getDividendPositions', () => {
 
   it('returns [] for schwab tab (no config account_id → no payments)', async () => {
     mockAuth();
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
-        household_members: () =>
-          Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
-        trading_account_config: () =>
-          // Schwab has account_id = null
-          Promise.resolve({
-            data: [{ id: 71, account_id: null }],
-            error: null,
-          }),
-      }),
+    setupMocks({
+      household_members: () =>
+        Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+      trading_account_config: () =>
+        Promise.resolve({ data: [{ id: 71, account_id: null }], error: null }),
     });
     (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
@@ -282,17 +299,11 @@ describe('getDividendPositions', () => {
 
   it('returns [] for ira tab (no stock positions)', async () => {
     mockAuth();
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
-        household_members: () =>
-          Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
-        trading_account_config: () =>
-          Promise.resolve({
-            data: [{ id: 72, account_id: null }],
-            error: null,
-          }),
-      }),
+    setupMocks({
+      household_members: () =>
+        Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+      trading_account_config: () =>
+        Promise.resolve({ data: [{ id: 72, account_id: null }], error: null }),
     });
     (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
@@ -310,22 +321,18 @@ describe('getDividendPositions', () => {
       { symbol: 'JEPI', amount: '40.00', ex_date: '2025-05-15', report_date: '2025-05-19', type: 'Dividends' },
     ];
 
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
+    setupMocks(
+      {
         household_members: () =>
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
-          Promise.resolve({
-            data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }],
-            error: null,
-          }),
-        dividend_payments: () =>
-          Promise.resolve({ data: payments, error: null }),
-        dividend_accruals: () =>
-          Promise.resolve({ data: [], error: null }),
-      }),
-    });
+          Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
+      },
+      {
+        dividend_payments: () => Promise.resolve({ data: payments, error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      },
+    );
 
     (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([IBKR_POS_JEPI]);
 
@@ -361,19 +368,18 @@ describe('getDividendPositions', () => {
       { symbol: 'JEPI', amount: '40.00', ex_date: '2025-02-14', report_date: '2025-02-18', type: 'Dividends' },
     ];
 
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
+    setupMocks(
+      {
         household_members: () =>
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-        dividend_payments: () =>
-          Promise.resolve({ data: payments, error: null }),
-        dividend_accruals: () =>
-          Promise.resolve({ data: accruals, error: null }),
-      }),
-    });
+      },
+      {
+        dividend_payments: () => Promise.resolve({ data: payments, error: null }),
+        dividend_accruals: () => Promise.resolve({ data: accruals, error: null }),
+      },
+    );
 
     (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([IBKR_POS_JEPI]);
 
@@ -399,7 +405,7 @@ describe('getDividendPositions', () => {
     mockAuth();
 
     // No accruals → forward_div_per_share = ttm_div_per_share (already annualised as 12-month sum)
-    // All 4 payments must be within the TTM window (ex_date >= 2025-05-11)
+    // All 4 payments must be within the TTM window (ex_date >= last-year)
     const payments = [
       { symbol: 'JEPI', amount: '30.00', ex_date: '2025-11-15', report_date: '2025-11-20', type: 'Dividends' },
       { symbol: 'JEPI', amount: '30.00', ex_date: '2025-08-14', report_date: '2025-08-18', type: 'Dividends' },
@@ -407,19 +413,18 @@ describe('getDividendPositions', () => {
       { symbol: 'JEPI', amount: '30.00', ex_date: '2025-05-15', report_date: '2025-05-19', type: 'Dividends' },
     ];
 
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
+    setupMocks(
+      {
         household_members: () =>
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-        dividend_payments: () =>
-          Promise.resolve({ data: payments, error: null }),
-        dividend_accruals: () =>
-          Promise.resolve({ data: [], error: null }),
-      }),
-    });
+      },
+      {
+        dividend_payments: () => Promise.resolve({ data: payments, error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      },
+    );
 
     (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([IBKR_POS_JEPI]);
 
@@ -443,20 +448,18 @@ describe('getDividendPositions', () => {
       id: 'pos-2',
     };
 
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
+    setupMocks(
+      {
         household_members: () =>
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-        dividend_payments: () =>
-          // No payments for META
-          Promise.resolve({ data: [], error: null }),
-        dividend_accruals: () =>
-          Promise.resolve({ data: [], error: null }),
-      }),
-    });
+      },
+      {
+        dividend_payments: () => Promise.resolve({ data: [], error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      },
+    );
 
     (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([IBKR_POS_JEPI, nonDivPos]);
 
@@ -472,24 +475,105 @@ describe('getDividendPositions', () => {
       { symbol: 'JEPI', amount: '40.00', ex_date: '2025-11-15', report_date: '2025-11-20', type: 'Dividends' },
     ];
 
-    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({
-      auth: { getUser: mockGetUser },
-      from: mockSupabaseFrom({
+    setupMocks(
+      {
         household_members: () =>
           Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
         trading_account_config: () =>
           Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
-        dividend_payments: () =>
-          Promise.resolve({ data: payments, error: null }),
-        dividend_accruals: () =>
-          Promise.resolve({ data: [], error: null }),
-      }),
-    });
+      },
+      {
+        dividend_payments: () => Promise.resolve({ data: payments, error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      },
+    );
 
     (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([IBKR_POS_JEPI]);
 
     const result = await getDividendPositions('ibkr');
     expect(result[0].source).toBe('flex');
+  });
+
+  // ── Regression tests (hotfix 2026-05-11) ──────────────────────────────────
+
+  it('[regression] counts payment toward TTM when ex_date is NULL but report_date is within window', async () => {
+    // Mirrors real IBKR Flex export behaviour: ex_date is NULL, report_date is set.
+    // Previously the .gte('ex_date', ...) filter excluded all such rows, returning [].
+    mockAuth();
+
+    const ONE_YEAR_AGO = new Date();
+    ONE_YEAR_AGO.setDate(ONE_YEAR_AGO.getDate() - 180); // safely within TTM
+    const withinTTM = ONE_YEAR_AGO.toISOString().split('T')[0];
+
+    const payments = [
+      // ex_date intentionally NULL — matches real IBKR Flex export
+      { symbol: 'JEPI', amount: '44.76', ex_date: null, report_date: withinTTM, type: 'Dividends' },
+    ];
+
+    setupMocks(
+      {
+        household_members: () =>
+          Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+        trading_account_config: () =>
+          Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
+      },
+      {
+        dividend_payments: () => Promise.resolve({ data: payments, error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      },
+    );
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([IBKR_POS_JEPI]);
+
+    const result = await getDividendPositions('ibkr');
+    // JEPI must surface — not be dropped because ex_date was null
+    expect(result).toHaveLength(1);
+    expect(result[0].ticker).toBe('JEPI');
+    // TTM total = 44.76
+    expect(result[0].ttm_dividend_total).toBe(44.76);
+  });
+
+  it('[regression] surfaces positions via accruals when payments table is empty (RLS gate regression)', async () => {
+    // Simulates the prod situation: dividend_payments returns [] (blocked by RLS/no policies),
+    // but dividend_accruals has a live gross_rate entry for the ticker.
+    // Fix: admin client bypasses RLS on both tables; this test ensures the accruals-only
+    // code path still works even when payments come back empty.
+    mockAuth();
+
+    const accruals = [
+      { symbol: 'O', gross_rate: '0.2705', ex_date: '2026-04-30' },
+    ];
+
+    const posO = {
+      ...IBKR_POS_JEPI,
+      ticker: 'O',
+      id: 'pos-o',
+      description: 'Realty Income Corp',
+      quantity: 20,
+      mark_price: 52.0,
+    };
+
+    setupMocks(
+      {
+        household_members: () =>
+          Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+        trading_account_config: () =>
+          Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
+      },
+      {
+        dividend_payments: () => Promise.resolve({ data: [], error: null }),
+        dividend_accruals: () => Promise.resolve({ data: accruals, error: null }),
+      },
+    );
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([posO]);
+
+    const result = await getDividendPositions('ibkr');
+    expect(result).toHaveLength(1);
+    expect(result[0].ticker).toBe('O');
+    // forward yield from accruals: gross_rate × paymentsPerYear(null/annual) = 0.2705 × 1 = 0.2705
+    // roundCurrency rounds to 2dp: 0.27
+    expect(result[0].forward_div_per_share).toBe(0.27);
   });
 });
 
@@ -523,12 +607,14 @@ describe('getDividendSummary', () => {
             error: null,
           });
         },
-        dividend_payments: () =>
-          Promise.resolve({ data: payments, error: null }),
-        dividend_accruals: () =>
-          Promise.resolve({ data: [], error: null }),
       }),
     }));
+    (createAdminClient as ReturnType<typeof vi.fn>).mockReturnValue({
+      from: mockSupabaseFrom({
+        dividend_payments: () => Promise.resolve({ data: payments, error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      }),
+    });
 
     (getStockPositions as ReturnType<typeof vi.fn>).mockImplementation(async (accountId?: number | null) => {
       if (accountId === 1) return [IBKR_POS_JEPI];

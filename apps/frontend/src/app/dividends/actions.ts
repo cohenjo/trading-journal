@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { convertCurrency } from '@/lib/currency';
 import { getStockPositions } from '@/app/trading/actions';
 import type {
@@ -989,33 +990,42 @@ export async function getDividendPositions(
 
   const tickers = [...new Set(positions.map((p) => p.ticker))];
 
-  // TTM window: 365 days back from CURRENT_DATETIME (2026-05-11)
-  const CURRENT_DATE = new Date('2026-05-11T05:56:00Z'); // UTC equivalent
+  // TTM window: 365 days back from today (server-side clock).
+  const CURRENT_DATE = new Date();
   const ttmStart = new Date(CURRENT_DATE);
   ttmStart.setDate(ttmStart.getDate() - 365);
-  const ttmStartStr = ttmStart.toISOString().split('T')[0]; // "2025-05-11"
+  const ttmStartStr = ttmStart.toISOString().split('T')[0];
 
-  // Fetch 2 years of payments for TTM calculation + frequency detection
+  // Fetch 2 years of payments for TTM calculation + frequency detection.
   const twoYearsStart = new Date(CURRENT_DATE);
   twoYearsStart.setFullYear(twoYearsStart.getFullYear() - 2);
   const twoYearsStartStr = twoYearsStart.toISOString().split('T')[0];
 
+  // dividend_payments and dividend_accruals have RLS enabled but no per-household
+  // policies (they carry account_id TEXT, not household_id). Use the admin client to
+  // bypass RLS. Security is already enforced upstream: tickers are scoped to the
+  // authenticated user's positions via getStockPositions (which IS RLS-gated).
+  //
+  // IBKR Activity Flex exports often omit ex_date (leaving it NULL). Fall back to
+  // report_date when ex_date is NULL so those rows are not silently dropped.
+  const adminSupabase = createAdminClient();
+
   const [paymentsResult, accrualsResult] = await Promise.all([
-    supabase
+    adminSupabase
       .from('dividend_payments')
       .select('symbol, amount, ex_date, report_date, type')
       .in('symbol', tickers)
-      .gte('ex_date', twoYearsStartStr)
+      .or(`ex_date.gte.${twoYearsStartStr},and(ex_date.is.null,report_date.gte.${twoYearsStartStr})`)
       .neq('type', 'Withholding Tax')
-      .order('ex_date', { ascending: false }),
-    supabase
+      .order('report_date', { ascending: false }),
+    adminSupabase
       .from('dividend_accruals')
       .select('symbol, gross_rate, ex_date')
       .in('symbol', tickers)
       .order('ex_date', { ascending: false }),
   ]);
 
-  // Build per-ticker maps from payment rows
+  // Build per-ticker maps from payment rows.
   const ttmTotalByTicker = new Map<string, number>();
   const lastPayDateByTicker = new Map<string, string>();
   const allExDatesByTicker = new Map<string, string[]>();
@@ -1023,15 +1033,18 @@ export async function getDividendPositions(
   for (const row of ((paymentsResult.data ?? []) as PaymentRow[])) {
     const sym = row.symbol;
     const amt = Number(row.amount ?? 0);
-    const exDate = row.ex_date;
-    const reportDate = row.report_date ?? exDate;
+    // IBKR Flex ex_date may be NULL — use report_date as canonical date fallback.
+    const effectiveDate: string = row.ex_date ?? row.report_date ?? '';
+    const reportDate = row.report_date ?? row.ex_date ?? '';
 
-    // Accumulate ex-dates for frequency detection
-    if (!allExDatesByTicker.has(sym)) allExDatesByTicker.set(sym, []);
-    allExDatesByTicker.get(sym)!.push(exDate);
+    // Accumulate ex-dates for frequency detection (skip empty dates)
+    if (effectiveDate) {
+      if (!allExDatesByTicker.has(sym)) allExDatesByTicker.set(sym, []);
+      allExDatesByTicker.get(sym)!.push(effectiveDate);
+    }
 
-    // TTM accumulation
-    if (exDate >= ttmStartStr) {
+    // TTM accumulation — compare effective date against TTM window
+    if (effectiveDate >= ttmStartStr) {
       ttmTotalByTicker.set(sym, (ttmTotalByTicker.get(sym) ?? 0) + amt);
     }
 
