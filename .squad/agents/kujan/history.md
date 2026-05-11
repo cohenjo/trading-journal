@@ -11,6 +11,23 @@ DevOps/Platform engineer. Owns Supabase infrastructure, Docker/Aspire setup, CI/
 
 ---
 
+## 2026-05-11 — ✅ Nightly Backup Triage: #344–#349 (pg_dump v17 mismatch + issue-spam dedupe)
+
+**Scope:** Root-cause the 6× backup failure issues filed 2026-05-09 and harden the workflow.
+
+**Root cause:** Commit `870a253` (2026-05-05) added the PGDG APT repo but kept installing `postgresql-client-15`. Supabase runs PostgreSQL 17; `PG_DUMP` pointed to `/usr/lib/postgresql/17/bin/pg_dump` which wasn't installed, causing every nightly run to fail immediately. An operator manually triggered the workflow 6 times while investigating, and the `alert-on-failure` job had no deduplication guard, producing 6 identical `priority:critical` issues (#344–#349).
+
+**Executed:**
+- ✅ Confirmed root cause via log analysis (run 25609713276 shows `postgresql-client-15` install attempt with v17 binary path)
+- ✅ pg_dump fix already applied (commits `04d3558`, `fa6b75c`, `1e9e011`) — backup verified working at run [25654224589](https://github.com/cohenjo/trading-journal/actions/runs/25654224589) (`2026-05-11T06:35:26Z`)
+- ✅ Added deduplication to `alert-on-failure` job: closes prior open `🚨 Nightly backup FAILED` issues as "superseded" before opening a single fresh issue
+- ✅ Filed decisions inbox: `kujan-backup-triage-2026-05-11.md`
+- ✅ Closed issues #344–#349 with root-cause comment
+
+**PR:** `squad/backup-triage-344-349` — `chore(infra): backup workflow hardening + dedupe (#344-#349)`
+
+---
+
 ## 2026-05-10 — ✅ Flex Pipeline v2: Applied Migrations + Rebuilt Worker (Image 82fe82a9)
 
 **Scope:** Infrastructure work to apply Flex v2 schema migrations and deploy updated worker for live Flex sync.
