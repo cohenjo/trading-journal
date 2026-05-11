@@ -29,8 +29,8 @@ vi.mock('@/app/trading/actions', () => ({
 import {
   getDividendPositions,
   getDividendSummary,
-  detectPaymentFrequency,
 } from '../actions';
+import { detectPaymentFrequency } from '@/lib/dividends/payment-frequency';
 import { createClient } from '@/lib/supabase/server';
 import { getStockPositions } from '@/app/trading/actions';
 
