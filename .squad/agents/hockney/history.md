@@ -1,3 +1,39 @@
+## 2026-05-11 — Leumi IRA XLS Import — SpreadsheetML parser + multi-exchange ticker resolution (PR squad/leumi-ira-xls-import)
+
+**Scope:** Parse Leumi IRA Excel holdings export and import positions into the IRA account via the existing "Import CSV" button on `/trading/accounts?account=ira`.
+
+**Changes:**
+1. **`apps/frontend/src/lib/trading/leumi-xls-parser.ts`** — NEW: SpreadsheetML XML parser; `deriveExchange()` heuristic; `holdingsToCsv()` converter
+2. **`apps/frontend/src/lib/trading/leumi-xls-parser.test.ts`** — NEW: 48 unit tests covering all exchange branches + Hebrew round-trip
+3. **`apps/frontend/src/lib/trading/__tests__/fixtures/leumi-ira-sample.xls`** — NEW: Redacted SpreadsheetML fixture (7 holdings, synthetic account)
+4. **`CSVImportButton.tsx`** — MODIFIED: now accepts `.csv,.xls,.xlsx`; button label → "Import file"; XLS path dispatches to parser
+5. **`CSVImportButton.test.tsx`** — MODIFIED: aligned with new extensions and label; added XLS path test
+
+**Architecture (Option A — extend existing flow):**
+- XLS parsed client-side → converted to CSV → forwarded to existing FastAPI `/positions/import` endpoint unchanged
+- No backend changes required
+- `TASE_TO_GLOBAL_MAP` seeded empty for future dual-listed stock overrides
+
+**Key findings about the file:**
+- Leumi exports SpreadsheetML XML (not binary XLS) — parseable with pure regex, no binary library needed
+- TASE paper numbers: 8-digit starting with `6` = foreign securities (US or LSE); all others = TASE
+- Exchange suffix: trailing ` LN` in name → LSE/GBP; else → US/USD; pure Hebrew name → TASE/ILA
+- All prices in native currency (ILA agorot for TASE, USD for US, GBP for LSE)
+- Holdings in the 2026-05-11 file: 22 TASE, 4 US, 8 LSE, 0 UNKNOWN (total 30)
+
+**Tests:** 519 → 568/568 (+49). Build: ✅ green. LURVG: 🟡 recommended — Redfoot should validate upload of actual .xls against `/trading/accounts?account=ira` in staging.
+
+## Learnings
+
+- **SpreadsheetML vs binary XLS**: Israeli brokers export SpreadsheetML XML with `.xls` extension. Always check first bytes before reaching for a binary parser.
+- **TASE paper number encoding**: 8-digit numbers starting with `6` reliably identify foreign-listed securities on TASE. The name format `(description) TICKER [LN]` encodes the exchange.
+- **Israeli Agorot (ILA)**: TASE prices are in ILA (1/100 ILS), not ILS. Quantity × price / 100 = market value in ILS. Store currency as `ILA` to avoid data corruption.
+- **Parser architecture**: Separate pure `deriveExchange()` from I/O and make it fully unit-testable. The SpreadsheetML row extraction is also isolated for independent testing.
+- **Fixture redaction**: Replace account numbers with `999-000000/00`, keep security identifiers and structure intact. Hebrew strings must be preserved for encoding validation.
+- **Key file paths**: `leumi-xls-parser.ts`, `leumi-xls-parser.test.ts`, `__tests__/fixtures/leumi-ira-sample.xls`, `CSVImportButton.tsx`
+
+---
+
 ## 2026-05-12 — #335 Step 5: insurance_policies cleanup — drop user_id, require household_id (PR squad/335-insurance-cleanup)
 
 **Scope:** Apply the deferred `insurance_policies` column cleanup that was blocked in the #335 drift audit (MEDIUM severity).
