@@ -17,14 +17,13 @@ DROP POLICY IF EXISTS insurance_policies_insert_own ON public.insurance_policies
 DROP POLICY IF EXISTS insurance_policies_update_own ON public.insurance_policies;
 DROP POLICY IF EXISTS insurance_policies_delete_own ON public.insurance_policies;
 
--- Step 2: Backfill household_id from user_id where possible (if user_id column exists)
--- If row has user_id but not household_id, look up user's default_household_id
+-- Step 2a: Backfill household_id from user_id via user_profile.default_household_id
 DO $$
 BEGIN
   IF EXISTS (
-    SELECT 1 FROM information_schema.columns 
-    WHERE table_schema = 'public' 
-    AND table_name = 'insurance_policies' 
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+    AND table_name = 'insurance_policies'
     AND column_name = 'user_id'
   ) THEN
     UPDATE public.insurance_policies ip
@@ -33,6 +32,29 @@ BEGIN
     WHERE ip.user_id::uuid = up.id
       AND ip.household_id IS NULL
       AND up.default_household_id IS NOT NULL;
+  END IF;
+END $$;
+
+-- Step 2b: Fallback backfill via household_members (for users with null default_household_id)
+-- Picks the first active household membership when user_profile.default_household_id is not set.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+    AND table_name = 'insurance_policies'
+    AND column_name = 'user_id'
+  ) THEN
+    UPDATE public.insurance_policies ip
+    SET household_id = hm.household_id
+    FROM (
+      SELECT DISTINCT ON (user_id) user_id, household_id
+      FROM public.household_members
+      WHERE left_at IS NULL
+      ORDER BY user_id, household_id
+    ) hm
+    WHERE ip.user_id = hm.user_id
+      AND ip.household_id IS NULL;
   END IF;
 END $$;
 
