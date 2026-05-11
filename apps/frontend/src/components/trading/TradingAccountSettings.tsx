@@ -180,8 +180,9 @@ export default function TradingAccountSettings() {
                 <form onSubmit={handleSave} className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-400 mb-2">Account Name</label>
+                            <label htmlFor="account-name" className="block text-sm font-medium text-slate-400 mb-2">Account Name</label>
                             <input
+                                id="account-name"
                                 type="text"
                                 title="Account Name"
                                 placeholder="e.g. Schwab Main"
@@ -192,8 +193,9 @@ export default function TradingAccountSettings() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-2">Account Type</label>
+                            <label htmlFor="account-type" className="block text-sm font-medium text-slate-400 mb-2">Account Type</label>
                             <select
+                                id="account-type"
                                 title="Account Type"
                                 value={editingConfig.account_type ?? "ibkr"}
                                 onChange={(e) => setEditingConfig({ ...editingConfig, account_type: e.target.value as TradingAccountConfig['account_type'] })}
@@ -206,8 +208,9 @@ export default function TradingAccountSettings() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-2">Link to Internal Account</label>
+                            <label htmlFor="linked-account" className="block text-sm font-medium text-slate-400 mb-2">Link to Internal Account</label>
                             <select
+                                id="linked-account"
                                 title="Select internal account to link"
                                 value={editingConfig.linked_account_id ?? ""}
                                 onChange={(e) => setEditingConfig({ ...editingConfig, linked_account_id: e.target.value })}
@@ -223,8 +226,9 @@ export default function TradingAccountSettings() {
                         {isIBKR ? (
                             <>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">Host</label>
+                                    <label htmlFor="host" className="block text-sm font-medium text-slate-400 mb-2">Host</label>
                                     <input
+                                        id="host"
                                         type="text"
                                         title="Host"
                                         placeholder="127.0.0.1"
@@ -234,8 +238,9 @@ export default function TradingAccountSettings() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">Port</label>
+                                    <label htmlFor="port" className="block text-sm font-medium text-slate-400 mb-2">Port</label>
                                     <input
+                                        id="port"
                                         type="number"
                                         title="Port"
                                         placeholder="4001"
@@ -245,8 +250,9 @@ export default function TradingAccountSettings() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">Client ID</label>
+                                    <label htmlFor="client-id" className="block text-sm font-medium text-slate-400 mb-2">Client ID</label>
                                     <input
+                                        id="client-id"
                                         type="number"
                                         title="Client ID"
                                         placeholder="1"
@@ -259,8 +265,9 @@ export default function TradingAccountSettings() {
                         ) : (
                             <>
                                 <div className="md:col-span-2">
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">App Key</label>
+                                    <label htmlFor="app-key" className="block text-sm font-medium text-slate-400 mb-2">App Key</label>
                                     <input
+                                        id="app-key"
                                         type="text"
                                         value={editingConfig.app_key || ""}
                                         onChange={(e) => setEditingConfig({ ...editingConfig, app_key: e.target.value })}
@@ -269,8 +276,9 @@ export default function TradingAccountSettings() {
                                     />
                                 </div>
                                 <div className="md:col-span-2">
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">App Secret</label>
+                                    <label htmlFor="app-secret" className="block text-sm font-medium text-slate-400 mb-2">App Secret</label>
                                     <input
+                                        id="app-secret"
                                         type="password"
                                         value={editingConfig.app_secret || ""}
                                         onChange={(e) => setEditingConfig({ ...editingConfig, app_secret: e.target.value })}
@@ -279,8 +287,9 @@ export default function TradingAccountSettings() {
                                     />
                                 </div>
                                 <div className="md:col-span-2">
-                                    <label className="block text-sm font-medium text-slate-400 mb-2">Account Hash</label>
+                                    <label htmlFor="account-hash" className="block text-sm font-medium text-slate-400 mb-2">Account Hash</label>
                                     <input
+                                        id="account-hash"
                                         type="text"
                                         value={editingConfig.account_hash || ""}
                                         onChange={(e) => setEditingConfig({ ...editingConfig, account_hash: e.target.value })}
