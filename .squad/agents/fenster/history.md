@@ -92,3 +92,26 @@ Delivered full inline CRUD management for Schwab and LeumiIRA manual accounts. A
 ## 2026-05-11 — Hardcoded 3-Tab Pattern + Settings Banners + Playwright Spec
 
 Frontend invariant established: `ACCOUNT_TABS` hardcoded from `TAB_ORDER` keys (`ibkr`, `schwab`, `ira`), never derived from DB rows. Empty config renders `data-testid="account-not-configured"` banner. Settings form defaults to lowercase `account_type` matching DB constraint. Form errors display `data-testid="settings-save-error"` (red) and success (green). E2E spec created: `apps/frontend/e2e/account-tabs.spec.ts` for local and deployed validation. Pattern mirrors `dividends/page.tsx` — tabs hardcoded, DB rows map to visible state.
+
+## 2026-05-11 — #363 Dividends positions-first view + #364 Bonds account tabs
+
+**Issues:** #363 (dividends page refactor to positions-first projected-income view) and #364 (bonds/ladder page 3-tab account pattern). Built on Hockney's backend PR #365 which provided `getDividendPositions()`, `getDividendSummary()`, and `getLadderOverviewByAccount()`.
+
+**Dividends (#363):**
+- Rewrote `dividends/page.tsx`: title "Dividend Income", summary header with total forward annual income, 3-tab layout (IBKR/Schwab/IRA).
+- Created `DividendPositionsTable` — 14-column table sorted by `forward_dividend_annual` DESC. Exports `fmtFrequency` for testing.
+- Created `DividendAccountTab` — per-tab container using `useEffect` + `getDividendPositions(accountKey)`. Shows table or empty state; collapsible history section backed by legacy `DividendDashboard`.
+- Import pattern: `DividendPosition` type from `@/types/dividends`, functions-only from `@/app/dividends/actions` — workaround for TS2440/TS2484 conflict in actions.ts (Hockney's bug, logged in drop-box).
+
+**Bonds (#364):**
+- Refactored `ladder/page.tsx`: added 3-tab bar, switched from `getLadderOverview()` to `getLadderOverviewByAccount(activeTab)`.
+- IBKR always shows full ladder view; Schwab/IRA show `bonds-account-empty` when API returns empty data.
+- `isEmpty` guard: `!loading && !error && activeTab !== 'ibkr' && bonds.length === 0 && rungs.length === 0`.
+
+**Test pattern learned:**
+- Top-level `await` in `beforeEach` for dynamic imports does NOT work in Vitest. Correct pattern: assign mock fn at module level, override return value in `beforeEach` with `.mockResolvedValue()`.
+- When refactoring a page to call a different action function, always update the test's `vi.mock()` factory to include the new function name.
+
+**Tests:** 471 passing (52 files). 3 previously failing LadderPage tests fixed by updating mock factory.
+
+**Commit:** `0eaea1d` on `squad/363-dividends-positions-mirror` → PR #365.
