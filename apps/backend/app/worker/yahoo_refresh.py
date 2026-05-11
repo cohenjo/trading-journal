@@ -13,9 +13,10 @@ Exchange resolution strategy (listing_exchange → Yahoo suffix):
 
 TASE normalization note:
   Leumi IRA imports prices in agorot (ILA = 1/100 ILS).
-  Yahoo Finance returns TASE prices in ILS (full shekels), not agorot.
-  When a TASE position is updated from Yahoo we store the price in ILS
-  and update the currency column from ILA → ILS for consistency.
+  Yahoo Finance also returns TASE prices in ILA (agorot) — empirically
+  confirmed: info.currency == 'ILA' and LUMI.TA price == 7550 (agorot).
+  We store the price as-is and set currency = 'ILA' for all TASE rows
+  so that broker data and Yahoo data remain in the same canonical unit.
 """
 
 from __future__ import annotations
@@ -271,7 +272,7 @@ def _upsert_position_price(
                     dividend_yield    = :dividend_yield,
                     market_value      = :market_value,
                     market_value_local= :market_value_local,
-                    currency          = 'ILS',
+                    currency          = 'ILA',
                     prices_refreshed_at = NOW(),
                     updated_at        = NOW()
                 WHERE id = CAST(:id AS UUID)

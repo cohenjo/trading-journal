@@ -24,6 +24,7 @@ from app.worker.yahoo_refresh import (
     YAHOO_REFRESH_JOB_ID,
     _clean_lse_ticker,
     _fetch_yahoo_data,
+    _upsert_position_price,
     refresh_stock_positions,
     resolve_yahoo_ticker,
 )
@@ -35,9 +36,9 @@ from app.worker.registry import JOB_SCHEDULES
 # ---------------------------------------------------------------------------
 
 SAMPLE_TASE_MAP = {
-    "1081843": "LUMI.TA",
-    "224014": "POLI.TA",
-    "604611": "MZTF.TA",
+    "604611": "LUMI.TA",
+    "662577": "POLI.TA",
+    "1081843": "MTAV.TA",
 }
 
 
@@ -100,11 +101,11 @@ class TestResolveYahooTicker:
 
     def test_null_exchange_ila_known_tase(self) -> None:
         result = resolve_yahoo_ticker("1081843", "ILA", None, SAMPLE_TASE_MAP)
-        assert result == "LUMI.TA"
+        assert result == "MTAV.TA"
 
     def test_null_exchange_ils_known_tase(self) -> None:
         result = resolve_yahoo_ticker("604611", "ILS", None, SAMPLE_TASE_MAP)
-        assert result == "MZTF.TA"
+        assert result == "LUMI.TA"
 
     def test_null_exchange_ila_unknown_tase_returns_none(self) -> None:
         result = resolve_yahoo_ticker("9999999", "ILA", None, SAMPLE_TASE_MAP)
@@ -313,6 +314,92 @@ class TestRefreshStockPositions:
 
 
 # ---------------------------------------------------------------------------
+# TASE unit normalization tests
+# ---------------------------------------------------------------------------
+
+
+class TestTaseCurrencyNormalization:
+    """TASE rows must store currency='ILA' (agorot) — Yahoo Finance returns ILA.
+
+    Yahoo Finance reports TASE prices with info.currency == 'ILA' (Israeli agorot,
+    1/100 ILS). The worker must persist 'ILA', not 'ILS', so that the stored
+    mark_price and the currency column remain consistent with broker XLS imports
+    which also denominate TASE positions in agorot.
+    """
+
+    def test_tase_upsert_writes_currency_ila(self) -> None:
+        """_upsert_position_price(is_tase=True) must use currency='ILA' in the SQL."""
+        mock_session = MagicMock()
+
+        _upsert_position_price(
+            session=mock_session,
+            position_id=uuid4(),
+            yahoo_ticker="LUMI.TA",
+            mark_price=Decimal("7550"),
+            dividend_yield=None,
+            market_value=Decimal("75500"),
+            is_tase=True,
+        )
+
+        assert mock_session.execute.called
+        sql_text = str(mock_session.execute.call_args[0][0])
+        assert "ILA" in sql_text, "TASE UPDATE must set currency='ILA'"
+        assert "ILS" not in sql_text, "TASE UPDATE must NOT set currency='ILS'"
+
+    def test_non_tase_upsert_does_not_override_currency(self) -> None:
+        """_upsert_position_price(is_tase=False) must NOT touch the currency column."""
+        mock_session = MagicMock()
+
+        _upsert_position_price(
+            session=mock_session,
+            position_id=uuid4(),
+            yahoo_ticker="AAPL",
+            mark_price=Decimal("150"),
+            dividend_yield=Decimal("0.005"),
+            market_value=Decimal("1500"),
+            is_tase=False,
+        )
+
+        sql_text = str(mock_session.execute.call_args[0][0])
+        assert "currency" not in sql_text, "Non-TASE UPDATE must not touch currency column"
+
+    def test_refresh_tase_position_uses_ila_currency(self) -> None:
+        """Full refresh flow: a TASE position (ILA, no listing_exchange) must store ILA."""
+        tase_pos = _pos(ticker="604611", currency="ILA", listing_exchange=None)
+        mock_yf = _make_yfinance_mock(close=7550.0, div_yield=0.04)
+        tase_map = {"604611": "LUMI.TA"}
+
+        captured_sql: list[str] = []
+
+        def capture_execute(stmt, params=None):
+            captured_sql.append(str(stmt))
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            return mock_result
+
+        mock_sess = MagicMock()
+        mock_sess.__enter__ = MagicMock(return_value=mock_sess)
+        mock_sess.__exit__ = MagicMock(return_value=False)
+        mock_sess.execute.side_effect = capture_execute
+
+        with (
+            patch("app.worker.yahoo_refresh.Session", return_value=mock_sess),
+            patch("app.worker.yahoo_refresh._load_tase_map", return_value=tase_map),
+            patch("app.worker.yahoo_refresh._fetch_active_positions", return_value=[tase_pos]),
+            patch("yfinance.Ticker", return_value=mock_yf),
+            patch("app.worker.yahoo_refresh.time.sleep"),
+        ):
+            result = refresh_stock_positions()
+
+        assert result["refreshed"] == 1
+        update_sqls = [s for s in captured_sql if "UPDATE stock_positions" in s]
+        assert update_sqls, "Expected at least one UPDATE stock_positions call"
+        update_sql = update_sqls[0]
+        assert "ILA" in update_sql, f"Expected ILA in UPDATE SQL, got: {update_sql}"
+        assert "ILS" not in update_sql, f"Must not write ILS in UPDATE SQL, got: {update_sql}"
+
+
+# ---------------------------------------------------------------------------
 # Schedule registration test
 # ---------------------------------------------------------------------------
 
@@ -356,7 +443,7 @@ class TestIntegration:
         assert result["mark_price"] > Decimal("1")
 
     def test_lumi_ta_has_price(self) -> None:
-        """LUMI.TA — Bank Leumi on Tel Aviv Stock Exchange (priced in ILS)."""
+        """LUMI.TA — Bank Leumi on Tel Aviv Stock Exchange (priced in ILA/agorot)."""
         result = _fetch_yahoo_data("LUMI.TA")
         assert result is not None
         assert result["mark_price"] > Decimal("1")
