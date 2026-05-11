@@ -1,3 +1,27 @@
+## 2026-05-11 — dividend_yield canonical decimal format (PR #413)
+
+**Scope:** Standardise `stock_positions.dividend_yield` to decimal fraction `[0, 1]`.
+Remove Fenster's read-time `>1` heuristic (PR #411) by fixing the root cause and migrating data.
+
+**Root cause:** Yahoo worker fell back to `dividendYield` info field (returns percentage e.g. 10.43)
+when `trailingAnnualDividendYield` was falsy. Schwab CSV parser was already correct.
+
+**Changes:**
+1. **`supabase/migrations/20260511230000_normalise_dividend_yield_to_decimal.sql`** — NEW: idempotent `UPDATE … WHERE dividend_yield > 1` converting 53 pct rows to decimal
+2. **`apps/backend/app/worker/yahoo_refresh.py`** — normalise `raw_yield > 1` before Decimal conversion
+3. **`apps/backend/tests/test_yahoo_refresh.py`** — `test_normalises_percentage_yield_to_decimal` regression test
+4. **`apps/frontend/src/app/dividends/actions.ts`** — remove `raw > 1 ? raw / 100 : raw` heuristic
+5. **`apps/frontend/src/app/dividends/__tests__/dividend-positions.test.ts`** — update JEPQ fixture `'10.43'` → `'0.1043'`
+
+**Before:** 53 pct rows (1.71–22.29), 228 decimal rows.
+**After:** 0 pct rows, 281 decimal rows, MAX=0.530452 < 1. ✅
+
+**Tests:** 627/627 frontend + 40/40 backend passing. Merged SHA: `d1538a7`.
+
+**Decision note:** `.squad/decisions/inbox/hockney-yield-canonicalization-2026-05-11.md`
+
+---
+
 ## 2026-05-11 — Leumi IRA XLS Import — SpreadsheetML parser + multi-exchange ticker resolution (PR squad/leumi-ira-xls-import)
 
 **Scope:** Parse Leumi IRA Excel holdings export and import positions into the IRA account via the existing "Import CSV" button on `/trading/accounts?account=ira`.
