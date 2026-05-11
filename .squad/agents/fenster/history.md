@@ -17,7 +17,7 @@
 
 **Build:** ✅ Next.js build succeeds.
 
-**Commit:** (see PR #<to-be-updated>) on `squad/358-coupon-rate-utility`.
+**Commit:** `9ea88a8` on `squad/358-coupon-rate-utility` → PR #373.
 
 ---
 
