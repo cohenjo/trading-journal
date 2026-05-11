@@ -1205,3 +1205,49 @@ None. All green.
 **Recommendation:** **Safe to proceed.** One-time action: re-verify Vercel GitHub App access post-privacy change. Monitor Actions minutes in first month (expect <600 min/mo). No code changes required.
 
 **References:** GitHub Actions billing docs, Vercel GitHub integration docs.
+
+---
+
+## 2026-05-11 — Sprint: Leumi IRA Excel Import (PR #381)
+
+**By:** Hockney (Backend Dev), Redfoot (Tester)
+
+### Outcome
+- PR #381 merged → `9d70f69`
+- 30 IRA positions live in production: 18 TASE (ILA) + 4 US (USD) + 8 LSE (GBP), account_id=72
+- Tests: 519 → 568 (+49 new tests)
+- Skill extracted: `.squad/skills/leumi-xls-import/SKILL.md`
+- Vercel prod deploy: `36jc6xzkd` — auto-deploy triggered on merge
+
+### File format discovery
+- Leumi's `.xls` export is actually **SpreadsheetML XML** (not binary BIFF8), UTF-8 encoded
+- Structure: 4 overview rows + headers at row 5 + data rows starting row 6 (30 rows = rows 6–35)
+- Use regex-based extraction — do **not** use `xml.etree.ElementTree` (fails on unescaped `&` in names like `LEGAL & GEN`). The `xlsx` (SheetJS) library handles SpreadsheetML transparently if a binary library is ever needed.
+
+### Exchange-mapping heuristic (canonical pattern for Israeli broker exports)
+Paper number + name + currency triangulation:
+
+| Pattern | Exchange | Currency | Symbol |
+|---|---|---|---|
+| 8-digit paper# starting with `6` + name ends ` LN` | LSE | GBP | ticker before ` LN` |
+| 8-digit paper# starting with `6` + `(…) TICKER` parenthesis | US | USD | TICKER |
+| 8-digit paper# starting with `6`, no parens | UNKNOWN | — | paper# |
+| All others (typically <8 digits, or Hebrew-only name) | TASE | ILA | paper# |
+
+- TASE prices are in Israeli Agorot (`ILA` = 1/100 ILS)
+- `TASE_TO_GLOBAL_MAP` in `apps/frontend/src/lib/trading/leumi-xls-parser.ts` is the hand-curated dual-listed override table — starts empty, grow as needed (e.g. Teva `1081157 → TEVA/US/USD`)
+- `raw_description` field stores the original Hebrew text for audit/trace-back
+
+### Architectural directive — multi-format file ingest dispatch
+When extending an existing CSV import button to accept a new file format, prefer **Option A (backfit existing flow)** over adding a new sibling button. Detect file extension client-side and dispatch to the appropriate parser; share the existing position-upsert server action. UI label change ("Import CSV" → "Import file") is acceptable and minimal. This keeps the server action and backend unchanged.
+
+### Documentation hygiene
+Hockney's PR description listed "22 TASE" but the actual count was 18 TASE (typo — rows 6–35 = 30 holdings, not rows 5–35). Redfoot caught this during LURVG; coordinator fixed the PR body before merge.
+
+**Lesson: always verify per-exchange counts sum to the stated total in PR descriptions.**
+
+### LURVG approach for new features
+- "Reproduce-on-main" adapts to "absent on main, present on PR branch" for new features
+- Validator used Supabase service-role SQL to simulate the import for account_id=72 (Jony uses Google OAuth — no programmatic JWT obtainable)
+- Inserting real prod data as part of validation is acceptable when the upload itself IS the desired prod state; document clearly so the user can verify
+- `activeTab` on accounts page defaults to `"ibkr"` with no URL-param sync — Playwright tests must click `data-testid="account-tab-ira"` explicitly (pre-existing UX issue, not introduced by this PR)
