@@ -1251,3 +1251,48 @@ Hockney's PR description listed "22 TASE" but the actual count was 18 TASE (typo
 - Validator used Supabase service-role SQL to simulate the import for account_id=72 (Jony uses Google OAuth — no programmatic JWT obtainable)
 - Inserting real prod data as part of validation is acceptable when the upload itself IS the desired prod state; document clearly so the user can verify
 - `activeTab` on accounts page defaults to `"ibkr"` with no URL-param sync — Playwright tests must click `data-testid="account-tab-ira"` explicitly (pre-existing UX issue, not introduced by this PR)
+
+### 2026-05-11 — Import endpoint P0 fix + Schwab CSV + Leumi field enrichment (PR #394)
+
+**By:** Hockney (Backend Dev), Copilot (Code Gen), Redfoot (Tester)
+**PR:** [#394](https://github.com/cohenjo/trading-journal/pull/394) — `fix(trading): repair import endpoint + add Schwab CSV + Leumi field enrichment`
+**Merged at:** 2026-05-11T15:43:42Z → commit `3d0f061` (production ready on Vercel)
+**Tests:** 568 → 619 (+51) ✅
+
+**What:**
+
+1. **P0 Root Cause & Fix** — `importManualPositionsCsv` (server action) called `fetch('/api/accounts/{id}/positions/import')` with a relative URL. Node.js native `fetch` requires absolute URLs; on Vercel this threw `TypeError: Invalid URL`, caught → `"Unable to reach import endpoint"`. Additionally, the Next.js API route proxied to `NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'` — FastAPI is not on Vercel, so even a valid URL would fail. **Fix:** Rewrote to skip HTTP entirely — parse CSV text in the server action, upsert via `createClient()` user-scoped client (RLS-gated by `is_household_writer(household_id)`). No admin client needed. Old API route left in place but unused.
+
+2. **Schwab CSV Import** — New `schwab-csv-parser.ts` with `isSchwabCsv()` detection (sniffs preamble `"Positions for account..."`), `parseSchwabCsv()` row parser (handles `$`-stripped numbers, `%`-stripped yields, sentinel row skipping). `CSVImportButton` detects on first 256 bytes, dispatches via `parseSchwabCsv()` → `holdingsToCsv()` → server action. Enriched fields: `description`, `mark_price`, `dividend_yield`. All enrichment columns unified under single 11-column format.
+
+3. **Leumi Field Enrichment** — `ParsedHolding` extended with `description`, `mark_price`, `market_value_local`, `dividend_yield`, `cost_basis_total`. `parseLeumiIraXmlText()` now reads col 6 (`שער אחרון` → `mark_price`) and col 7 (`שווי אחזקה ב ₪` → `market_value_local`). `extractDescription()` extracts Hebrew/English name from TASE paper descriptions; for 8-digit TASE IDs starting with '6' (foreign), extracts leading `(...)` text; for pure TASE, returns Hebrew name as-is. All point-in-time data captured from source file — not deferred to worker.
+
+4. **Schema Migration** — `20260511200000_add_dividend_yield_market_value_local_to_stock_positions.sql` adds `dividend_yield NUMERIC(8,6)` and `market_value_local NUMERIC(18,4)` to `stock_positions`. Columns `description` and `mark_price` pre-existing from PR #381.
+
+5. **UI Enhancement** — `StockPositionsTable`: numeric TASE tickers (all-digit paper numbers) show Hebrew `description` as `dir="rtl"` subtitle in Ticker cell for visual Hebrew text direction compliance.
+
+**Schema change:** Migration `20260511200000` applied; `description` + `mark_price` pre-existing from PR #381.
+
+**New artifact:** `.squad/skills/broker-import-validation/SKILL.md` — reusable skill for broker CSV/XLS import testing (ephemeral account + post-state diff + P0 detection pattern + broker-specific assertions).
+
+**Pending:** Yahoo Finance background worker (apps/backend) for periodic `mark_price` + `dividend_yield` refresh on `stock_positions` — captured to backlog as separate issue (see Issues opened in follow-up).
+
+**LURVG validation:** 🟢 **GREEN** — Redfoot validated all 6 phases:
+  - Build: 619 tests pass ✅
+  - Schema: 4 enrichment columns confirmed in prod ✅
+  - Leumi XLS: 30 positions imported, 15/18 TASE numeric tickers have Hebrew description ✅
+  - Schwab CSV: 21 positions imported, all fields populated ✅
+  - P0 check: No "Unable to reach import endpoint" error ✅
+  - UI: Hebrew subtitles render as `dir="rtl"` spans ✅
+
+**Known findings (pre-existing, out of scope):**
+  - `listing_exchange` not populated for Leumi imports (never was; future work to add `exchange` column to CSV format).
+  - 3 TASE numeric tickers without Hebrew description (8-digit IDs starting with '6' = foreign securities; expected behavior).
+  - Vercel preview auth bypass not available (dev-server fallback used for validation).
+
+**Pending backlog issues opened:**
+  - Yahoo Finance worker for periodic `mark_price` + `dividend_yield` refresh
+  - Stale E2E smoke test — `e2e/flows/trading-accounts.spec.ts` expects old UI (3-tab change from PRs #354/#355)
+  - CI shadow DB missing `supabase_realtime` publication
+
+---
