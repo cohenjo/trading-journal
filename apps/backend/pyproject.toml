@@ -33,7 +33,7 @@ dependencies = [
     "python-jose[cryptography]>=3.5.0",
     "passlib[bcrypt]>=1.7.4",
     "bcrypt<5.1",
-    "pydantic-settings>=2.14.0",
+    "pydantic-settings>=2.14.1",
     "pydantic[email]>=2.13.3",
     "apscheduler>=3.11.2",
 ]
