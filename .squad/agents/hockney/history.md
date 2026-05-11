@@ -1,3 +1,18 @@
+## 2026-05-11 — #367 Hotfix: Dividends IBKR tab empty state (PR #368, commit `e6f037d`)
+
+**Scope:** `getDividendPositions` returned [] for IBKR tab despite known holdings (JEPI/O/GS). Two root causes:
+
+1. **RLS default-deny (PRIMARY)**: `dividend_payments` and `dividend_accruals` have RLS enabled with zero `pg_policies` rows → user-scoped `createClient()` returns 0 rows. Fix: use `createAdminClient()` for both tables. Security preserved: ticker list comes from `getStockPositions()` which is RLS-gated by household.
+2. **NULL `ex_date`**: IBKR Flex XML omits ex_date; parser stores NULL for all 340 payment rows. `.gte('ex_date', ...)` silently excludes NULLs. Fix: OR filter `(ex_date.gte.DATE OR (ex_date IS NULL AND report_date.gte.DATE))` + JS fallback `row.ex_date ?? row.report_date ?? ''`.
+3. **Hardcoded date**: `new Date('2026-05-11T05:56:00Z')` would break next day. Fix: `new Date()`.
+
+**Key learnings:**
+- Always check `pg_policies` count when data is missing — RLS + no policies = silent empty results, not an error.
+- `dividend_payments.ex_date` is unreliable (NULL for all IBKR rows). `report_date` is the reliable fallback.
+- `dividend_accruals.ex_date` IS reliably populated — prefer for forward yield.
+- Test mocks don't enforce RLS; integration tests against real Supabase would have caught this sooner.
+- Added `createAdminClient` to the set of imports needed by dividends server actions.
+
 ## 2026-05-11 — Build fix: extract `detectPaymentFrequency` from `'use server'` module (commit `9a438a2`)
 
 **Scope:** Next.js 15 RSC rule: every export in a `'use server'` file **must be async**. Synchronous pure utilities must live in plain modules (`src/lib/…`), never directly exported from `actions.ts`. Moved `detectPaymentFrequency` → `src/lib/dividends/payment-frequency.ts`; updated `actions.ts` (import) and test file. Vercel preview ● Ready: `https://trading-journal-bd3xbzyx3-cohenjos-projects.vercel.app`.
