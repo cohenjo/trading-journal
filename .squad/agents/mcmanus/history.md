@@ -379,3 +379,24 @@ Option A (compute from existing tables) is the right path. `dividend_accruals.gr
 **Critical gap:** Schwab + LeumiIRA accounts have no ingested dividend data. New Dividends page will be IBKR-only until those accounts are wired up.
 
 **Decisions filed:** `.squad/decisions/inbox/mcmanus-dividend-data-inventory.md`
+
+## 2026-05-11 — #363/#364 Dividend Data Inventory & Portal Gaps
+
+**Scope:** Full data inventory for dividend_positions-based yield computation. Deliverable: 5,524 dividend_payments verified, TTM yield formula ready, portal gaps flagged.
+
+**Key findings:**
+- **5,524 dividend_payments** (IBKR-sourced, period: full history), 102 unique tickers, all routed via `type` field (no assetCategory needed)
+- `dividend_payments.account_id` = IBKR text string "U2515365" (NOT integer config ID); join TTM aggregation by symbol instead
+- `dividend_accruals.gross_rate` = per-share per-payment; multiply by `paymentsPerYear(frequency)` for annual forward yield
+- `dividend_ticker_data` empty (market data enrichment deferred to future sprint)
+- **IBKR OpenPositions bonus fields:** cusip/isin/figi/securityID/listingExchange directly on rows; FII section not required for v1
+
+**Portal gaps (Jony action required):**
+- `assetCategory` on CashTransactions (0.6% population, expected 100%)
+- `fxRateToBase` on dividend cash rows (currently missing, needed for base-currency income summaries)
+- `accruedInterest` on bond holdings (NULL, expected from FinancialInstrumentInformation section)
+
+**Pattern learned — Pydantic field shadowing:**
+Naming a Pydantic field same as imported stdlib type (e.g., `date: date | None`) causes `TypeError: unsupported operand type(s)` during class construction. Fix: rename field (`accrual_date` instead of `date`). Applies to all Pydantic models when binding stdlib datetime/date types.
+
+**Decision filed:** `.squad/decisions/inbox/mcmanus-dividend-data-inventory.md`

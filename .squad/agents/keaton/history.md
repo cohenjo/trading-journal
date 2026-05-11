@@ -18,7 +18,28 @@
 
 ---
 
-### 2026-04-30 — YOLO Direct-Apply Round: PR #90 Review + TJ-005 Migration Strategy Verdict
+### 2026-05-11 — #363/#364 Architecture Directive Design Lead
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Architected the positions-as-source-of-truth pattern for dividends and bonds pages. Inventoried data model, chose yield computation strategy (Option A: TTM from dividend_payments), confirmed bonds page already has positions pattern but needs 3-tab filtering. Recommended summary chart wiring already covered by backend refactoring.
+
+**Design decisions:**
+- Hardcoded 3 tabs (ibkr, schwab, ira) reuse existing `TAB_ORDER`, `TAB_LABELS`, `ACCOUNT_TABS` constants
+- TTM yield = SUM(dividend_payments where ex_date >= 12mo ago) / mark_price (no external API dependency)
+- Forward yield = dividend_accruals.gross_rate × paymentFrequency
+- Account mapping: account_type (lowercase) → config.id (int) → stock_positions.account_id (int FK)
+- Bonds: new `getLadderOverviewByAccount(accountKey)` export; Schwab/IRA return empty by construction
+
+**Issues filed:** #363 (Dividends, high priority), #364 (Bonds, medium priority)
+
+**Open questions flagged for Jony:**
+- `dividend_payments.account_id` mapping (IBKR text string vs config FK)
+- Historical payments UX (collapsible vs separate tab)
+- `dividend_positions` table retirement timeline
+
+**Decision filed:** `.squad/decisions/inbox/keaton-positions-source-of-truth-design.md`
+
+---
 
 **Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
 **Work:** Conducted detailed code review of McManus baseline schema work (PR #90). Identified 3 findings: tradingaccounttype enum, missing columns, FK coverage. Submitted APPROVE verdict. All findings addressed in subsequent commit 5a8367e.

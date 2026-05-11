@@ -1,3 +1,11 @@
+## 2026-05-11 — Build fix: extract `detectPaymentFrequency` from `'use server'` module (commit `9a438a2`)
+
+**Scope:** Next.js 15 RSC rule: every export in a `'use server'` file **must be async**. Synchronous pure utilities must live in plain modules (`src/lib/…`), never directly exported from `actions.ts`. Moved `detectPaymentFrequency` → `src/lib/dividends/payment-frequency.ts`; updated `actions.ts` (import) and test file. Vercel preview ● Ready: `https://trading-journal-bd3xbzyx3-cohenjos-projects.vercel.app`.
+
+## 2026-05-11 — #363 TS hotfix: DividendPosition → DividendPositionRecord (commit `55ea014`)
+
+**Scope:** Renamed legacy CRUD interface in `apps/frontend/src/app/dividends/actions.ts` to `DividendPositionRecord` to eliminate TS2440/TS2484 conflicts with the enriched `DividendPosition` imported from `@/types/dividends`. Removed conflicting re-export. 471/471 tests pass. Runtime behavior unchanged.
+
 ## 2026-05-11 — #363/#364 Dividends positions-mirror + Bonds per-account (PR #365, commit `fb74195`)
 
 **Scope:** Add `getDividendPositions(accountKey)` + `getDividendSummary()` to dividends backend so UI tabs consume live `stock_positions` data instead of the legacy empty `dividend_positions` table. Add `getLadderOverviewByAccount(accountKey)` for bonds tab filtering.

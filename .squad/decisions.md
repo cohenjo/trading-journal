@@ -937,3 +937,45 @@ Query: `SELECT id, account_type, household_id FROM trading_account_config WHERE 
 
 ## Any RED Findings
 None. All green.
+
+---
+
+## Sprint C — Positions Source of Truth (2026-05-11)
+
+### Design & Architecture (Keaton)
+- Hardcoded 3 tabs (ibkr, schwab, ira) reuse `TAB_ORDER`, `TAB_LABELS`, `ACCOUNT_TABS` constants
+- Dividends page: enriched view of `stock_positions` filtered by account, not independent data store
+- TTM yield = 12-month dividend sum ÷ mark_price (from 5,524 dividend_payments); forward yield from `dividend_accruals.gross_rate` × payment frequency
+- Bond ladder: `getLadderOverviewByAccount(accountKey)` for per-account filtering; Schwab/IRA return empty by construction
+- Summary chart wiring: `getDividendDashboard().stats.annual_income` uses new positions-based computation
+
+### Backend Implementation (Hockney)
+- `getDividendPositions(accountKey)` + `getDividendSummary()` in `apps/frontend/src/app/dividends/actions.ts`
+- `getLadderOverviewByAccount(accountKey)` in `apps/frontend/src/app/ladder/actions.ts`
+- Account mapping: `account_type` (lowercase) → `config.id` (int) → `stock_positions.account_id` (int FK)
+- Withdrawal Tax rows must be excluded before TTM aggregation; TTM window = 365 days from server-side `new Date()`
+- TS hotfix: DividendPositionRecord rename eliminates TS2440/TS2484 conflicts (commit 55ea014)
+- Next.js 15 rule: synchronous utilities must export from `src/lib/…`, never directly from `'use server'` files (commit 9a438a2)
+
+### Frontend Wiring + Testing (Fenster)
+- `DividendAccountTab.tsx` + `DividendPositionsTable.tsx` components with collapsible history
+- `DividendPositionsTable` columns: Ticker/Qty/Price/TTM Yield%/TTM Yield$/Fwd Yield%/Fwd Annual$/Frequency/Last Payment
+- E2E specs with playwright auth fixture; 6 specs for #363, 5 for #364 (all passing)
+- `dividends-summary-total`, `dividends-account-empty`, `bonds-account-empty` testids; tab routing via `useState`
+
+### Validation & LURVG Closure (Redfoot)
+- 🟢 Verdict: #363 ✅ 8/8 playwright specs pass, #364 ✅ 5/5 playwright specs pass
+- Build: `npm run build` ✅ 26 pages, 0 TS errors, 0 webpack errors
+- Non-blocking observations: URL param tab routing not implemented; e2e specs need auth fixture; PR self-approval blocked
+- Evidence commit: `55de7b2`; validation commit: `9a438a2`
+
+### Data Inventory & Portal Gaps (McManus)
+- 5,524 dividend_payments, 102 tickers, `dividend_ticker_data` empty (market data enrichment deferred)
+- `dividend_payments.account_id` = IBKR text string ("U2515365"), not integer; join by symbol instead
+- `dividend_accruals.gross_rate` = per-share per-payment; multiply by payment frequency for annual forward yield
+- IBKR OpenPositions includes cusip/isin/figi/securityID/listingExchange directly; FII section not required for v1
+
+### Issues Closed
+- **#363** — Dividends positions-mirror (squad:hockney + squad:fenster) ✅ CLOSED
+- **#364** — Bonds 3-tab alignment (squad:hockney + squad:fenster) ✅ CLOSED
+- **PR #365** — Squash commit `db03735` merged to main ✅ CLOSED
