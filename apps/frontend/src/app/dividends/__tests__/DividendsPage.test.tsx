@@ -1,11 +1,11 @@
 /**
- * Tests for Issue #355 — Dividends page: 3-account tabs (IBKR / Schwab / LeumiIRA)
+ * Tests for DividendsPage — refactored to positions-first view (Issue #363).
  *
  * Covers:
- *   - 3 canonical account tabs render
+ *   - 3 canonical account tabs render with correct data-testids
  *   - Default active tab is IBKR
- *   - Switching tabs updates account context (empty-state banner for accounts without data)
- *   - Empty-state banner references the Accounts page
+ *   - Tab switching works
+ *   - Summary header renders
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -15,26 +15,25 @@ import DividendsPage from "../page";
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
-// Mock DividendDashboard so we can inspect which accountNameFilter it receives.
-vi.mock("@/components/Dividends/DividendDashboard", () => ({
-  default: ({ accountNameFilter }: { accountNameFilter?: string }) => (
-    <div data-testid="mock-dashboard" data-account={accountNameFilter ?? ""}>
-      {/* Simulate empty-state banner when accountNameFilter is Schwab/LeumiIRA in unit tests */}
-      {accountNameFilter && accountNameFilter !== "InteractiveBrokers" && (
-        <div data-testid="div-empty-state">
-          No positions on this account yet. Add positions on the{" "}
-          <a href="/trading/accounts">Accounts</a> page to see projected dividends.
-        </div>
-      )}
+vi.mock("@/components/Dividends/DividendAccountTab", () => ({
+  default: ({ accountKey }: { accountKey: string }) => (
+    <div data-testid="mock-account-tab" data-account={accountKey}>
+      Tab content for {accountKey}
     </div>
   ),
 }));
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+vi.mock("@/app/dividends/actions", () => ({
+  getDividendSummary: vi.fn().mockResolvedValue({
+    total_forward_annual: 5000,
+    position_count: 10,
+    by_account: { ibkr: 5000, schwab: 0, ira: 0 },
+  }),
+}));
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
-describe("DividendsPage — 3-account tabs (#355)", () => {
+describe("DividendsPage — positions-first view (#363)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -55,14 +54,14 @@ describe("DividendsPage — 3-account tabs (#355)", () => {
     expect(screen.getByTestId("div-tab-ira")).toHaveTextContent("LeumiIRA");
   });
 
-  it("default active tab is IBKR — dashboard receives InteractiveBrokers filter", () => {
+  it("default active tab is IBKR — mocked tab renders ibkr key", () => {
     render(<DividendsPage />);
 
-    const dashboard = screen.getByTestId("mock-dashboard");
-    expect(dashboard).toHaveAttribute("data-account", "InteractiveBrokers");
+    const tab = screen.getByTestId("mock-account-tab");
+    expect(tab).toHaveAttribute("data-account", "ibkr");
   });
 
-  it("switching to Schwab tab updates dashboard account filter to Schwab", async () => {
+  it("switching to Schwab tab renders schwab account key", async () => {
     render(<DividendsPage />);
 
     await act(async () => {
@@ -70,11 +69,11 @@ describe("DividendsPage — 3-account tabs (#355)", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("mock-dashboard")).toHaveAttribute("data-account", "Schwab");
+      expect(screen.getByTestId("mock-account-tab")).toHaveAttribute("data-account", "schwab");
     });
   });
 
-  it("switching to LeumiIRA tab updates dashboard account filter to LeumiIRA", async () => {
+  it("switching to LeumiIRA tab renders ira account key", async () => {
     render(<DividendsPage />);
 
     await act(async () => {
@@ -82,40 +81,37 @@ describe("DividendsPage — 3-account tabs (#355)", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("mock-dashboard")).toHaveAttribute("data-account", "LeumiIRA");
+      expect(screen.getByTestId("mock-account-tab")).toHaveAttribute("data-account", "ira");
     });
   });
 
-  it("empty-state banner is shown when tab has no positions (Schwab)", async () => {
+  it("summary header renders with dividends-summary-total testid", async () => {
     render(<DividendsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("dividends-summary-total")).toBeInTheDocument();
+    });
+  });
+
+  it("page title is 'Dividend Income'", () => {
+    render(<DividendsPage />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Dividend Income");
+  });
+
+  it("tabs have role=tab and aria-selected", async () => {
+    render(<DividendsPage />);
+
+    const ibkrTab = screen.getByTestId("div-tab-ibkr");
+    expect(ibkrTab).toHaveAttribute("role", "tab");
+    expect(ibkrTab).toHaveAttribute("aria-selected", "true");
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("div-tab-schwab"));
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("div-empty-state")).toBeInTheDocument();
-    });
-    expect(screen.getByTestId("div-empty-state")).toHaveTextContent("Accounts");
-  });
-
-  it("switching back to IBKR removes the empty-state (IBKR has data)", async () => {
-    render(<DividendsPage />);
-
-    // Go to Schwab (shows empty state in mock)
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("div-tab-schwab"));
-    });
-    await waitFor(() => expect(screen.getByTestId("div-empty-state")).toBeInTheDocument());
-
-    // Switch back to IBKR
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("div-tab-ibkr"));
-    });
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("div-empty-state")).not.toBeInTheDocument();
-      expect(screen.getByTestId("mock-dashboard")).toHaveAttribute("data-account", "InteractiveBrokers");
+      expect(screen.getByTestId("div-tab-schwab")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("div-tab-ibkr")).toHaveAttribute("aria-selected", "false");
     });
   });
 });

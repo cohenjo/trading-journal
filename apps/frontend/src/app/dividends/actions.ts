@@ -2,6 +2,15 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { convertCurrency } from '@/lib/currency';
+import { getStockPositions } from '@/app/trading/actions';
+import type {
+  DividendPosition,
+  DividendSummaryResult,
+  PaymentFrequency,
+} from '@/types/dividends';
+import { detectPaymentFrequency } from '@/lib/dividends/payment-frequency';
+
+// Consumers should import DividendPosition, DividendSummaryResult, PaymentFrequency directly from '@/types/dividends'.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -20,11 +29,11 @@ export interface DividendPositionPayload {
 
 export type DividendPositionPatch = Partial<DividendPositionPayload>;
 
-export interface DividendPosition extends DividendPositionPayload {
+export interface DividendPositionRecord extends DividendPositionPayload {
   id: number;
 }
 
-export interface EnrichedDividendPosition extends DividendPosition {
+export interface EnrichedDividendPosition extends DividendPositionRecord {
   price: number;
   dividend_yield: number;
   annual_income: number;
@@ -46,7 +55,7 @@ export interface DividendDashboardData {
 }
 
 export type DividendPositionResult =
-  | { ok: true; position: DividendPosition }
+  | { ok: true; position: DividendPositionRecord }
   | { ok: false; error: string };
 
 export type DeleteDividendPositionResult =
@@ -151,7 +160,7 @@ function normalizePositionPatch(
   return updates;
 }
 
-function toDividendPosition(row: DividendPositionRow): DividendPosition {
+function toDividendPositionRecord(row: DividendPositionRow): DividendPositionRecord {
   return {
     id: Number(row.id),
     account: row.account,
@@ -181,8 +190,9 @@ async function dividendAccountExists(account: string, householdId: string): Prom
 
 /**
  * Returns dashboard stats and enriched dividend positions for the authenticated
- * user's household. Market data enrichment is read from dividend_ticker_data;
- * missing ticker data degrades to zero values until the cache is refreshed.
+ * user's household. The annual_income stat is now sourced from getDividendSummary()
+ * (positions-based computation) so the summary chart reflects actual holdings.
+ * Legacy positions from dividend_positions are still returned for backward compat.
  */
 export async function getDividendDashboard(
   currency = 'USD',
@@ -218,14 +228,15 @@ export async function getDividendDashboard(
     return emptyDashboard(targetCurrency);
   }
 
-  const positions = ((positionRows ?? []) as DividendPositionRow[]).map(toDividendPosition);
-  if (!positions.length) return emptyDashboard(targetCurrency);
+  const positions = ((positionRows ?? []) as DividendPositionRow[]).map(toDividendPositionRecord);
 
   const tickers = [...new Set(positions.map((p) => p.ticker))];
-  const { data: tickerRows, error: tickerError } = await supabase
-    .from('dividend_ticker_data')
-    .select('ticker, price, currency, dividend_yield, dividend_rate, dgr_3y, dgr_5y')
-    .in('ticker', tickers);
+  const { data: tickerRows, error: tickerError } = tickers.length > 0
+    ? await supabase
+      .from('dividend_ticker_data')
+      .select('ticker, price, currency, dividend_yield, dividend_rate, dgr_3y, dgr_5y')
+      .in('ticker', tickers)
+    : { data: [], error: null };
 
   if (tickerError) {
     console.error('[getDividendDashboard] ticker query error:', tickerError.message);
@@ -236,7 +247,6 @@ export async function getDividendDashboard(
   );
 
   let totalValueTarget = 0;
-  let totalAnnualIncomeTarget = 0;
   let dgr5yTotal = 0;
   let dgr5yCount = 0;
 
@@ -252,7 +262,6 @@ export async function getDividendDashboard(
     const positionValue = position.shares * price;
 
     totalValueTarget += convertCurrency(positionValue, tickerCurrency, targetCurrency);
-    totalAnnualIncomeTarget += convertCurrency(annualIncome, tickerCurrency, targetCurrency);
 
     if (dgr5y !== 0) {
       dgr5yTotal += dgr5y;
@@ -269,6 +278,14 @@ export async function getDividendDashboard(
       currency: tickerCurrency,
     };
   });
+
+  // Use positions-based summary for annual_income (replaces dividend_positions fallback).
+  const summary = await getDividendSummary();
+  const totalAnnualIncomeTarget = convertCurrency(
+    summary.total_forward_annual,
+    'USD',
+    targetCurrency,
+  );
 
   return {
     stats: {
@@ -319,7 +336,7 @@ export async function createDividendPosition(
     return { ok: false, error: 'Failed to create position. Please try again.' };
   }
 
-  return { ok: true, position: toDividendPosition(data as DividendPositionRow) };
+  return { ok: true, position: toDividendPositionRecord(data as DividendPositionRow) };
 }
 
 /** Updates a dividend position in the authenticated user's household. */
@@ -366,7 +383,7 @@ export async function updateDividendPosition(
   }
   if (!data) return { ok: false, error: 'Position not found' };
 
-  return { ok: true, position: toDividendPosition(data as DividendPositionRow) };
+  return { ok: true, position: toDividendPositionRecord(data as DividendPositionRow) };
 }
 
 /** Deletes a dividend position from the authenticated user's household. */
@@ -887,4 +904,257 @@ export async function saveDividendEstimations(
   }
 
   return { ok: true };
+}
+
+// ── Dividend Positions — Issue #363 ──────────────────────────────────────────
+// Source-of-truth: stock_positions (via getStockPositions) enriched with
+// TTM yield from dividend_payments and forward yield from dividend_accruals.
+// dividend_ticker_data is NOT used here (empty table).
+
+function paymentsPerYear(freq: PaymentFrequency): number {
+  switch (freq) {
+    case 'monthly': return 12;
+    case 'quarterly': return 4;
+    case 'semi-annual': return 2;
+    case 'annual': return 1;
+    default: return 1;
+  }
+}
+
+function roundDecimal(value: number, decimals: number): number {
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
+}
+
+type PaymentRow = {
+  symbol: string;
+  amount: string | number | null;
+  ex_date: string;
+  report_date: string | null;
+  type: string | null;
+};
+
+type AccrualRow = {
+  symbol: string;
+  gross_rate: string | number | null;
+  ex_date: string;
+};
+
+/**
+ * Returns dividend-enriched positions for one account tab.
+ *
+ * Algorithm:
+ *  1. Resolve trading_account_config by account_type = accountKey
+ *  2. Fetch deduplicated stock_positions via getStockPositions(config.id)
+ *  3. Fetch dividend_payments (last 2 years) for those tickers
+ *  4. Fetch dividend_accruals (most recent per ticker) for forward yield
+ *  5. Compute TTM yield, forward yield, frequency; filter to dividend-bearing only
+ *
+ * Schwab/IRA: config exists but stock_positions/dividend_payments are empty →
+ * returns [] (expected current state per McManus inventory).
+ *
+ * Account mapping: trading_account_config.account_type (lowercase) is the tab key.
+ * dividend_payments.account_id is the IBKR text string — not used for filtering here
+ * because payments are matched by ticker symbol across all IBKR positions.
+ */
+export async function getDividendPositions(
+  accountKey: 'ibkr' | 'schwab' | 'ira',
+): Promise<DividendPosition[]> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) return [];
+
+  const householdId = await resolveHouseholdId(user.id);
+  if (!householdId) return [];
+
+  // Resolve account config for the requested tab
+  const { data: configRows, error: configError } = await supabase
+    .from('trading_account_config')
+    .select('id, account_id')
+    .eq('account_type', accountKey)
+    .is('deleted_at', null)
+    .limit(1);
+
+  if (configError || !configRows || configRows.length === 0) return [];
+  const config = configRows[0] as { id: number; account_id: string | null };
+
+  // Get deduplicated stock positions (dedupeLatestSnapshot applied inside getStockPositions)
+  const positions = await getStockPositions(config.id);
+  if (positions.length === 0) return [];
+
+  const tickers = [...new Set(positions.map((p) => p.ticker))];
+
+  // TTM window: 365 days back from CURRENT_DATETIME (2026-05-11)
+  const CURRENT_DATE = new Date('2026-05-11T05:56:00Z'); // UTC equivalent
+  const ttmStart = new Date(CURRENT_DATE);
+  ttmStart.setDate(ttmStart.getDate() - 365);
+  const ttmStartStr = ttmStart.toISOString().split('T')[0]; // "2025-05-11"
+
+  // Fetch 2 years of payments for TTM calculation + frequency detection
+  const twoYearsStart = new Date(CURRENT_DATE);
+  twoYearsStart.setFullYear(twoYearsStart.getFullYear() - 2);
+  const twoYearsStartStr = twoYearsStart.toISOString().split('T')[0];
+
+  const [paymentsResult, accrualsResult] = await Promise.all([
+    supabase
+      .from('dividend_payments')
+      .select('symbol, amount, ex_date, report_date, type')
+      .in('symbol', tickers)
+      .gte('ex_date', twoYearsStartStr)
+      .neq('type', 'Withholding Tax')
+      .order('ex_date', { ascending: false }),
+    supabase
+      .from('dividend_accruals')
+      .select('symbol, gross_rate, ex_date')
+      .in('symbol', tickers)
+      .order('ex_date', { ascending: false }),
+  ]);
+
+  // Build per-ticker maps from payment rows
+  const ttmTotalByTicker = new Map<string, number>();
+  const lastPayDateByTicker = new Map<string, string>();
+  const allExDatesByTicker = new Map<string, string[]>();
+
+  for (const row of ((paymentsResult.data ?? []) as PaymentRow[])) {
+    const sym = row.symbol;
+    const amt = Number(row.amount ?? 0);
+    const exDate = row.ex_date;
+    const reportDate = row.report_date ?? exDate;
+
+    // Accumulate ex-dates for frequency detection
+    if (!allExDatesByTicker.has(sym)) allExDatesByTicker.set(sym, []);
+    allExDatesByTicker.get(sym)!.push(exDate);
+
+    // TTM accumulation
+    if (exDate >= ttmStartStr) {
+      ttmTotalByTicker.set(sym, (ttmTotalByTicker.get(sym) ?? 0) + amt);
+    }
+
+    // Track most recent payment date
+    if (!lastPayDateByTicker.has(sym) || reportDate > lastPayDateByTicker.get(sym)!) {
+      lastPayDateByTicker.set(sym, reportDate);
+    }
+  }
+
+  // Most recent accrual per ticker (rows already ordered desc)
+  const accrualByTicker = new Map<string, { gross_rate: number; ex_date: string }>();
+  for (const row of ((accrualsResult.data ?? []) as AccrualRow[])) {
+    const sym = row.symbol;
+    if (!accrualByTicker.has(sym)) {
+      accrualByTicker.set(sym, {
+        gross_rate: Number(row.gross_rate ?? 0),
+        ex_date: row.ex_date,
+      });
+    }
+  }
+
+  const result: DividendPosition[] = [];
+
+  for (const pos of positions) {
+    const { ticker } = pos;
+    const ttmTotal = ttmTotalByTicker.get(ticker);
+    const accrual = accrualByTicker.get(ticker);
+
+    const hasTTM = ttmTotal !== undefined && ttmTotal > 0;
+    const hasAccrual = accrual !== undefined && accrual.gross_rate > 0;
+
+    // Filter to dividend-bearing only
+    if (!hasTTM && !hasAccrual) continue;
+
+    const qty = pos.quantity;
+    const price = pos.mark_price;
+
+    // Frequency detection from historical ex-dates
+    const exDates = allExDatesByTicker.get(ticker) ?? [];
+    const freq = detectPaymentFrequency(exDates);
+    const ppy = paymentsPerYear(freq);
+
+    // TTM metrics
+    const ttmDivPerShare =
+      hasTTM && qty > 0 ? roundCurrency(ttmTotal! / qty) : null;
+    const ttmDividendTotal = hasTTM ? roundCurrency(ttmTotal!) : null;
+    const ttmYieldPct =
+      ttmDivPerShare !== null && price !== null && price > 0
+        ? roundDecimal((ttmDivPerShare / price) * 100, 4)
+        : null;
+
+    // Forward yield: prefer accruals.gross_rate × frequency; else use TTM (already annualised)
+    let forwardDivPerShare: number | null = null;
+    if (hasAccrual) {
+      forwardDivPerShare = roundCurrency(accrual!.gross_rate * ppy);
+    } else if (ttmDivPerShare !== null) {
+      forwardDivPerShare = ttmDivPerShare;
+    }
+
+    const forwardDividendAnnual =
+      forwardDivPerShare !== null && qty > 0
+        ? roundCurrency(forwardDivPerShare * qty)
+        : null;
+    const forwardYieldPct =
+      forwardDivPerShare !== null && price !== null && price > 0
+        ? roundDecimal((forwardDivPerShare / price) * 100, 4)
+        : null;
+
+    const marketValue =
+      qty > 0 && price !== null
+        ? roundCurrency(qty * price)
+        : (pos.market_value ?? null);
+
+    result.push({
+      ticker,
+      name: pos.description,
+      quantity: qty,
+      avg_cost: pos.cost_basis,
+      current_price: price,
+      market_value: marketValue,
+      ttm_div_per_share: ttmDivPerShare,
+      ttm_dividend_total: ttmDividendTotal,
+      ttm_yield_pct: ttmYieldPct,
+      forward_div_per_share: forwardDivPerShare,
+      forward_dividend_annual: forwardDividendAnnual,
+      forward_yield_pct: forwardYieldPct,
+      last_payment_date: lastPayDateByTicker.get(ticker) ?? null,
+      payment_frequency: freq,
+      source: (hasTTM || hasAccrual) ? 'flex' : null,
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Aggregate dividend summary across all 3 account tabs.
+ * Used by getDividendDashboard() (summary chart) and available to any
+ * consumer that needs total projected annual dividend income.
+ *
+ * All 3 accounts are fetched in parallel for efficiency.
+ */
+export async function getDividendSummary(): Promise<DividendSummaryResult> {
+  const [ibkr, schwab, ira] = await Promise.all([
+    getDividendPositions('ibkr'),
+    getDividendPositions('schwab'),
+    getDividendPositions('ira'),
+  ]);
+
+  const sum = (positions: DividendPosition[]) =>
+    positions.reduce((total, p) => total + (p.forward_dividend_annual ?? 0), 0);
+
+  const ibkrTotal = roundCurrency(sum(ibkr));
+  const schwabTotal = roundCurrency(sum(schwab));
+  const iraTotal = roundCurrency(sum(ira));
+
+  return {
+    total_forward_annual: roundCurrency(ibkrTotal + schwabTotal + iraTotal),
+    position_count: ibkr.length + schwab.length + ira.length,
+    by_account: {
+      ibkr: ibkrTotal,
+      schwab: schwabTotal,
+      ira: iraTotal,
+    },
+  };
 }

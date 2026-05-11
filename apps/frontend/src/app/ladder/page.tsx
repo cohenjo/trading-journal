@@ -3,10 +3,27 @@ export const dynamic = 'force-dynamic';
 
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Ladder } from "@/components/Ladder/Ladder";
 import { ExpectedIncomeChart } from "@/components/Ladder/ExpectedIncomeChart";
 import type { RungData, IncomePoint, DistributionRow, Bond } from "@/components/Ladder/types";
-import { addLadderBond, getLadderIncome, getLadderOverview, updateLadderRung } from "./actions";
+import { addLadderBond, getLadderIncome, getLadderOverviewByAccount, updateLadderRung } from "./actions";
+
+// ── Tab config ─────────────────────────────────────────────────────────────────
+
+const TAB_LABELS: Record<string, string> = {
+  ibkr:   "InteractiveBrokers",
+  schwab: "Schwab",
+  ira:    "LeumiIRA",
+};
+
+const TAB_ORDER: Record<string, number> = { ibkr: 0, schwab: 1, ira: 2 };
+
+type AccountKey = "ibkr" | "schwab" | "ira";
+
+const ACCOUNT_TABS = (Object.keys(TAB_ORDER) as AccountKey[]).sort(
+  (a, b) => TAB_ORDER[a] - TAB_ORDER[b],
+);
 
 export default function LadderPageWrapper() {
   return (
@@ -25,17 +42,18 @@ function LadderPage() {
   const [hoveredRungId, setHoveredRungId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<AccountKey>("ibkr");
   const searchParams = useSearchParams();
 
   const candidateId = searchParams.get("candidateId");
   const candidateYear = searchParams.get("candidateYear");
 
-  const loadLadderData = useCallback(async () => {
+  const loadLadderData = useCallback(async (tab: AccountKey = "ibkr") => {
     setLoading(true);
     setError(null);
     try {
       const [overviewResult, incomeResult] = await Promise.all([
-        getLadderOverview(),
+        getLadderOverviewByAccount(tab),
         getLadderIncome(),
       ]);
 
@@ -55,8 +73,8 @@ function LadderPage() {
   }, []);
 
   useEffect(() => {
-    void loadLadderData();
-  }, [loadLadderData]);
+    void loadLadderData(activeTab);
+  }, [loadLadderData, activeTab]);
 
   // When coming back from the scanner with a candidateYear, auto-open that rung.
   useEffect(() => {
@@ -69,9 +87,38 @@ function LadderPage() {
     setSelectedRungId(String(yr));
   }, [candidateYear]);
 
+  const handleTabChange = (tab: AccountKey) => {
+    setActiveTab(tab);
+    setSelectedRungId(null);
+  };
+
+  // Schwab/IRA have no bond holdings → show empty state when both rungs and bonds are empty
+  // and the account is not IBKR.
+  const isEmpty = !loading && !error && activeTab !== "ibkr" && bonds.length === 0 && rungs.length === 0;
+
   return (
     <main className="h-[90vh] flex flex-col py-4 px-6 overflow-hidden">
       <h1 className="text-3xl font-bold text-center mb-4">Bond Ladder</h1>
+
+      {/* 3-account tab bar */}
+      <div className="flex flex-wrap p-1 bg-slate-900 rounded-lg border border-slate-800 gap-1 mb-4 w-fit">
+        {ACCOUNT_TABS.map((tab) => (
+          <button
+            key={tab}
+            role="tab"
+            aria-selected={activeTab === tab}
+            onClick={() => handleTabChange(tab)}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${
+              activeTab === tab
+                ? "bg-slate-800 text-white shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+            data-testid={`bonds-tab-${tab}`}
+          >
+            {TAB_LABELS[tab]}
+          </button>
+        ))}
+      </div>
 
       {error && (
         <div className="bg-red-900/50 border border-red-800 text-red-200 p-4 rounded mb-4 max-w-4xl mx-auto">
@@ -85,7 +132,25 @@ function LadderPage() {
         </div>
       )}
 
-      {!loading && (
+      {/* Empty state for Schwab/IRA — no bond holdings in these accounts today */}
+      {isEmpty && (
+        <div
+          className="flex flex-col items-center gap-4 flex-1 justify-center text-center"
+          data-testid="bonds-account-empty"
+        >
+          <p className="text-slate-300 text-base">
+            No bond holdings in this account. Import positions or add manually on the Accounts page.
+          </p>
+          <Link
+            href={`/trading/accounts?account=${activeTab}`}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            Go to Accounts page
+          </Link>
+        </div>
+      )}
+
+      {!loading && !isEmpty && (
         <div className="flex-1 flex gap-4 w-full max-w-[1800px] mx-auto min-h-0 px-2">
         {/* Left: Ladder */}
         <div className="basis-[15%] h-full flex flex-col items-start justify-start pr-2">
@@ -129,7 +194,7 @@ function LadderPage() {
 
                 // After adding a bond, reload ladder and income data so
                 // all views stay in sync.
-                await loadLadderData();
+                await loadLadderData(activeTab);
               } catch (err) {
                 console.error("Failed to add bond", err);
               }
