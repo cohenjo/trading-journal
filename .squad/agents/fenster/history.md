@@ -1,3 +1,31 @@
+## 2026-05-11 — #406 Dividends Accuracy Fix
+
+**Issue:** #406 — /dividends shows only ~3 Schwab positions (~$430/yr) instead of ~21 (~$9,200/yr)
+
+### Diagnosis
+
+`getDividendPositions()` filtered with `if (!hasTTM && !hasAccrual) continue` — only positions
+with IBKR Flex payment history (`dividend_payments`) or `dividend_accruals` were shown. Schwab
+CSV imports write to `stock_positions` only; 18 of 21 yielding Schwab positions were silently
+dropped. Three tickers (ABR, BXMT, JPC) slipped through because IBKR also held them.
+
+DB diagnostic: account 71 (Schwab) had 21 positions with `dividend_yield > 0` in `stock_positions`
+but 0 TTM payments. Additionally found `dividend_yield` is stored in mixed format:
+values > 1 are percentages (Yahoo Finance format); values ≤ 1 are decimal fractions.
+
+### Fix (PR #411, SHA 34bf9f7)
+
+- Added third parallel query: `stock_positions.dividend_yield` for the account.
+- Expanded filter: `!hasTTM && !hasAccrual && !hasYield` (yield-only positions now qualify).
+- Yield-only forward estimate: `mark_price × normalised_yield × quantity`; `source = 'csv'`.
+- Normalisation at read-time: `raw > 1 ? raw / 100 : raw` (handles both storage formats).
+- `DividendPositionsTable`: amber **est.** badge on Fwd Annual$ for `source='csv'` rows.
+- +2 regression tests (percentage + decimal yield paths). 627/627 pass.
+
+**Before:** 3 rows, ~$430/yr. **After:** 21 rows + est. badges; ~$9,200/yr once full.
+
+---
+
 ## 2026-05-11 — #372 & #376 Batch Frontend Fixes
 
 **Issues:** #372 (label htmlFor accessibility), #376 (LadderPage coupon test alignment)
