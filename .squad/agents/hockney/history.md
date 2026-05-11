@@ -1,3 +1,34 @@
+## 2026-05-12 — #335 Step 5: insurance_policies cleanup — drop user_id, require household_id (PR squad/335-insurance-cleanup)
+
+**Scope:** Apply the deferred `insurance_policies` column cleanup that was blocked in the #335 drift audit (MEDIUM severity).
+
+**Changes:**
+1. **Migration `20260501120000_align_insurance_policies_household_id`** — applied to prod:
+   - Dropped 4 wave2 `_own` RLS policies (using `auth.uid() = user_id`)
+   - Backfilled `household_id` via `user_profile.default_household_id` (primary path)
+   - **NEW: Backfilled `household_id` via `household_members` fallback** — for users with `null default_household_id`; preserved 2 test rows that would otherwise have been deleted as orphans
+   - Deleted any remaining orphaned rows (none after fallback)
+   - `DROP COLUMN user_id` (+ FK to `auth.users`, + `idx_insurance_policies_user_id` index)
+   - `ALTER COLUMN household_id SET NOT NULL`
+2. **No frontend/backend code changes** — `actions.ts` already uses `household_id` exclusively; backend `insurance_models.py` already lacks `user_id`
+
+**Architectural note:**
+- `_own` RLS policies (using `user_id`) dropped; remaining 4 canonical policies use `is_household_member()`/`is_household_writer()` — consistent with all other household-scoped tables
+- The `(household_id IS NOT NULL) AND is_household_member(household_id)` USING clause is now redundant on the IS NOT NULL check (column is NOT NULL), but harmless — no policy update needed
+
+**Pre-flight findings:**
+- 2 test rows from `redfoot-test@example.com` had `null household_id` — user had `household_members` entry but `user_profile.default_household_id = NULL`. Enhanced migration with fallback backfill to preserve them.
+- No `insurance_policies.user_id` code references found in active paths.
+
+**Key learning banked:**
+- Always include a `household_members` fallback when backfilling `household_id` from `user_id` — `user_profile.default_household_id` can be NULL even when the user has active household membership.
+
+**Tests:** 519/519 passing. Build: ✅ green. LURVG: recommended for `/insurance` route (no user surface existed during this dispatch; Redfoot should validate post-merge).
+
+**Related:** #335 (Steps 1–4 completed in earlier PRs), audit doc `.squad/decisions/hockney-migration-drift-audit-2026-05-11.md`
+
+---
+
 ## 2026-05-11 — #374 RLS policies: dividend tables + security_reference (PR squad/374-rls-policies)
 
 **Scope:** Fix 3 tables with RLS enabled + zero policies (silent deny-all). Executes Steps 3–4 of #335 reconciliation plan.
