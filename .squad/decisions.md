@@ -1508,3 +1508,51 @@ Issues #408 + #409 closed.
 **Held PRs requiring human review:** #393 (Next.js 16) and #244 (ESLint 10) — both major version bumps, await @cohenjo validation.
 
 **Note:** Inbox file `hockney-leumi-parser-2026-05-11.md` was not present in `.squad/decisions/inbox/` at fold time. PR #414 content reconstructed from sprint summary notes.
+
+---
+
+### Round 4 — XFLT Yield Regression + IRA UI Display Fixes (2026-05-12)
+
+**Sprint by:** Jony Vesterman Cohen
+**Date:** 2026-05-12T23:00Z
+**Main after sprint:** `2f4e009`
+**Squad:** Hockney (backend), Fenster (frontend)
+
+---
+
+#### PR #417 — XFLT yield decimal enforcement + worker container rebuild (Hockney)
+
+**SHA:** `4af7f6c` → `main`
+
+**Root cause:** The Docker container `trading_journal_backend_supabase` was running **pre-PR-#413 stale code** — it had never been rebuilt after #413 merged. When the Yahoo worker executed, it fetched `dividendYield` (which returns 14.06 for a 14.06% yield), had no `> 1` normalisation guard, and wrote `14.06` back to the DB, overwriting the migrated `0.1406` values for XFLT and any other percentage-format rows.
+
+**Fix:**
+1. Container rebuilt — `docker compose -f docker-compose.backend.yml build --no-cache backend` → new image SHA `33fd12cab77e`. Worker's `raw_float > 1: raw_float /= 100` guard (lines 192–193 of `yahoo_refresh.py`) now live in the running container.
+2. DB patched — `UPDATE stock_positions SET dividend_yield = dividend_yield / 100 WHERE dividend_yield > 1` (3 XFLT rows; 0 rows >1 remain post-fix).
+3. Post-rebuild refresh run — 297 refreshed; XFLT = `0.140600` ✅.
+4. CHECK constraint `chk_dividend_yield_decimal` added via migration `20260512010000_enforce_dividend_yield_decimal.sql`: `CHECK (dividend_yield IS NULL OR (dividend_yield >= 0 AND dividend_yield <= 1))`. Future worker regressions now fail loudly with a constraint violation instead of silently corrupting values.
+
+**Verification:** 622/622 backend tests passing. DB: 0 rows with `dividend_yield > 1`; 281 rows in `[0,1]`.
+
+**Decision/principle reinforced:**
+> **Always rebuild containers after worker code changes.** Migrations alone cannot correct values that the stale in-memory worker will overwrite on its next run. Container rebuild must be the final step of any worker code change deployment.
+> **Use DB CHECK constraints as defense-in-depth for unit/format invariants.** `stock_positions.dividend_yield` MUST be decimal fraction `[0,1]`. The constraint enforces this at the DB layer — no silent corruption possible.
+
+---
+
+#### PR #418 — IRA market value composite display fixes (Fenster)
+
+**SHA:** `2f4e009` → `main`
+
+**Root cause:** DB was already correct (LUMI `market_value` = 78,639 ILS post PR #414 migration). Three stacked display-layer bugs caused the UI to inflate IRA values dramatically:
+
+1. **`mark_price` displayed in agorot** — `formatCurrency(mark_price, 'ILA')` rendered the raw agorot value (e.g. `₪7,786`) instead of the ILS per-share price (`₪77.86`). Fix: divide by 100 for ILA in `toDisplayMarkPrice()` in `StockPositionsTable.tsx`.
+2. **`market_value` mislabeled with `'ILA'` Intl currency code** — `market_value` is stored in ILS by the DB worker/migration (per PR #410 contract), but passing `currency='ILA'` to `Intl.NumberFormat` displayed it as an agorot amount, creating a confusing unit mismatch. Fix: `toDisplayCurrency()` maps ILA → ILS for all value display contexts.
+3. **No ILS→USD conversion in portfolio footer** — `AggregatePortfolioFooter` summed ILA/ILS `market_value`s and passed the sum directly to the USD total with no FX conversion, inflating the IRA account's contribution by ~3×. Fix: `convertCurrency(mv, 'ILS', 'USD')` for ILA positions in `AggregatePortfolioFooter.tsx`.
+4. **`market_value_local` not used as fallback** — 7 IRA positions had `market_value=null` (Yahoo worker hasn't mapped their TASE ticker) but valid `market_value_local` set by the Leumi parser. These contributed $0 to totals. Fix: `market_value ?? market_value_local ?? 0` throughout `actions.ts`, `StockPositionsTable.tsx`, and `AggregatePortfolioFooter.tsx`.
+
+**Verification:** Vercel auto-deployed. LUMI: mark price ₪77.86, market value ₪78,639 ILS (~$26k USD). IRA total in portfolio footer: ~$260k USD (was ~$778k). Grand portfolio total correct.
+
+**Decision/principle reinforced:**
+> **When DB is correct but UI is wrong, dig into the display layer.** `mark_price` unit (agorot vs ILS), Intl currency code label, FX conversion in aggregators, and `market_value_local` fallback are all separate axes — migrations that fix DB storage do not automatically fix display bugs.
+> **Composite display bugs stack multiplicatively.** `mark_price` ÷100 error + ILA/ILS label mismatch + missing FX conversion produced a combined ~100–300× inflation of IRA displayed values.

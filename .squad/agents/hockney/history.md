@@ -871,3 +871,7 @@ Leumi parser tags TASE rows `currency='ILA'`; computes `market_value` in ILS (÷
 ### Worker verification
 
 `docker exec trading_journal_backend_supabase uv run python -m app.worker.yahoo_refresh_cli` — 297/321 refreshed, 17 skipped, 7 failed (delisted). ✅
+
+### 2026-05-12 23:30 — PR #417 (XFLT yield enforcement + worker rebuild + CHECK constraint)
+
+Container rebuild root-causes the regression: `trading_journal_backend_supabase` was running pre-PR-#413 stale code; stale worker overwrote migrated `0.1406` back to `14.06` on every daily run. Fix: rebuild with `--no-cache` (image SHA `33fd12cab77e`), patch 3 XFLT DB rows, run post-rebuild refresh (297 refreshed; XFLT = `0.140600` ✅). CHECK constraint `chk_dividend_yield_decimal` (`dividend_yield BETWEEN 0 AND 1`) added via migration `20260512010000_enforce_dividend_yield_decimal.sql` to prevent silent recurrence. 622/622 backend tests passing.

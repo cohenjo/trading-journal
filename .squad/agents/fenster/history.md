@@ -273,3 +273,7 @@ Frontend invariant established: `ACCOUNT_TABS` hardcoded from `TAB_ORDER` keys (
 **Decision:** `getDividendProjection()` dropped entirely — unmaintained legacy endpoint, values wrong. `getDividendSummary()` is the authoritative dividend total source.
 
 **Result:** /summary 2026 bar: $80,000 → $9,200. /estimations 2026: anchored to live total. Issues #408 + #409 closed.
+
+### 2026-05-12 23:55 — PR #418 (IRA market value 3 composite display bugs)
+
+DB correct (LUMI `market_value` = 78,639 ILS); 3 stacked display-layer bugs fixed: (1) Agorot→ILS: `toDisplayMarkPrice()` divides by 100 for ILA positions so mark price shows `₪77.86` not `₪7,786`. (2) ILA→ILS Intl code: `toDisplayCurrency()` maps ILA→ILS for `Intl.NumberFormat` so `market_value` (stored in ILS) is not mislabeled as agorot. (3) FX in footer: `AggregatePortfolioFooter` now calls `convertCurrency(mv, 'ILS', 'USD')` for ILA positions (was summing ILS as USD, 3× inflation). (4) `market_value_local` fallback: 7 positions with `market_value=null` now use `market_value_local` instead of contributing $0. Files: `StockPositionsTable.tsx`, `AggregatePortfolioFooter.tsx`, `actions.ts`. Result: IRA ~$260k USD (was ~$778k); LUMI ~$26k USD.
