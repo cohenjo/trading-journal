@@ -1,7 +1,6 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
 import { convertCurrency } from '@/lib/currency';
 import { getStockPositions } from '@/app/trading/actions';
 import type {
@@ -1001,24 +1000,21 @@ export async function getDividendPositions(
   twoYearsStart.setFullYear(twoYearsStart.getFullYear() - 2);
   const twoYearsStartStr = twoYearsStart.toISOString().split('T')[0];
 
-  // dividend_payments and dividend_accruals have RLS enabled but no per-household
-  // policies (they carry account_id TEXT, not household_id). Use the admin client to
-  // bypass RLS. Security is already enforced upstream: tickers are scoped to the
-  // authenticated user's positions via getStockPositions (which IS RLS-gated).
-  //
   // IBKR Activity Flex exports often omit ex_date (leaving it NULL). Fall back to
   // report_date when ex_date is NULL so those rows are not silently dropped.
-  const adminSupabase = createAdminClient();
-
+  // RLS SELECT policies on dividend_payments and dividend_accruals (migration
+  // 20260511102251) scope reads to the authenticated user's household via
+  // trading_account_config.account_id → is_household_member(). Standard client
+  // is correct here; admin client workaround from #368 is no longer needed.
   const [paymentsResult, accrualsResult] = await Promise.all([
-    adminSupabase
+    supabase
       .from('dividend_payments')
       .select('symbol, amount, ex_date, report_date, type')
       .in('symbol', tickers)
       .or(`ex_date.gte.${twoYearsStartStr},and(ex_date.is.null,report_date.gte.${twoYearsStartStr})`)
       .neq('type', 'Withholding Tax')
       .order('report_date', { ascending: false }),
-    adminSupabase
+    supabase
       .from('dividend_accruals')
       .select('symbol, gross_rate, ex_date')
       .in('symbol', tickers)
