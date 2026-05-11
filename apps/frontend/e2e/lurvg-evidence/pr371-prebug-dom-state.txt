@@ -1,0 +1,5 @@
+Pre-fix duplicate Schwab add result:
+success banner visible: true
+error banner visible: false
+Expected on main (bug): success=true, error=false (duplicate silently accepted)
+Expected on fix branch: success=false, error=true ("already configured" message)

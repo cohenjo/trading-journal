@@ -89,14 +89,14 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("tab-ibkr")).toBeInTheDocument();
-      expect(screen.getByTestId("tab-schwab")).toBeInTheDocument();
-      expect(screen.getByTestId("tab-ira")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-ibkr")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-schwab")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-ira")).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId("tab-ibkr")).toHaveTextContent("InteractiveBrokers");
-    expect(screen.getByTestId("tab-schwab")).toHaveTextContent("Schwab");
-    expect(screen.getByTestId("tab-ira")).toHaveTextContent("LeumiIRA");
+    expect(screen.getByTestId("account-tab-ibkr")).toHaveTextContent("InteractiveBrokers");
+    expect(screen.getByTestId("account-tab-schwab")).toHaveTextContent("Schwab");
+    expect(screen.getByTestId("account-tab-ira")).toHaveTextContent("LeumiIRA");
   });
 
   it("renders a Settings tab in addition to the account tabs", async () => {
@@ -105,7 +105,7 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("tab-settings")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-settings")).toBeInTheDocument();
     });
   });
 
@@ -134,11 +134,11 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
 
     // Wait for initial load to settle
     await waitFor(() => {
-      expect(screen.getByTestId("tab-schwab")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-schwab")).toBeInTheDocument();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-schwab"));
+      fireEvent.click(screen.getByTestId("account-tab-schwab"));
     });
 
     await waitFor(() => {
@@ -154,11 +154,11 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("tab-ira")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-ira")).toBeInTheDocument();
     });
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-ira"));
+      fireEvent.click(screen.getByTestId("account-tab-ira"));
     });
 
     await waitFor(() => {
@@ -175,15 +175,15 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
     });
 
     // Switch to Schwab
-    await waitFor(() => screen.getByTestId("tab-schwab"));
+    await waitFor(() => screen.getByTestId("account-tab-schwab"));
     await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-schwab"));
+      fireEvent.click(screen.getByTestId("account-tab-schwab"));
     });
     await waitFor(() => screen.getByTestId("add-position-button"));
 
     // Switch back to IBKR
     await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-ibkr"));
+      fireEvent.click(screen.getByTestId("account-tab-ibkr"));
     });
     await waitFor(() => {
       expect(screen.getByTestId("refresh-button")).toBeInTheDocument();
@@ -212,9 +212,9 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("tab-ibkr")).toBeInTheDocument();
-      expect(screen.getByTestId("tab-schwab")).toBeInTheDocument();
-      expect(screen.getByTestId("tab-ira")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-ibkr")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-schwab")).toBeInTheDocument();
+      expect(screen.getByTestId("account-tab-ira")).toBeInTheDocument();
     });
   });
 
@@ -223,10 +223,10 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
       render(<TradingAccountsPage />);
     });
 
-    await waitFor(() => expect(screen.getByTestId("tab-schwab")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("account-tab-schwab")).toBeInTheDocument());
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-schwab"));
+      fireEvent.click(screen.getByTestId("account-tab-schwab"));
     });
 
     await waitFor(() => {
@@ -240,10 +240,10 @@ describe("TradingAccountsPage — Phase 2 tab / header regression (#340)", () =>
       render(<TradingAccountsPage />);
     });
 
-    await waitFor(() => expect(screen.getByTestId("tab-schwab")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("account-tab-schwab")).toBeInTheDocument());
 
     await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-schwab"));
+      fireEvent.click(screen.getByTestId("account-tab-schwab"));
     });
 
     await waitFor(() => {

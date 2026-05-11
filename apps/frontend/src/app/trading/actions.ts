@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { normalizeAccountType } from '@/lib/trading/account-type';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -112,11 +113,16 @@ function normalizeNumber(value: number | string | null | undefined, fallback: nu
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function normalizeConfigInput(input: TradingAccountConfigInput, householdId: string) {
+function normalizeConfigInput(
+  input: TradingAccountConfigInput,
+  householdId: string,
+  validatedType: string,
+) {
   return {
     name: normalizeText(input.name, 'My Trading Account'),
-    // Lowercase enforced — chk_account_type allows only 'ibkr'|'schwab'|'ira'
-    account_type: (input.account_type ?? '').toLowerCase(),
+    // Caller must already have validated via normalizeAccountType().
+    // We store the pre-validated lowercase value directly.
+    account_type: validatedType,
     host: normalizeText(input.host, '127.0.0.1'),
     port: normalizeNumber(input.port, 4001),
     client_id: normalizeNumber(input.client_id, 1),
@@ -236,7 +242,16 @@ export async function saveTradingConfig(input: TradingAccountConfigInput): Promi
     return { ok: false, error: 'No active household found for your account' };
   }
 
-  const row = normalizeConfigInput(input, householdId);
+  // Validate account_type — normalize case then reject unknowns before any DB write.
+  const validatedType = normalizeAccountType(input.account_type);
+  if (!validatedType) {
+    return {
+      ok: false,
+      error: `Invalid account type "${input.account_type ?? ''}". Must be one of: ibkr, schwab, ira.`,
+    };
+  }
+
+  const row = normalizeConfigInput(input, householdId, validatedType);
 
   if (input.id) {
     const { data, error } = await supabase
@@ -254,6 +269,24 @@ export async function saveTradingConfig(input: TradingAccountConfigInput): Promi
     if (!data) return { ok: false, error: 'Trading account not found' };
 
     return { ok: true, config: data as unknown as TradingAccountConfig };
+  }
+
+  // Duplicate prevention — only one config row per account_type per household.
+  // RLS on trading_account_config already scopes this query to the user's household.
+  const { data: existing } = await supabase
+    .from('trading_account_config')
+    .select('id')
+    .eq('account_type', validatedType)
+    .is('deleted_at', null)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing) {
+    const labels: Record<string, string> = { ibkr: 'InteractiveBrokers', schwab: 'Schwab', ira: 'LeumiIRA' };
+    return {
+      ok: false,
+      error: `${labels[validatedType]} account is already configured for this household.`,
+    };
   }
 
   const { data, error } = await supabase

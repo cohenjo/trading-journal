@@ -168,17 +168,39 @@ describe('saveTradingConfig', () => {
     if (!result.ok) expect(result.error).toMatch(/not authenticated/i);
   });
 
+  it('rejects invalid account_type with a descriptive error', async () => {
+    authOk();
+    (createClient as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ auth: { getUser: mockGetUser }, from: vi.fn() })
+      .mockResolvedValueOnce(householdClient());
+
+    const result = await saveTradingConfig({ name: 'Bad Broker', account_type: 'fidelity' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/invalid account type/i);
+  });
+
+  /** Builds the duplicate-check select chain. Pass null data for "no duplicate". */
+  function dupCheckChain(existingData: { id: number } | null) {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: existingData, error: null });
+    const limit = vi.fn().mockReturnValue({ maybeSingle });
+    const is = vi.fn().mockReturnValue({ limit });
+    const eq = vi.fn().mockReturnValue({ is });
+    return { select: vi.fn().mockReturnValue({ eq }) };
+  }
+
   it('creates configs with session-derived household_id and without secret fields', async () => {
     authOk();
-    const inserted = { id: 10, name: 'New Broker', account_type: 'IBKR' };
+    const inserted = { id: 10, name: 'New Broker', account_type: 'ibkr' };
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const selectAfterInsert = vi.fn().mockReturnValue({ single });
     const insert = vi.fn().mockReturnValue({ select: selectAfterInsert });
+    const dupCheck = dupCheckChain(null); // no duplicate
     const actionClient = {
       auth: { getUser: mockGetUser },
       from: vi.fn((table: string) => {
         if (table !== 'trading_account_config') throw new Error(`Unexpected table: ${table}`);
-        return { insert };
+        return { select: dupCheck.select, insert };
       }),
     };
 
@@ -218,7 +240,7 @@ describe('saveTradingConfig', () => {
 
   it('updates only the matching account in the active household', async () => {
     authOk();
-    const updated = { id: 5, name: 'Updated', account_type: 'IBKR' };
+    const updated = { id: 5, name: 'Updated', account_type: 'ibkr' };
     const maybeSingle = vi.fn().mockResolvedValue({ data: updated, error: null });
     const selectAfterUpdate = vi.fn().mockReturnValue({ maybeSingle });
     const eqHousehold = vi.fn().mockReturnValue({ select: selectAfterUpdate });
@@ -251,11 +273,12 @@ describe('saveTradingConfig', () => {
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const selectAfterInsert = vi.fn().mockReturnValue({ single });
     const insert = vi.fn().mockReturnValue({ select: selectAfterInsert });
+    const dupCheck = dupCheckChain(null);
     const actionClient = {
       auth: { getUser: mockGetUser },
       from: vi.fn((table: string) => {
         if (table !== 'trading_account_config') throw new Error(`Unexpected table: ${table}`);
-        return { insert };
+        return { select: dupCheck.select, insert };
       }),
     };
 
@@ -269,6 +292,30 @@ describe('saveTradingConfig', () => {
     expect(result.ok).toBe(true);
     const [row] = insert.mock.calls[0] as [Record<string, unknown>];
     expect(row.account_type).toBe('schwab');
+  });
+
+  it('prevents duplicate: returns friendly error if account_type already exists', async () => {
+    authOk();
+    const dupCheck = dupCheckChain({ id: 71 }); // existing Schwab row
+    const actionClient = {
+      auth: { getUser: mockGetUser },
+      from: vi.fn((table: string) => {
+        if (table !== 'trading_account_config') throw new Error(`Unexpected table: ${table}`);
+        return { select: dupCheck.select };
+      }),
+    };
+
+    (createClient as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(actionClient)
+      .mockResolvedValueOnce(householdClient());
+
+    const result = await saveTradingConfig({ name: 'Schwab Again', account_type: 'schwab' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/already configured/i);
+      expect(result.error).toContain('Schwab');
+    }
   });
 });
 

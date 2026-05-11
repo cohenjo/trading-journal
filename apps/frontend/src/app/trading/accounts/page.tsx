@@ -130,7 +130,7 @@ export default function TradingAccountsPage() {
                 ? "bg-slate-800 text-white shadow-sm"
                 : "text-slate-400 hover:text-slate-200"
             }`}
-            data-testid={`tab-${tab}`}
+            data-testid={`account-tab-${tab}`}
           >
             {TAB_LABELS[tab] ?? tab.toUpperCase()}
           </button>
@@ -142,7 +142,7 @@ export default function TradingAccountsPage() {
               ? "bg-slate-800 text-white shadow-sm"
               : "text-slate-400 hover:text-slate-200"
           }`}
-          data-testid="tab-settings"
+          data-testid="account-tab-settings"
         >
           Settings
         </button>

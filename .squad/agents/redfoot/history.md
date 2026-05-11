@@ -333,3 +333,34 @@ Executed full LURVG validation suite for #363 (Dividends positions-mirror) + #36
 **Open concern for Coordinator:** McManus's audit (#mcmanus-jepi-o-gs-audit.md) identified a secondary bug: `getDividendPositions` has no `account_id` filter on `dividend_payments`. Hockney's hotfix did NOT add this filter. The table is queried by symbol only, meaning users who hold the same tickers across multiple broker accounts could see combined data from all accounts. Not a blocker for #367 (single IBKR account use case), but worth a follow-up issue.
 
 **Learnings banked:** Reproduce-Before-Fix Rule added to `.squad/skills/validation-gates/SKILL.md`. When a bug is RLS/privilege/data-shape specific, validator must prove the bug reproduces on main before claiming the fix works.
+
+## 2026-05-12: LURVG — PR #371 broker-form fix (issue #359)
+
+**Assigned:** Redfoot validates Hockney's `fix(settings): normalize account_type to lowercase + surface save errors (#359)`.
+
+**Context:** Jony reported silent failure when adding a broker — uppercase `account_type` rejected by `chk_account_type` constraint with no user feedback. PR #371 adds: (1) `normalizeAccountType()` utility with validation before DB write, (2) duplicate prevention with friendly error message, (3) `data-testid` rename `tab-{type}` → `account-tab-{type}`, (4) 17 new unit tests, (5) 2 new e2e tests.
+
+**Reproduce-Before-Fix Rule applied:** The original uppercase bug was already patched in `cf2fd19` (`.toLowerCase()` added). Tested the remaining unfixed behavior: duplicate account_type insertion. On main, inserting a second Schwab silently succeeds (no unique constraint on `(household_id, account_type)`). Bug reproduced ✅.
+
+**Spec defect found:** Hockney's `add-broker-form.spec.ts` used `getByLabel(/account name/i)` — but the Account Name `<label>` has no `htmlFor` attribute association. Fix applied: `getByLabel` → `getByTitle('Account Name')`. Both tests then pass 2/2.
+
+**Procedure:** LURVG Path 2.
+1. **Main build + pre-fix spec:** Seeded ephemeral Schwab config. Submitted duplicate Schwab via form. On main: no duplicate check → INSERT succeeds → **success banner shown** (bug — should be rejected). ✅ Bug reproduced.
+2. **Fix branch build + Hockney's spec:** 2/2 tests pass. Happy path: Schwab added successfully, 3 tabs visible after reload. Negative: duplicate Schwab rejected with "Schwab account is already configured for this household." ✅ Fix confirmed.
+3. **Smoke tests:** /dividends, /ladder, /summary all load without regression (3/3 ✅).
+4. **Unit tests:** **492/492** including 17 new `account-type.test.ts` tests ✅.
+5. **DB cleanup:** Restored production rows (ids 1, 71, 72 intact). Cleared stale test households via trigger-bypass.
+
+**Evidence files:**
+- `e2e/lurvg-evidence/pr371-prebug-broker-add-silent-fail.png` — pre-fix: duplicate succeeds silently
+- `e2e/lurvg-evidence/pr371-prebug-dom-state.txt` — pre-fix DOM state text
+- `e2e/lurvg-evidence/add-broker-schwab-success.png` — post-fix: happy path success banner
+- `e2e/lurvg-evidence/add-broker-schwab-after-reload.png` — post-fix: 3 tabs visible after reload
+- `e2e/lurvg-evidence/add-broker-schwab-duplicate-error.png` — post-fix: duplicate rejection banner
+- `e2e/lurvg-evidence/pr371-smoke-dividends.png` — smoke: dividends no regression
+- `e2e/lurvg-evidence/pr371-smoke-ladder.png` — smoke: ladder no regression
+- `e2e/lurvg-evidence/pr371-smoke-summary.png` — smoke: summary no regression
+
+**Verdict: 🟢 APPROVED** — pre-fix reproduced, fix confirmed, all tests pass, no regressions.
+
+**Learnings banked:** `TradingAccountSettings.tsx` Account Name/Type `<label>` elements lack `htmlFor` attribute — always use `getByTitle()` not `getByLabel()` for these inputs. E2e spec authors should associate labels properly (`htmlFor` / `aria-labelledby`) to enable `getByLabel` matching.
