@@ -29,7 +29,31 @@
 
 ---
 
+### 2026-05-11 — Positions-as-Source-of-Truth: Dividends + Bonds Alignment Design
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Inventoried the full data model gap between the current dividends page (reads from `dividend_positions` — 0 rows, manually maintained) and the directive (read from `stock_positions` — 427 rows, synced from FlexQuery). Confirmed bonds page (`/ladder`) already uses `bond_holdings` with positions-pattern columns but lacks 3-tab account filtering. Chose Option A (compute TTM yield from `dividend_payments` — 5524 historical rows) over external API or FlexQuery field ingestion. Summary chart wiring is already covered — `getDividendDashboard()` feeds `projectedDividendAmount` and will automatically pick up the refactored data source.
+
+**Issues filed:**
+- #363 — Dividends page refactor to projected-income view (high priority)
+- #364 — Bonds page 3-tab alignment (medium priority)
+- No Issue C needed (summary chart covered by #363)
+
+**Key finding:** `dividend_payments.account_id` is the IBKR account STRING ("U2515365"), not the integer `trading_account_config.id`. The join for per-account TTM yield requires mapping through `trading_account_config.details` or a dedicated lookup. Flagged as open question for Jony.
+
+**Decision filed:** `.squad/decisions/inbox/keaton-positions-source-of-truth-design.md`
+
+---
+
 ## Learnings
+
+### 2026-05-11 — dividend_payments.account_id is IBKR string, not config FK
+
+**Context:** The `dividend_payments` table uses a TEXT `account_id` column containing the IBKR account string (e.g. "U2515365"), while `stock_positions` uses an INTEGER `account_id` that FK's to `trading_account_config.id`. Any cross-table join for dividend enrichment must bridge this mismatch.
+
+### 2026-05-11 — Dividend data lives in 4 separate tables
+
+**Context:** `dividend_positions` (manual ticker/shares), `dividend_ticker_data` (cached market data), `dividend_payments` (IBKR payment history), `dividend_accruals` (217 rows). The positions-as-source-of-truth directive consolidates the position source to `stock_positions`, making `dividend_positions` redundant for the main view.
 
 ### 2026-05-01 — Supabase Branching vs 2-Project Model
 

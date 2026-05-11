@@ -236,3 +236,7 @@ gh issue close <N> --reason completed
 - `account-tabs.spec.ts` (Fenster's spec) has no auth — tests will silently fail on protected routes unless wrapped with `auth-cookie` fixture. Create a separate LURVG spec file rather than modifying the original.
 
 **Drop-box note:** `.squad/decisions/inbox/redfoot-lurvg-cf2fd19.md`
+
+## 2026-05-11 — Live-URL Validation Gate (LURVG) Playbook Operationalized
+
+Applied Ralph's LURVG rule (code validation ≠ production validation) to Sprint B closure. Playwright suite created: `e2e/lurvg-cf2fd19.spec.ts` with `auth-cookie` fixture against production build. Database verification (3 accounts with correct household_id), DOM assertions (tab bar HTML), evidence screenshots saved to `e2e/lurvg-evidence/`. All 5 issues (#354–#362) validated GREEN. Pattern: Separate validator (not implementer), load deployed URL, capture DOM/screenshot evidence. Implemented both Path 1 (Vercel bypass) and Path 2 (local prod build) templates.

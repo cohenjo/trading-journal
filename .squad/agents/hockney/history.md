@@ -467,3 +467,7 @@ Created `apps/backend/scripts/seed_manual_account_positions.py` + `apps/backend/
 **Files:** `apps/backend/app/api/positions.py`, `apps/backend/tests/test_manual_crud.py`
 
 Delivered four endpoints for manual account stock position management: `POST /api/accounts/{account_id}/positions`, `PATCH /api/accounts/{account_id}/positions/{position_id}`, `DELETE /api/accounts/{account_id}/positions/{position_id}`, and `POST /api/accounts/{account_id}/positions/import` (CSV bulk refresh). All endpoints block IBKR accounts with 422. CSV import implements DELETE-then-INSERT semantics in a single transaction. 23 new tests; 558 total passing. Contract documented early for parallel Fenster work. API uses `average_cost` in request bodies (maps to DB `cost_basis`); responses surface `cost_basis` for consistency.
+
+## 2026-05-11 — Lowercase Account Type Normalization + Household Backfill Migration
+
+Backend data bug fix: `trading_account_config` rows had NULL `household_id` (RLS invisible) and uppercase `account_type` (constraint violation). Created idempotent migration `20260511052500_backfill_placeholder_account_households.sql` gating on household existence. Code fix: removed `normalizeAccountType()` helper, inline `.toLowerCase()` with constraint comment. Tests: 16 new tests added across Sprint B cycle. Pattern: always normalize before DB save when constraint is lowercase-only.

@@ -349,3 +349,33 @@ Pipeline is production-ready for next sync. Data will be fully green (12/12 §6 
 **Spot-check evidence (canonical end-to-end pattern):** 3 tickers (AAPL/NVDA/META) in 2026-05-01 snapshot; 3 bonds with correct CUSIPs/coupons; 3 dividend transactions with correct account mapping.
 
 **Decisions filed:** `mcmanus-flex-revalidation-v3-2026-05-10.md` (processed by Scribe)
+
+---
+
+## 2026-05-11 — Dividend Data Inventory for Dividends Page Rebuild
+
+**Requested by:** Jony · **For:** Keaton (architecture decision: Option A/B/C for yield computation)
+
+**Mission:** Map all existing data assets relevant to showing dividend yield (TTM + forward) on the new Dividends page.
+
+### Key Findings
+
+**Tables confirmed:**
+- `stock_positions` (427 rows, latest snapshot 2026-05-01): `household_id`, `account_id` (int FK), `ticker`, `quantity`, `mark_price` (current price from FlexQuery), `market_value`. Multiple year-end + May-2026 snapshots — "current" = MAX(as_of_date) per (household, account).
+- `dividend_payments` (5,524 rows, 2022-01-03 → 2026-05-06): links via `account_id` TEXT = IBKR string "U2515365". **No `household_id` directly**. 102 distinct tickers. IBKR-only — Schwab (71) and LeumiIRA (72) have NULL account_ids → zero payment history.
+- `dividend_accruals` (217 rows): Has `gross_rate` = **dividend per share from IBKR FlexQuery**. Best existing forward-dividend source.
+- `dividend_ticker_data` (0 rows): Schema has `dividend_yield`, `dividend_rate`, `dgr_3y`, `dgr_5y`. Empty — yfinance background job has not run. This is what `getDividendProjection` relies on via JOIN.
+- `dividend_positions` (0 rows): Legacy manual table. Superseded by `stock_positions`.
+
+**FlexQuery (IBKR) — Option B confirmed NOT available:** `FinancialInstrumentInformation` / `SecurityInfo` XML elements carry only security identifiers (CUSIP, ISIN, FIGI, exchange). No `dividendPerShare`, `dividendYield`, `expectedDividend`, or yield fields exist in the IBKR XML.
+
+**Summary chart current state:** `getDividendProjection` falls back to $0 because both `dividend_ticker_data` and `dividend_positions` are empty. The `buildYearlyIncomeData()` pure function in `apps/frontend/src/app/summary/buildYearlyIncomeData.ts` is the right abstraction for centralising projection.
+
+**47 IBKR tickers** overlap between the latest `stock_positions` snapshot and `dividend_payments` history — sufficient for TTM yield computation today.
+
+### Recommendation for Keaton
+Option A (compute from existing tables) is the right path. `dividend_accruals.gross_rate` × annualisation factor provides forward yield; `dividend_payments` provides TTM actuals. `stock_positions.mark_price` provides the price denominator. For tickers where accruals/payments are absent, fall back to Option C (yfinance via `dividend_ticker_data` cache after first run).
+
+**Critical gap:** Schwab + LeumiIRA accounts have no ingested dividend data. New Dividends page will be IBKR-only until those accounts are wired up.
+
+**Decisions filed:** `.squad/decisions/inbox/mcmanus-dividend-data-inventory.md`
