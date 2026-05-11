@@ -3,8 +3,7 @@ export const dynamic = 'force-dynamic';
 
 import { useEffect, useState, useMemo } from "react";
 import { useSettings } from "../settings/SettingsContext";
-import { getDividendDashboard, getDividendEstimations } from "@/app/dividends/actions";
-import { getDividendProjection } from "@/app/trading/actions";
+import { getDividendEstimations, getDividendSummary } from "@/app/dividends/actions";
 import StackedIncomeBarChart, { YearlyIncomeData, SERIES_COLORS } from "../../components/Summary/StackedIncomeBarChart";
 import { getLadderIncome } from "../ladder/actions";
 import { getOptionsYearlyCashFlow } from "../options/actions";
@@ -54,18 +53,10 @@ export default function SummaryPage() {
           });
         }
 
-        // 4. Project dividends — prefer Hockney's new endpoint; fall back to dividend_positions
-        const dividendDashboard = await getDividendDashboard(settings.mainCurrency);
-        let projectedDividendAmount = dividendDashboard.stats.annual_income;
-
-        try {
-          const projection = await getDividendProjection();
-          if (projection && projection.total_annual > 0) {
-            projectedDividendAmount = projection.total_annual;
-          }
-        } catch {
-          // network error — use existing dividend_positions fallback above
-        }
+        // 4. Fetch live dividend total — single source of truth via getDividendSummary()
+        //    (same query used by /dividends page, PR #411).
+        const dividendSummary = await getDividendSummary();
+        const projectedDividendAmount = dividendSummary.total_forward_annual;
 
         // 5. Merge all sources — estimations override projections for any year
         //    they cover, including years before currentYear (fixes #342).
@@ -90,7 +81,7 @@ export default function SummaryPage() {
     };
 
     fetchData();
-  }, [divParams, optionsFinalYear, settings.mainCurrency]);
+  }, [divParams, optionsFinalYear]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">

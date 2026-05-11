@@ -6,12 +6,14 @@ import DividendChart, { DividendChartPoint } from "../../../components/Dividends
 import DividendHistory, { DividendRecord } from "../../../components/Dividends/DividendHistory";
 import DividendSettings, { ProjectionParams } from "../../../components/Dividends/DividendSettings";
 import { useSettings } from "../../settings/SettingsContext";
-import { getDividendEstimations, saveDividendEstimations } from "../actions";
+import { getDividendEstimations, getDividendSummary, saveDividendEstimations } from "../actions";
+import { formatCurrency } from "@/lib/currency";
 
 export default function DividendEstimationsPage() {
     const { settings, updateSettings } = useSettings();
     const [historicalData, setHistoricalData] = useState<DividendRecord[]>([]);
     const [chartData, setChartData] = useState<DividendChartPoint[]>([]);
+    const [liveAnnualTotal, setLiveAnnualTotal] = useState<number>(0);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -43,6 +45,9 @@ export default function DividendEstimationsPage() {
 
     // Projection is computed client-side now that the legacy FastAPI XLSX
     // endpoints have been removed from the frontend path.
+    // Current year is anchored to the live getDividendSummary() total (same
+    // source of truth as /dividends) unless the user has already entered it
+    // as a historical estimation.
     useEffect(() => {
         const historicalPoints: DividendChartPoint[] = historicalData.map((record) => ({
             time: `${record.year}-01-01`,
@@ -55,14 +60,21 @@ export default function DividendEstimationsPage() {
             return;
         }
 
+        const currentYear = new Date().getFullYear();
         const sortedHistory = [...historicalData].sort((a, b) => a.year - b.year);
         const lastHistorical = sortedHistory[sortedHistory.length - 1];
         const projectedPoints: DividendChartPoint[] = [];
         let projectedAmount = lastHistorical.amount;
 
         for (let year = lastHistorical.year + 1; year <= params.final_year; year += 1) {
-            const reinvestedGrowth = params.yield_rate * params.reinvest_rate;
-            projectedAmount *= 1 + params.growth_rate + reinvestedGrowth;
+            // Anchor the current year to the live /dividends total when the user
+            // has not explicitly entered an estimation for it.
+            if (year === currentYear && liveAnnualTotal > 0 && !historicalData.some(r => r.year === year)) {
+                projectedAmount = liveAnnualTotal;
+            } else {
+                const reinvestedGrowth = params.yield_rate * params.reinvest_rate;
+                projectedAmount *= 1 + params.growth_rate + reinvestedGrowth;
+            }
             projectedPoints.push({
                 time: `${year}-01-01`,
                 value: Math.round(projectedAmount * 100) / 100,
@@ -71,19 +83,23 @@ export default function DividendEstimationsPage() {
         }
 
         setChartData([...historicalPoints, ...projectedPoints]);
-    }, [historicalData, params]);
+    }, [historicalData, params, liveAnnualTotal]);
 
-    // Load estimations on mount
+    // Load estimations and live dividend total on mount
     useEffect(() => {
         const loadEstimations = async () => {
             setIsLoading(true);
             setErrorMessage(null);
-            const result = await getDividendEstimations();
-            if (result.ok) {
-                setHistoricalData(result.data);
+            const [estimationsResult, summaryResult] = await Promise.all([
+                getDividendEstimations(),
+                getDividendSummary(),
+            ]);
+            if (estimationsResult.ok) {
+                setHistoricalData(estimationsResult.data);
             } else {
-                setErrorMessage(`Failed to load estimations: ${result.error}`);
+                setErrorMessage(`Failed to load estimations: ${estimationsResult.error}`);
             }
+            setLiveAnnualTotal(summaryResult.total_forward_annual);
             setIsLoading(false);
         };
         loadEstimations();
@@ -109,6 +125,16 @@ export default function DividendEstimationsPage() {
     return (
         <div className="p-6 max-w-7xl mx-auto">
             <h1 className="text-3xl font-bold mb-6 text-slate-100">Dividend Growth Estimations</h1>
+
+            {liveAnnualTotal > 0 && (
+                <div className="mb-4 p-3 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-300 flex items-center gap-2">
+                    <span className="text-slate-400">Current year anchor (from /dividends):</span>
+                    <span className="text-green-400 font-semibold" data-testid="estimations-live-anchor">
+                        {formatCurrency(liveAnnualTotal, "USD")}
+                    </span>
+                    <span className="text-slate-500 text-xs">· based on current holdings</span>
+                </div>
+            )}
 
             {errorMessage && (
                 <div className="mb-4 p-4 bg-red-900/20 border border-red-800 rounded-lg text-red-200">
