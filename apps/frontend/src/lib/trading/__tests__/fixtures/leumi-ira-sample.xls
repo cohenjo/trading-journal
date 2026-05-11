@@ -1,0 +1,160 @@
+
+        <?xml version="1.0"?>
+        <?mso-application progid="Excel.Sheet"?>
+        <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+        xmlns:o="urn:schemas-microsoft-com:office:office"
+        xmlns:x="urn:schemas-microsoft-com:office:excel"
+        xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+        xmlns:html="http://www.w3.org/TR/REC-html40">
+        <Worksheet ss:Name="Holdings">
+        <Table>
+        <Row>
+          <Cell><Data ss:Type="String">מבט אישי - האחזקות שלי</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="String">תאריך:</Data></Cell>
+          <Cell><Data ss:Type="String">11.05.26</Data></Cell>
+          <Cell><Data ss:Type="String">תיק:</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="String">מס' ניירות:</Data></Cell>
+          <Cell><Data ss:Type="Number">7</Data></Cell>
+          <Cell><Data ss:Type="String">שווי תיק עדכני ב₪</Data></Cell>
+          <Cell><Data ss:Type="Number">500000.00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="String">שווי כולל אירועים כספיים ב₪</Data></Cell>
+          <Cell><Data ss:Type="Number">500100.00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="String">מספר נייר</Data></Cell>
+          <Cell><Data ss:Type="String">שם הנייר</Data></Cell>
+          <Cell><Data ss:Type="String"> אירועים</Data></Cell>
+          <Cell><Data ss:Type="String"> הצבעות</Data></Cell>
+          <Cell><Data ss:Type="String">שער קניה ממוצע</Data></Cell>
+          <Cell><Data ss:Type="String">כמות אחזקה</Data></Cell>
+          <Cell><Data ss:Type="String">שער אחרון</Data></Cell>
+          <Cell><Data ss:Type="String">שווי אחזקה ב ₪</Data></Cell>
+          <Cell><Data ss:Type="String">% שינוי יומי</Data></Cell>
+          <Cell><Data ss:Type="String">רווח ב-%</Data></Cell>
+          <Cell><Data ss:Type="String">רווח ב ₪</Data></Cell>
+          <Cell><Data ss:Type="String">%  מהתיק</Data></Cell>
+          <Cell><Data ss:Type="String">שער בסיס</Data></Cell>
+          <Cell><Data ss:Type="String">מס התיק</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="Number">604611</Data></Cell>
+          <Cell><Data ss:Type="String">לאומי</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="String">קיים</Data></Cell>
+          <Cell><Data ss:Type="Number">3593.44</Data></Cell>
+          <Cell><Data ss:Type="Number">1010.00</Data></Cell>
+          <Cell><Data ss:Type="Number">7616.00</Data></Cell>
+          <Cell><Data ss:Type="Number">76921.60</Data></Cell>
+          <Cell><Data ss:Type="Number">-0.0218</Data></Cell>
+          <Cell><Data ss:Type="Number">1.1194</Data></Cell>
+          <Cell><Data ss:Type="Number">40627.90</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0552</Data></Cell>
+          <Cell><Data ss:Type="Number">7786.00</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="Number">475020</Data></Cell>
+          <Cell><Data ss:Type="String">ניו-מד אנרג יהש</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="Number">1254.89</Data></Cell>
+          <Cell><Data ss:Type="Number">2000.00</Data></Cell>
+          <Cell><Data ss:Type="Number">1828.00</Data></Cell>
+          <Cell><Data ss:Type="Number">36560.00</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0247</Data></Cell>
+          <Cell><Data ss:Type="Number">0.4567</Data></Cell>
+          <Cell><Data ss:Type="Number">11462.16</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0262</Data></Cell>
+          <Cell><Data ss:Type="Number">1784.00</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="Number">60457875</Data></Cell>
+          <Cell><Data ss:Type="String">(איי-שיירס JPX ניקיי 400) JPXN</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="Number">99.20</Data></Cell>
+          <Cell><Data ss:Type="Number">60.00</Data></Cell>
+          <Cell><Data ss:Type="Number">99.76</Data></Cell>
+          <Cell><Data ss:Type="Number">17400.14</Data></Cell>
+          <Cell><Data ss:Type="String"></Data></Cell>
+          <Cell><Data ss:Type="Number">0.0056</Data></Cell>
+          <Cell><Data ss:Type="Number">97.68</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0125</Data></Cell>
+          <Cell><Data ss:Type="Number">99.76</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="Number">60398411</Data></Cell>
+          <Cell><Data ss:Type="String">(ניאוס נאסד"ק 100 הכנסה גבוהה) QQQI</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="Number">54.57</Data></Cell>
+          <Cell><Data ss:Type="Number">700.00</Data></Cell>
+          <Cell><Data ss:Type="Number">56.50</Data></Cell>
+          <Cell><Data ss:Type="Number">114971.85</Data></Cell>
+          <Cell><Data ss:Type="String"></Data></Cell>
+          <Cell><Data ss:Type="Number">0.0353</Data></Cell>
+          <Cell><Data ss:Type="Number">3922.13</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0825</Data></Cell>
+          <Cell><Data ss:Type="Number">56.50</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="Number">60007751</Data></Cell>
+          <Cell><Data ss:Type="String">(BARCLAYS PLC) BARC LN</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="Number">1.98</Data></Cell>
+          <Cell><Data ss:Type="Number">2159.00</Data></Cell>
+          <Cell><Data ss:Type="Number">4.35</Data></Cell>
+          <Cell><Data ss:Type="Number">37150.55</Data></Cell>
+          <Cell><Data ss:Type="String"></Data></Cell>
+          <Cell><Data ss:Type="Number">1.2017</Data></Cell>
+          <Cell><Data ss:Type="Number">20277.08</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0267</Data></Cell>
+          <Cell><Data ss:Type="Number">4.35</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="Number">60008327</Data></Cell>
+          <Cell><Data ss:Type="String">(RIO TINTO PLC) RIO LN</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="Number">50.54</Data></Cell>
+          <Cell><Data ss:Type="Number">199.00</Data></Cell>
+          <Cell><Data ss:Type="Number">77.04</Data></Cell>
+          <Cell><Data ss:Type="Number">60644.68</Data></Cell>
+          <Cell><Data ss:Type="String"></Data></Cell>
+          <Cell><Data ss:Type="Number">0.5243</Data></Cell>
+          <Cell><Data ss:Type="Number">20860.54</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0435</Data></Cell>
+          <Cell><Data ss:Type="Number">77.04</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        <Row>
+          <Cell><Data ss:Type="Number">60100398</Data></Cell>
+          <Cell><Data ss:Type="String">(NATIONAL GRID PLC) NG/ LN</Data></Cell>
+          <Cell><Data ss:Type="String">קיים</Data></Cell>
+          <Cell><Data ss:Type="String">לא קיים</Data></Cell>
+          <Cell><Data ss:Type="Number">9.73</Data></Cell>
+          <Cell><Data ss:Type="Number">638.00</Data></Cell>
+          <Cell><Data ss:Type="Number">12.78</Data></Cell>
+          <Cell><Data ss:Type="Number">32243.26</Data></Cell>
+          <Cell><Data ss:Type="String"></Data></Cell>
+          <Cell><Data ss:Type="Number">0.3132</Data></Cell>
+          <Cell><Data ss:Type="Number">7689.79</Data></Cell>
+          <Cell><Data ss:Type="Number">0.0231</Data></Cell>
+          <Cell><Data ss:Type="Number">12.78</Data></Cell>
+          <Cell><Data ss:Type="String">999-000000/00</Data></Cell>
+        </Row>
+        </Table>
+        </Worksheet>
+        </Workbook>
