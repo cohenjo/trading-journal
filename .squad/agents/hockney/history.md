@@ -1,3 +1,21 @@
+## 2026-05-12 — #359 Broker-form fix: normalize account_type + duplicate guard (PR #371, commit `3f49540`)
+
+**Scope:** Settings "Add Broker" silently failed — uppercase `account_type` values violated `chk_account_type CHECK (account_type IN ('ibkr','schwab','ira'))`.
+
+1. **New lib module** `src/lib/trading/account-type.ts` — exports `normalizeAccountType()` per Next.js 15 async-only export rule (pure sync helpers in `lib/`, never in `'use server'` modules).
+2. **Validation gate** in `saveTradingConfig`: rejects unknown types with a descriptive error before any DB operation.
+3. **Duplicate prevention**: SELECT before INSERT; returns friendly "already configured" error instead of letting the constraint fail silently.
+4. **Testid rename**: `tab-{type}` → `account-tab-{type}` in `page.tsx` + all callers for DOM scoping.
+5. **Tests**: 17 new unit tests for normalizer; +2 saveTradingConfig cases; new Playwright spec `add-broker-form.spec.ts` (happy path + negative/duplicate). Total 492/492 green.
+
+**Key learnings:**
+- `normalizeAccountType` pattern: pure sync utility in `lib/` (not `'use server'`) is the established template for all future account-type validation.
+- `seedOptionsDashboard` in `seed-data.ts` still uses uppercase `'IBKR'` (line ~296) — no runtime failure (admin client, bypasses action) but inconsistent. Flag for follow-on cleanup.
+- `TradingAccountType` union still has uppercase variants — type-system inconsistency only, deferred to follow-on.
+- Duplicate check uses RLS-scoped client (same pattern as `getTradingConfigs`): no explicit `household_id` filter needed.
+
+---
+
 ## 2026-05-11 — #367 Hotfix: Dividends IBKR tab empty state (PR #368, commit `e6f037d`)
 
 **Scope:** `getDividendPositions` returned [] for IBKR tab despite known holdings (JEPI/O/GS). Two root causes:
