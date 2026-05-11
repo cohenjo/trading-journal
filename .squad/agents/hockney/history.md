@@ -694,3 +694,6 @@ Delivered hotfix for RLS default-deny on dividend tables. Three root causes fixe
 **Learning:** The `normalizeAccountType` pattern (lib module, not `'use server'`) is the correct template for any future account-type validation or similar sync utilities.
 
 **LURVG Validation:** Redfoot validated PR pre-fix (duplicate-add bug reproduced on main) → post-fix (fix confirmed, error banner working, duplicate prevention working). Spec defect found: label missing `htmlFor` attribute; fixed in test with `getByTitle()` fallback. All smoke tests pass (3/3). Decisions folded into shared decisions.md.
+
+## 2026-05-11: PR #381 — Leumi IRA Excel Import
+PR #381 merged at `9d70f69`. Skill extracted: `.squad/skills/leumi-xls-import/SKILL.md`. 30 IRA positions live in prod (18 TASE + 4 US + 8 LSE). Tests: 519 → 568 (+49).
