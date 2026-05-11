@@ -400,3 +400,18 @@ Option A (compute from existing tables) is the right path. `dividend_accruals.gr
 Naming a Pydantic field same as imported stdlib type (e.g., `date: date | None`) causes `TypeError: unsupported operand type(s)` during class construction. Fix: rename field (`accrual_date` instead of `date`). Applies to all Pydantic models when binding stdlib datetime/date types.
 
 **Decision filed:** `.squad/decisions/inbox/mcmanus-dividend-data-inventory.md`
+
+### 2026-05-11: Data Audit for Dividends Empty Bug (Issue #367)
+
+**Date:** 2026-05-11
+**Scope:** Full data inventory for dividend positions, account_id type mismatch investigation.
+
+**Key finding:** `dividend_payments.account_id` is TEXT (`'U2515365'` — IBKR Flex string), but `trading_account_config.id` is INTEGER (1, 71, 72). `getDividendPositions()` fetches correct positions (by config.id=1) but queries `dividend_payments` by symbol only — no `account_id` filter applied.
+
+**Data verified:** 5,524 dividend_payments present (IBKR-sourced, full history). Jony's positions: JEPI (3), O (5), GS (5), MAIN (5) all correctly linked to config.id=1 and household. Corresponding dividend payments exist (JEPI 46, O 110, GS 16, MAIN 124; total 296 within 365 days).
+
+**Impact assessment:** Single IBKR account (Jony's current setup) — unaffected (symbol query returns correct rows by accident). Multi-account IBKR users — symbol-only query could return combined payments from different accounts holding same tickers.
+
+**Recommendation:** Add `.eq('account_id', config.account_id)` filter to `dividend_payments` query in getDividendPositions(). Validate that Schwab/IRA tabs handle NULL account_id correctly.
+
+**Follow-up assigned:** Issue #369 (filed by Redfoot during LURVG validation).

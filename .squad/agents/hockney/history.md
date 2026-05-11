@@ -514,3 +514,18 @@ Delivered four endpoints for manual account stock position management: `POST /ap
 ## 2026-05-11 — Lowercase Account Type Normalization + Household Backfill Migration
 
 Backend data bug fix: `trading_account_config` rows had NULL `household_id` (RLS invisible) and uppercase `account_type` (constraint violation). Created idempotent migration `20260511052500_backfill_placeholder_account_households.sql` gating on household existence. Code fix: removed `normalizeAccountType()` helper, inline `.toLowerCase()` with constraint comment. Tests: 16 new tests added across Sprint B cycle. Pattern: always normalize before DB save when constraint is lowercase-only.
+
+### 2026-05-11: Dividends Empty-State Hotfix (PR #368, Issue #367)
+
+**Commit:** `111e795` (main)
+**Date:** 2026-05-11
+**Files:** `apps/frontend/app/dividends/actions.ts` (line 987–1010)
+
+Delivered hotfix for RLS default-deny on dividend tables. Three root causes fixed:
+1. **RLS default-deny:** Switched from `createClient()` to `createAdminClient()` in `getDividendPositions()` (security preserved via position-gated ticker list).
+2. **NULL ex_date handling:** Implemented OR-filter `report_date >= startDate OR ex_date >= startDate` + fallback logic in JS.
+3. **Hardcoded date:** Replaced hardcoded 2026-05-11 with `new Date()` for dynamic TTM window.
+
+**Tests:** 471 → 473 (+2 regression tests added for each fix). All unit tests pass post-fix. LURVG Reproduce-Before-Fix validated: bug confirmed on main (RLS blocks query), fix confirmed on branch (admin client + fallback logic → JEPI/O/GS visible, $2,662 annual income).
+
+**Secondary finding (not fixed in this PR):** `dividend_payments` query lacks `account_id` filter — currently symbol-only. Harmless for single IBKR account. Multi-account users could see combined data. Follow-up issue #369 filed; assigned to future sprint.

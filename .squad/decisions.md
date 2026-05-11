@@ -979,3 +979,72 @@ None. All green.
 - **#363** — Dividends positions-mirror (squad:hockney + squad:fenster) ✅ CLOSED
 - **#364** — Bonds 3-tab alignment (squad:hockney + squad:fenster) ✅ CLOSED
 - **PR #365** — Squash commit `db03735` merged to main ✅ CLOSED
+
+---
+
+## 2026-05-11 — Dividends Empty-State Hotfix (PR #368, Issue #367)
+
+**By:** Hockney (Backend Dev), Redfoot (Tester), McManus (Data Auditor)
+
+### Decision: Use createAdminClient() for Dividend Tables
+
+**Root cause of empty dividends:** `dividend_payments` and `dividend_accruals` have RLS enabled but zero policies, triggering Postgres default-deny. User-scoped `createClient()` returns zero rows. Fixed by switching to `createAdminClient()` (service-role) in `getDividendPositions()`.
+
+**Security preserved:** Ticker list fed into queries comes from RLS-gated `getStockPositions()` — users only ever see dividends for positions they own. See PR #368 for full server action changes.
+
+**Related findings:**
+- NULL `ex_date` in `dividend_payments` (IBKR Flex XML omits it); parser stores NULL. Future queries on this table must use `report_date` as fallback or support OR-filter logic.
+- `dividend_accruals.ex_date` reliably populated; prefer accruals for forward yield calculations.
+
+**Hotfix impact:** 471 → 473 unit tests (+2 regression tests added). Pre-fix unit tests passed but UI showed empty state (environment-specific RLS bug). Post-fix all visual elements render (JEPI/O/GS dividends visible), summary shows correct $2,662.00 annual income.
+
+**Secondary audit finding (not fixed in this PR):** McManus identified missing `account_id` filter on `dividend_payments` query — currently filters by symbol only. For single IBKR account, this is harmless by accident. For multi-account IBKR users, different accounts with same tickers could see combined data. Recommend follow-up issue #369 (filed).
+
+### LURVG Validation Result
+
+**Validator:** Redfoot (Tester)
+**Procedure:** Reproduce-Before-Fix Rule (NEW) — confirmed DB-level RLS default-deny, reproduced bug on main, proved fix on fix branch.
+
+**Pre-fix (main):** User-scoped client hits RLS → `dividends-account-empty` visible ✅
+**Post-fix (fix branch):** Admin client bypasses RLS + OR filter handles NULL ex_date → `dividend-row-JEPI`, `dividend-row-O`, `dividend-row-GS` all visible, summary $2,662.00 ✅
+
+**DB sanity checked:** `dividend_payments` and `dividend_accruals` confirmed `rowsecurity=true, policy_count=0`.
+
+**Evidence:** Screenshots in `apps/frontend/e2e/lurvg-evidence/` (dividends-populated-postfix-ibkr.png shows all three tickers + summary).
+
+**Signed:** Redfoot per LURVG Reproduce-Before-Fix Rule. ✅ READY TO MERGE
+
+---
+
+## 2026-05-11 — Data Audit: Account ID Type Mismatch on Dividend Payments
+
+**By:** McManus (Data Auditor)
+
+**Finding:** `dividend_payments.account_id` is TEXT (`'U2515365'` — IBKR Flex string), but `trading_account_config.id` is INTEGER. `getDividendPositions()` correctly filters `stock_positions` by config.id but **does NOT filter `dividend_payments` by account_id** — queries by symbol only.
+
+**Impact:** Single-account users unaffected (symbol query returns correct payments by accident). Multi-account IBKR users holding same tickers in different accounts could see combined dividend data.
+
+**Data inventory:** 5,524 dividend_payments verified (IBKR source, full history), 296 payments for Jony's tickers (JEPI/O/GS/MAIN within last 365 days).
+
+**Recommendation:** Add `.eq('account_id', config.account_id)` filter to `dividend_payments` query. Test with Schwab/IRA tabs to confirm they handle NULL account_id edge case.
+
+**Assigned to:** Follow-up issue #369 (filed by Redfoot during validation).
+
+---
+
+## Repository Operational Notes
+
+### 2026-05-11 — Private Repo Impact Analysis
+
+**Research scope:** Making `github.com/cohenjo/trading-journal` private.
+
+**Findings:**
+- **Vercel:** No breaking change — GitHub App works with private repos if app has access. Pre-deployment verification recommended.
+- **Supabase:** No impact — project independence. Mitigates secret leakage risk if any .env committed (none found, only placeholders).
+- **GitHub Actions:** Private repos have 2,000 free minutes/month. This repo estimated 300–500 min/month (Playwright E2E + CI/CD). **No cost risk.**
+- **GitHub features:** Issues, PRs, discussions, Squad CLI, @copilot all work identically on private repos.
+- **Repo-specific:** No LFS, branch protection, or premium features at risk. `.env.example` files safe (placeholders only).
+
+**Recommendation:** **Safe to proceed.** One-time action: re-verify Vercel GitHub App access post-privacy change. Monitor Actions minutes in first month (expect <600 min/mo). No code changes required.
+
+**References:** GitHub Actions billing docs, Vercel GitHub integration docs.
