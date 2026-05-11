@@ -403,3 +403,10 @@ Executed full LURVG validation suite for #363 (Dividends positions-mirror) + #36
 - **RLS seed strategy for account_id joins:** When the RLS policy joins `dividend_payments.account_id → trading_account_config.account_id`, seed with the REAL broker account number (not a fake UUID/string). Using a fake ID causes RLS to return 0 rows → test passes for the wrong reason (empty state shown as "correct" when it's actually blocked).
 - **`trading_account_config` select with duplicate account_id:** After seeding the real account_id (`U2515365`) which already exists in Jony's household, `.single()` fails with multiple rows. Always filter by `household_id` too, or use `.maybeSingle()` with household scoping.
 - **`account-tab-{type}` testids:** Trading accounts page uses `<button data-testid="account-tab-ibkr">` not `role="tablist"` / `role="tab"`. Always use `getByTestId('account-tab-ibkr')` for tab assertions on this page.
+
+
+## 2026-05-11: LURVG — PR #379 insurance_policies cleanup (prod-applied migration)
+
+**Verdict: 🟢 APPROVED.** Schema verified via Supabase MCP: `user_id` dropped, `household_id` NOT NULL, 2/2 rows preserved, 4 canonical household-scoped RLS policies intact, 0 wave2 `_own` policies remain. Unit tests: 519/519. Playwright: 3/3 passed (`/insurance` renders clean, no `user_id` errors, Add Policy flow functional). Server log clean. PR #379 ready to squash-merge.
+
+**Learnings banked:** `households` requires `name+created_by+account_type ∈ {individual,joint}` (NOT NULL). `trg_households_add_creator` auto-inserts creator as `owner` — never insert manually into `household_members` or duplicate key violation occurs. `is_household_writer` = role in `('owner','member')`. New seed pattern lives in `e2e/lurvg-pr379-insurance.spec.ts`.
