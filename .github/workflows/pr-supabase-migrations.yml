@@ -14,7 +14,7 @@ jobs:
     name: Lint Migrations (supabase db lint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: supabase/setup-cli@v2
         with:
@@ -51,7 +51,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Apply migrations in order
         run: |
