@@ -1,0 +1,2 @@
+holdingsVisible=true emptyVisible=false
+holdingsVisible=true emptyVisible=false pageHasContent=false
