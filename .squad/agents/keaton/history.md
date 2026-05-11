@@ -210,3 +210,24 @@ Exactly `['ibkr', 'schwab', 'ira']` — enforced via CHECK constraint on `tradin
 
 **McManus Dependency:**
 All Flex STK parser work (H3) gates on McManus confirming whether existing Activity XMLs carry STK `OpenPosition` rows or if a new Flex query template is needed. Schema migration (H1) is Flex-source-agnostic and can proceed immediately.
+
+## 2026-05-12 — Dividend accuracy + Leumi IRA + chore-PR triage sprint
+
+**Sprint by:** Jony Vesterman Cohen
+
+### PR Triage (12 chore PRs)
+
+Triaged all 12 dependabot/chore PRs. E2E Smoke + Auth failures on all PRs confirmed as pre-existing infra issue (#366/#350), not caused by dep bumps — "All Required Checks Reference" gate SUCCESS for all.
+
+- **Merged (8):** #383 #384 #385 #386 #387 #388 #390 #392 — patch/minor dep bumps and CI action major bumps (checkout 4→6, setup-python 5→6, setup-cli 1→2). CI action majors merged when CI proves green.
+- **Closed (2):** #389 #391 — merge conflicts (superseded by concurrent merges; Dependabot will regenerate)
+- **Held (2):** #393 (Next.js 15→16), #244 (ESLint 9→10) — framework major versions; require @cohenjo manual validation before merging
+
+**Key decision:** Framework-level major bumps (Next.js, ESLint) must be manually validated — not auto-merged even when CI passes.
+
+### Issue Triage (25 open issues)
+
+- **Closed (3):** #350 (E2E superseded by #366), #79 (production confirmed live on Vercel), #65 (Supabase backfill complete via Flex XML)
+- **Help wanted (1):** #304 — OAuth preview-deploy strategy awaiting @cohenjo decision on 3 design options
+- **Re-routed:** #353 → squad:hockney; #315 → squad:copilot
+- **Kept active:** 21 issues (5 with next-step comments, 16 unchanged)

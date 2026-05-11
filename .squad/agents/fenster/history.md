@@ -247,3 +247,29 @@ Frontend invariant established: `ACCOUNT_TABS` hardcoded from `TAB_ORDER` keys (
 **Tests:** 471 passing (52 files). 3 previously failing LadderPage tests fixed by updating mock factory.
 
 **Commit:** `0eaea1d` on `squad/363-dividends-positions-mirror` → PR #365.
+
+## 2026-05-12 — Dividend accuracy + Leumi IRA + chore-PR triage sprint
+
+**Sprint by:** Jony Vesterman Cohen
+
+### PR #411 — /dividends dividend_yield fallback path + est. badge (`34bf9f7`)
+
+**Problem:** `getDividendPositions()` required TTM payments or `dividend_accruals`. Schwab CSV imports never create `dividend_payments` rows → only 3 tickers visible (cross-account IBKR overlap); 18 others silently dropped.
+
+**Fix:** Third parallel query for `stock_positions.dividend_yield`; filter expanded to `hasTTM || hasAccrual || hasYield`. Yield-only path: `forwardDivPerShare = mark_price × normalised_yield`; `source = 'csv'`. Amber **est.** badge added to `DividendPositionsTable` (Fwd Annual$ column) when `source === 'csv'`.
+
+**Result:** Schwab tab 3 → 21 positions; ~$430/yr → ~$9,200/yr. Issue #406 closed.
+
+**Note:** Read-time heuristic (`raw > 1 ? raw / 100 : raw`) was removed in PR #413 (Hockney) once canonical decimal format was enforced at write time.
+
+### PR #412 — /summary + /estimations source fix (`4250f88`)
+
+**Problem #408:** `/summary` called legacy FastAPI `getDividendProjection()` which returned stale ~$80k, overriding `getDividendSummary()` (~$9,200).
+
+**Problem #409:** `/estimations` anchored projections to last user-entered historical year instead of live holdings.
+
+**Fix:** `/summary/page.tsx` calls `getDividendSummary()` directly — drops `getDividendDashboard()` + `getDividendProjection()` (removes extra DB round-trips and legacy override). `/dividends/estimations/page.tsx` anchors current-year projected point to `getDividendSummary()` live total; historical user entries preserved. Info banner added showing live anchor.
+
+**Decision:** `getDividendProjection()` dropped entirely — unmaintained legacy endpoint, values wrong. `getDividendSummary()` is the authoritative dividend total source.
+
+**Result:** /summary 2026 bar: $80,000 → $9,200. /estimations 2026: anchored to live total. Issues #408 + #409 closed.

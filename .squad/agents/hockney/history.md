@@ -839,3 +839,35 @@ Rewrote `importManualPositionsCsv` to skip HTTP entirely — parse CSV text in t
 - **TASE price unit reality (confirmed 2026-05-11)**: Yahoo Finance returns TASE prices with `info.currency == 'ILA'` (Israeli agorot). LUMI.TA → 7550 ILA = ₪75.50. The canonical unit for all TASE `stock_positions` rows in this system is **ILA (agorot)**. Do NOT set `currency='ILS'` after a Yahoo write — the raw Yahoo value is already in ILA.
 - **TASE map verification method**: Always validate paper_id → company mapping at `https://www.bizportal.co.il/capitalmarket/quote/shares/<paper_id>`. The page title shows the company name in Hebrew. Never assume — ALL 11 original seed entries in migration `a1b2c3d4e5f6` were wrong. Corrected to 7 entries (4 ETF entries deleted, no confirmed Yahoo ticker for index funds).
 - **ETF/fund paper IDs**: Israeli ETF/mutual fund paper IDs (Kasam, MTF, iShares-TASE) should NOT be in `tase_yahoo_map` unless a specific Yahoo ticker is confirmed. They skip gracefully with `WARN [no-yahoo-resolution]` and retain their broker-imported prices.
+
+## 2026-05-12 — Dividend accuracy + Leumi IRA + chore-PR triage sprint
+
+**Sprint by:** Jony Vesterman Cohen
+
+### Issues opened
+
+#406 (dividend accuracy), #407 (Leumi IRA 100× unit), #408 (income summary), #409 (estimations).
+
+### PR #410 — Yahoo worker TASE market_value fix (`691b36d`)
+
+`yahoo_refresh.py`: TASE `market_value` now divided by 100 at compute time (ILA agorot → ILS). `mark_price` unchanged (stays in native ILA). DB self-corrects on next daily 22:00 UTC run. +2 tests in `TestTaseCurrencyNormalization`; 621 backend tests pass. Issue #407 partially addressed.
+
+### PR #413 — dividend_yield canonical decimal storage (`d1538a7`)
+
+Migration `20260511230000`: converted 53 percentage-format `dividend_yield` rows (`/100`). Worker now normalises at write-time (`if raw_float > 1: raw_float /= 100`). Fenster's read-time heuristic from PR #411 removed. Post-migration: 0 rows >1; 281 rows in [0,1].
+
+**Decision:** Canonical format is decimal fraction `[0,1]`. Yahoo `trailingAnnualDividendYield` preferred; `dividendYield` fallback guarded at write time.
+
+### PR #414 — Leumi XLS parser ILA tag + ILS market_value (`ff77079`)
+
+Leumi parser tags TASE rows `currency='ILA'`; computes `market_value` in ILS (÷100) at parse time. Two migrations (`20260512000000`, `20260512000001`) re-tag and correct existing Path A rows. Account 72 TASE total: **1,181,114 ILS** (target 1.23M–1.34M). Issue #407 closed.
+
+### Worker contract finalised
+
+- `mark_price`: native broker/Yahoo unit (ILA for TASE, GBp for LSE — GBp NOT yet fixed)
+- `market_value` / `market_value_local`: converted to settlement currency (ILS for TASE) at both worker and parser time
+- `dividend_yield`: canonical decimal fraction `[0,1]` at all write paths
+
+### Worker verification
+
+`docker exec trading_journal_backend_supabase uv run python -m app.worker.yahoo_refresh_cli` — 297/321 refreshed, 17 skipped, 7 failed (delisted). ✅

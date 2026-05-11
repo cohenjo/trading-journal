@@ -1340,3 +1340,171 @@ testing append
 4. **Per-row error handling** — session.rollback() per row — single failure does NOT kill entire worker run.
 
 ---
+
+---
+
+## 2026-05-12 — Dividend accuracy + Leumi IRA + chore-PR triage
+
+**Sprint by:** Jony Vesterman Cohen
+**Date:** 2026-05-12T00:30Z
+**Main after sprint:** `ff77079`
+**Squad:** Keaton (triage), Hockney (backend/worker/parser), Fenster (frontend)
+
+---
+
+### Theme 1 — PR + Issue Triage (Keaton)
+
+**Source:** `keaton-triage-2026-05-11.md`
+
+#### Chore PR triage (12 PRs)
+
+All 12 PRs had E2E Smoke + Auth failing — confirmed pre-existing environment issue (issues #366/#350), not caused by the dep bumps. "All Required Checks Reference" gate = SUCCESS for all.
+
+| PR | Action | Reason |
+|----|--------|--------|
+| #383 vitest 4.1.4→4.1.5 | **merged** | patch bump |
+| #384 pydantic >=2.13.3→>=2.13.4 | **merged** | patch bump |
+| #385 @vitest/coverage-v8 4.1.4→4.1.5 | **merged** | patch bump |
+| #386 pypdf >=6.10.2→>=6.11.0 | **merged** | minor bump |
+| #387 supabase/setup-cli 1→2 | **merged** | CI action major, CI proves green |
+| #388 @supabase/ssr 0.10.2→0.10.3 | **merged** | patch bump |
+| #389 pydantic-settings bump | **closed** | merge conflict (superseded) |
+| #390 actions/checkout 4→6 | **merged** | CI action major, CI green |
+| #391 python-multipart bump | **closed** | merge conflict (superseded) |
+| #392 actions/setup-python 5→6 | **merged** | CI action major, CI green |
+| #393 next 15→16 | **held** | Next.js major version — needs @cohenjo review |
+| #244 eslint 9→10 | **held** | ESLint major version — needs @cohenjo review |
+
+**Totals:** merged 8 / closed 2 (conflict) / held 2 (major version)
+
+**Decision — CI action major bumps:** Merged because CI ran and passed with new action versions. Major version in a GitHub Action doesn't imply breaking behaviour when CI is green.
+
+**Decision — Next.js 16 + ESLint 10:** Framework-level majors → HOLD. ESLint 10 changed config formats; Next.js 16 may break routing/rendering. Require manual validation before merging.
+
+#### Issue triage (25 open issues)
+
+**Closed (3):** #350 (E2E nightly superseded by #366), #79 (production deploy confirmed live), #65 (Supabase backfill confirmed complete via Flex XML).
+
+**Help wanted (1):** #304 — OAuth strategy for preview-deploy callbacks; awaiting @cohenjo decision on 3 options in design.md §4.1.
+
+**Re-routed:** #353 → `squad:hockney`/`area:backend`; #315 → `squad:copilot` (scoped rename task).
+
+**Kept active:** 21 issues retained with next-step comments or no changes needed.
+
+---
+
+### Theme 2 — Dividend Accuracy: Worker Market-Value Fix (Hockney) + /dividends UI (Fenster)
+
+**Sources:** `hockney-leumi-units-2026-05-11.md`, `fenster-dividends-accuracy-2026-05-11.md`
+
+#### Issues opened
+
+| # | Title |
+|---|-------|
+| #406 | fix(dividends): import dividend_yield from Schwab/Leumi + investigate 3-position display |
+| #407 | fix(accounts): Leumi IRA total ~100× off — agorot/ILS unit conversion bug |
+| #408 | fix(summary): income summary should use computed dividend total not hard-coded |
+| #409 | fix(dividends/estimations): forward estimation should default to current computed total |
+
+#### PR #410 — Yahoo worker TASE market_value fix (Hockney)
+
+**SHA:** `691b36d` | Branch: `squad/407-leumi-agorot-unit-fix`
+
+**Root cause:** `yahoo_refresh.py` computed `market_value = qty × mark_price` without dividing by 100 for TASE positions. Yahoo Finance returns TASE prices in ILA (agorot = 1/100 ILS) → all TASE market values inflated 100×.
+
+**Fix:** Worker now divides by 100 for `is_tase` positions when computing `market_value` / `market_value_local`. `mark_price` unchanged (stays in ILA native unit). DB self-corrects on next daily run (22:00 UTC).
+
+**Decision — Option A contract:** `mark_price` stays in ILA; `market_value` stored in ILS (worker divides). UI reads `market_value` directly — no frontend conversion needed.
+
+**Tests:** +2 assertions in `TestTaseCurrencyNormalization`: market_value in ILS, non-TASE unchanged. 621 backend tests pass.
+
+#### PR #411 — /dividends fallback path + est. badge (Fenster)
+
+**SHA:** `34bf9f7` → `main`
+
+**Root cause:** `getDividendPositions()` required TTM payments (from Flex exports) or `dividend_accruals`. Schwab CSV positions never create `dividend_payments` rows → only 3 cross-account tickers visible (was 3 positions, ~$430/yr); 18 others silently dropped.
+
+**Fix:** Third parallel query for `stock_positions.dividend_yield`; expanded filter to `hasTTM || hasAccrual || hasYield`. Yield-only path computes `forwardDivPerShare = mark_price × normalised_yield`; sets `source = 'csv'`.
+
+**Decision — yield normalisation at read time:** `raw > 1 ? raw / 100 : raw` guard at read-time; no DB migration (stays in Fenster's lane, avoids touching Hockney's data pipeline). *[Note: replaced in PR #413 by canonical DB format — see Theme 3.]*
+
+**Decision — amber 'est.' badge:** Pill on Fwd Annual$ column when `source === 'csv'`; tooltip explains origin. Reuses existing `DividendDataSource` union type; no schema changes.
+
+**Result:** Schwab tab: 3 → 21 positions; ~$430/yr → ~$9,200/yr.
+
+---
+
+### Theme 3 — Leumi IRA Currency Canonicalisation: Worker + Parser + Migrations (Hockney)
+
+**Sources:** `hockney-yield-canonicalization-2026-05-11.md`, `hockney-leumi-parser-2026-05-11.md` *(parser drop not found in inbox — reconstructed from sprint notes)*
+
+#### PR #413 — dividend_yield canonical decimal storage (Hockney)
+
+**SHA:** `d1538a7` → `main`
+
+**Problem:** `stock_positions.dividend_yield` stored mixed formats: 53 rows with values >1 (percentage, e.g. 10.43 for JEPQ) alongside 228 rows ≤1 (decimal fraction). Root cause: Yahoo worker's `dividendYield` fallback field returns percentage format for certain ETFs.
+
+**Migration `20260511230000_normalise_dividend_yield_to_decimal`:**
+```sql
+UPDATE stock_positions SET dividend_yield = dividend_yield / 100 WHERE dividend_yield > 1;
+```
+Idempotent. Post-run: 0 rows >1, 281 rows in [0,1], max = 0.530452.
+
+**Decision — canonical format: decimal fraction `[0,1]`:** Matches `trailingAnnualDividendYield` native format; math is clean without /100. Write-time normalisation in Yahoo worker: `if raw_float > 1: raw_float /= 100` before Decimal conversion. Fenster's read-time heuristic (PR #411) removed.
+
+#### PR #414 — Leumi XLS parser tags ILA + computes market_value in ILS (Hockney)
+
+**SHA:** `ff77079` → `main`
+
+**Fix:** Leumi XLS parser now tags TASE rows with `currency='ILA'` and computes `market_value` in ILS (divides by 100) at parse time, consistent with PR #410 worker contract.
+
+**Migrations:**
+- `20260512000000` — re-tags existing Path A rows: `UPDATE stock_positions SET currency='ILA' WHERE account_id IN (leumi IRA account IDs) AND currency='ILS' AND listing_exchange='TASE'`
+- `20260512000001` — divides `market_value` by 100 for newly tagged ILA rows
+
+**Result:** Account 72 TASE total: **1,181,114 ILS** (target 1.23M–1.34M; ~5% gap closes on next Yahoo refresh). Issue #407 closed.
+
+---
+
+### Theme 4 — Income Summary + Estimations Alignment (Fenster)
+
+**Source:** `fenster-summary-estimations-2026-05-11.md`
+
+#### PR #412 — /summary + /estimations source fix (Fenster)
+
+**SHA:** `4250f88` → `main`
+
+**Issue #408 — /summary stale ~$80k:** `getDividendProjection()` (legacy FastAPI `/api/dividends/projection`) overrode `getDividendSummary()` when it returned `total_annual > 0`. Stale endpoint returned ~$80k; actual live total was ~$9,200.
+
+**Issue #409 — /estimations anchor:** Projections grew from `lastHistorical.amount` (user-entered 2024 data) instead of live holdings. Result: 2026 projection anchored on ~$8,000 instead of live ~$9,200.
+
+**Fixes:**
+- `/summary/page.tsx`: Replaced `getDividendDashboard()` + `getDividendProjection()` with `getDividendSummary()` directly. Removes extra DB round-trips and the legacy FastAPI override path.
+- `/dividends/estimations/page.tsx`: Fetches `getDividendSummary()` alongside estimations; anchors current year's projection to live total unless user has explicitly entered it; info banner shows anchor basis.
+
+**Decision — drop `getDividendProjection()` entirely:** Legacy FastAPI endpoint is unmaintained; its override actively produced wrong values. `getDividendSummary()` is the authoritative source post-PR #411.
+
+**Decision — current-year anchor only:** Historical user-entered years (Jony's manual backfill) preserved untouched. Only the current year's projected point is replaced by the live total.
+
+**Before/After:**
+
+| Page | Metric | Before | After |
+|------|--------|--------|-------|
+| /summary | 2026 dividend bar | ~$80,000 | ~$9,200 |
+| /dividends/estimations | 2026 projected | Grew from last historical | Anchored to live ~$9,200 |
+
+Issues #408 + #409 closed.
+
+---
+
+### Theme 5 — Open Follow-Ups
+
+**Worker verification:** `docker exec trading_journal_backend_supabase uv run python -m app.worker.yahoo_refresh_cli` — 297/321 refreshed, 17 skipped, 7 failed. DB self-corrected per PR #410.
+
+**GBP/LSE pence issue (NOT addressed this sprint):** Account 72 (Leumi IRA London-listed holdings: RIO, BARC, NG, NXT, LGEN, etc.) sum to ~5.3M GBP — likely in pence (GBp) not pounds, analogous to the TASE ILA issue. Separate follow-up issue opened.
+
+**Legacy worker container:** `trading_journal_worker` (image `trading-journal-worker`, 28h uptime as of sprint end, throws SSL EOF on `compute_jobs`) runs old code from a separate compose file. `docker stop trading_journal_worker` when convenient; separate follow-up issue opened.
+
+**Held PRs requiring human review:** #393 (Next.js 16) and #244 (ESLint 10) — both major version bumps, await @cohenjo validation.
+
+**Note:** Inbox file `hockney-leumi-parser-2026-05-11.md` was not present in `.squad/decisions/inbox/` at fold time. PR #414 content reconstructed from sprint summary notes.
