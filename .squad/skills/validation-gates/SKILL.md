@@ -155,8 +155,48 @@ gh issue close <N> --reason completed
 
 ---
 
+## Reproduce-Before-Fix Rule (banked 2026-05-11, PR #368)
+
+**Rule:** When a bug is environment-specific (RLS policies, production data shape, hardcoded dates, NULL field patterns), the validator **MUST reproduce the failure on the unfixed branch first**, then prove the fix — otherwise validation has zero signal.
+
+### Why this matters
+
+Sprint C LURVG reported "IBKR populated locally" but the bug was real in production. The gap: the ephemeral test user had no household, so the server action returned `[]` for a *different* reason (early-exit before hitting the RLS-blocked query). The test was green for the wrong reason.
+
+### When to apply this rule
+
+Trigger this rule whenever a PR's root-cause hypothesis involves any of:
+- **RLS policies** (enabled with zero policies = default deny for user-scoped clients)
+- **Data shape differences** (NULL fields, type mismatches like INT vs TEXT account_id)
+- **Date/time logic** (hardcoded dates, timezone handling)
+- **Client privilege** (switching from `createClient()` to `createAdminClient()`)
+
+### Procedure
+
+1. **Checkout main** → build → start → run spec targeting the broken state → confirm spec PASSES (i.e., the bug IS visible). Capture screenshot.
+2. **Checkout fix branch** → rebuild → start → run spec targeting the fixed state → confirm spec PASSES. Capture screenshot.
+3. **If the bug does not reproduce on main** → STOP. Report that Path 2 has no signal for this specific bug. Fall back to asking the user to verify in their real browser session (Vercel preview), or use Supabase MCP to directly confirm the DB-level condition.
+
+### Seed strategy for RLS bugs
+
+- Create ephemeral test user + household + positions matching the production tickers
+- RLS-blocked tables (e.g., `dividend_payments`) already hold real production data
+- On main: user-scoped client hits RLS → returns `[]` → UI shows empty state (bug)
+- On fix: admin client bypasses RLS → finds matching rows → UI shows data (fix)
+- The seed only touches tables that ARE properly RLS-gated (`stock_positions`, `trading_account_config`) — never insert into the RLS-less table (that's production data)
+
+### Evidence from first application (PR #368)
+
+- Pre-fix spec on main: `dividends-account-empty` visible ✅ (bug confirmed)
+- Post-fix spec on fix branch: `dividend-row-JEPI`, `dividend-row-O`, `dividend-row-GS` visible ✅ (fix confirmed)
+- Unit tests: 471 on main → 473 on fix (+2 regression tests from Hockney)
+- DB sanity via Supabase MCP: `dividend_payments` + `dividend_accruals` confirmed `rowsecurity=true, policy_count=0`
+
+---
+
 ## Reference
 
 - LURVG rule: `.squad/decisions/inbox/ralph-validation-reflection-2026-05-11.md`
 - First application: `.squad/decisions/inbox/redfoot-lurvg-cf2fd19.md` (Sprint B, commit cf2fd19)
+- Reproduce-Before-Fix first application: `.squad/decisions/inbox/redfoot-dividends-empty-lurvg-2026-05-11.md` (PR #368)
 - Auth fixture: `apps/frontend/e2e/fixtures/auth-cookie.ts`

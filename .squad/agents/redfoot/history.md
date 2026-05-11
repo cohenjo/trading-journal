@@ -306,3 +306,30 @@ Executed full LURVG validation suite for #363 (Dividends positions-mirror) + #36
 3. PR #365 self-approval blocked (GitHub prevents cohenjo from approving own PR; evidence comment substituted)
 
 **Validation path:** Path 2 (local prod build) — no Vercel automation bypass secret configured; used local `.next/` build + SERVICE_ROLE_KEY from `.env.local`.
+
+
+## LURVG: Dividends Empty Hotfix (PR #368, Issue #367)
+
+**Date:** 2026-05-11 | **Branch:** squad/dividends-empty-fix | **Verdict:** 🟢 PASS
+
+**Context:** Production bug — `/dividends?account=ibkr` showed "No dividend-bearing positions" for Jony despite JEPI, O, GS held in IBKR. Hockney's hotfix addressed three root causes: (1) RLS default-deny on `dividend_payments`/`dividend_accruals`, (2) NULL `ex_date` on IBKR Flex rows, (3) hardcoded "today" date.
+
+**Procedure:** LURVG Path 2 — Reproduce-Before-Fix (NEW RULE banked this sprint).
+1. **DB sanity via Supabase MCP:** Confirmed `dividend_payments` + `dividend_accruals` have `rowsecurity=true, policy_count=0` — default deny proven at DB level.
+2. **Main branch build + pre-fix spec:** Seeded ephemeral test user + household + JEPI/O/GS stock_positions. On main, user-scoped client hits RLS → all positions filtered → `dividends-account-empty` visible. ✅ Bug reproduced.
+3. **Fix branch build + post-fix spec:** Same seed setup. Admin client bypasses RLS + OR filter handles NULL ex_date → `dividend-row-JEPI`, `dividend-row-O`, `dividend-row-GS` all visible. Summary shows $2,662.00 annual income. ✅ Fix confirmed.
+4. **Schwab tab sanity:** `dividends-account-empty` still shown (correct). ✅
+5. **Ladder regression:** `/ladder` loads without crash. ✅
+6. **Unit tests:** 471 on main → **473 on fix branch** (+2 regression tests by Hockney). ✅
+
+**Evidence files:**
+- `e2e/lurvg-evidence/dividends-empty-prebug-main.png` — bug screenshot
+- `e2e/lurvg-evidence/dividends-populated-postfix-ibkr.png` — fix screenshot (JEPI/O/GS visible)
+- `e2e/lurvg-evidence/dividends-empty-schwab.png` — Schwab still empty (correct)
+- `e2e/lurvg-evidence/ladder-postfix-ibkr.png` — ladder no regression
+- `e2e/lurvg-evidence/dividends-postfix-table-dom.txt` — DOM evidence with JEPI/O/GS rows
+- `e2e/lurvg-evidence/dividends-postfix-summary-dom.txt` — summary DOM showing $2,662.00
+
+**Open concern for Coordinator:** McManus's audit (#mcmanus-jepi-o-gs-audit.md) identified a secondary bug: `getDividendPositions` has no `account_id` filter on `dividend_payments`. Hockney's hotfix did NOT add this filter. The table is queried by symbol only, meaning users who hold the same tickers across multiple broker accounts could see combined data from all accounts. Not a blocker for #367 (single IBKR account use case), but worth a follow-up issue.
+
+**Learnings banked:** Reproduce-Before-Fix Rule added to `.squad/skills/validation-gates/SKILL.md`. When a bug is RLS/privilege/data-shape specific, validator must prove the bug reproduces on main before claiming the fix works.
