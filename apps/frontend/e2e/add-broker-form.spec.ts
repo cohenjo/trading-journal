@@ -54,7 +54,7 @@ authTest.describe('Add Broker form — #359 fix', () => {
         await page.waitForTimeout(300);
 
         // Fill in the form: Schwab
-        await page.getByLabel(/account name/i).fill('My Schwab Account');
+        await page.getByTitle('Account Name').fill('My Schwab Account');
         await page.getByTitle('Account Type').selectOption('schwab');
 
         // Submit
@@ -126,7 +126,7 @@ authTest.describe('Add Broker form — #359 fix', () => {
         await page.getByRole('button', { name: /add broker/i }).click();
         await page.waitForTimeout(300);
 
-        await page.getByLabel(/account name/i).fill('Duplicate Schwab');
+        await page.getByTitle('Account Name').fill('Duplicate Schwab');
         await page.getByTitle('Account Type').selectOption('schwab');
 
         await page.getByRole('button', { name: /save settings/i }).click();
