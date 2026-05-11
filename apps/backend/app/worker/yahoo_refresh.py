@@ -354,7 +354,13 @@ def refresh_stock_positions() -> dict[str, Any]:
 
             mark_price: Decimal = data["mark_price"]
             dividend_yield: Decimal | None = data["dividend_yield"]
-            market_value = (quantity * mark_price).quantize(Decimal("0.01"))
+            # TASE mark_price is in ILA (agorot = 1/100 ILS).
+            # Divide by 100 so market_value is stored in ILS, matching the
+            # broker XLS "שווי אחזקה ב ₪" column and all non-TASE positions.
+            if is_tase:
+                market_value = (quantity * mark_price / Decimal("100")).quantize(Decimal("0.01"))
+            else:
+                market_value = (quantity * mark_price).quantize(Decimal("0.01"))
 
             try:
                 _upsert_position_price(

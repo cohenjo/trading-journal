@@ -398,6 +398,95 @@ class TestTaseCurrencyNormalization:
         assert "ILA" in update_sql, f"Expected ILA in UPDATE SQL, got: {update_sql}"
         assert "ILS" not in update_sql, f"Must not write ILS in UPDATE SQL, got: {update_sql}"
 
+    def test_tase_market_value_is_in_ils_not_agorot(self) -> None:
+        """TASE market_value must be stored in ILS (mark_price / 100).
+
+        Example: 1000 shares of LUMI.TA at 7550 agorot → market_value = 75,500 ILS,
+        NOT 7,550,000 agorot. The fix divides by 100 when is_tase=True.
+        """
+        mock_session = MagicMock()
+
+        # 1000 shares × 7550 agorot / 100 = 75,500 ILS
+        quantity = Decimal("1000")
+        mark_price_ila = Decimal("7550")
+        expected_market_value_ils = Decimal("75500.00")
+
+        # Import the function under test after patching
+        from app.worker.yahoo_refresh import refresh_stock_positions  # noqa: PLC0415
+
+        tase_pos = _pos(ticker="604611", currency="ILA", listing_exchange=None, quantity=1000.0)
+        mock_yf = _make_yfinance_mock(close=float(mark_price_ila), div_yield=0.04)
+        tase_map = {"604611": "LUMI.TA"}
+
+        captured_params: list[dict] = []
+
+        def capture_execute(stmt, params=None):
+            if params and "market_value" in params:
+                captured_params.append(dict(params))
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            return mock_result
+
+        mock_sess = MagicMock()
+        mock_sess.__enter__ = MagicMock(return_value=mock_sess)
+        mock_sess.__exit__ = MagicMock(return_value=False)
+        mock_sess.execute.side_effect = capture_execute
+
+        with (
+            patch("app.worker.yahoo_refresh.Session", return_value=mock_sess),
+            patch("app.worker.yahoo_refresh._load_tase_map", return_value=tase_map),
+            patch("app.worker.yahoo_refresh._fetch_active_positions", return_value=[tase_pos]),
+            patch("yfinance.Ticker", return_value=mock_yf),
+            patch("app.worker.yahoo_refresh.time.sleep"),
+        ):
+            result = refresh_stock_positions()
+
+        assert result["refreshed"] == 1
+        assert captured_params, "Expected upsert params to be captured"
+        stored_market_value = Decimal(captured_params[0]["market_value"])
+        assert stored_market_value == expected_market_value_ils, (
+            f"TASE market_value must be in ILS ({expected_market_value_ils}), "
+            f"got {stored_market_value} (100x too high = agorot not converted)"
+        )
+
+    def test_non_tase_market_value_not_divided(self) -> None:
+        """Non-TASE market_value must use quantity * mark_price directly (no /100)."""
+        mock_session = MagicMock()
+
+        # 10 shares of AAPL at 150 USD → market_value = 1500 USD
+        captured_params: list[dict] = []
+
+        def capture_execute(stmt, params=None):
+            if params and "market_value" in params:
+                captured_params.append(dict(params))
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            return mock_result
+
+        mock_sess = MagicMock()
+        mock_sess.__enter__ = MagicMock(return_value=mock_sess)
+        mock_sess.__exit__ = MagicMock(return_value=False)
+        mock_sess.execute.side_effect = capture_execute
+
+        usd_pos = _pos(ticker="AAPL", currency="USD", listing_exchange="NASDAQ", quantity=10.0)
+        mock_yf = _make_yfinance_mock(close=150.0, div_yield=0.005)
+
+        with (
+            patch("app.worker.yahoo_refresh.Session", return_value=mock_sess),
+            patch("app.worker.yahoo_refresh._load_tase_map", return_value={}),
+            patch("app.worker.yahoo_refresh._fetch_active_positions", return_value=[usd_pos]),
+            patch("yfinance.Ticker", return_value=mock_yf),
+            patch("app.worker.yahoo_refresh.time.sleep"),
+        ):
+            result = refresh_stock_positions()
+
+        assert result["refreshed"] == 1
+        assert captured_params, "Expected upsert params to be captured"
+        stored_market_value = Decimal(captured_params[0]["market_value"])
+        assert stored_market_value == Decimal("1500.00"), (
+            f"USD market_value must be quantity × mark_price = 1500, got {stored_market_value}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Schedule registration test
