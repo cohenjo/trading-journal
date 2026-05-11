@@ -96,6 +96,14 @@ export default function DividendPositionsTable({ rows }: Props) {
               <td className="px-3 py-2 text-right">{fmtPct(row.forward_yield_pct)}</td>
               <td className="px-3 py-2 text-right font-medium text-green-400">
                 {fmtMoney(row.forward_dividend_annual)}
+                {row.source === 'csv' && (
+                  <span
+                    className="ml-1 inline-block rounded-full bg-amber-900/60 px-1.5 py-0.5 text-[10px] font-normal text-amber-300 align-middle"
+                    title="Estimated from dividend yield — actual payments not yet recorded. Refreshes after market close via Yahoo Finance."
+                  >
+                    est.
+                  </span>
+                )}
               </td>
               <td className="px-3 py-2 whitespace-nowrap">
                 {fmtFrequency(row.payment_frequency)}

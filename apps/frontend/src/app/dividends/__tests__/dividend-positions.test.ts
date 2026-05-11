@@ -512,6 +512,99 @@ describe('getDividendPositions', () => {
     expect(result[0].ttm_dividend_total).toBe(44.76);
   });
 
+  it('[regression] surfaces schwab positions with dividend_yield fallback when no payment history exists', async () => {
+    // Simulates Schwab Joint Tenant account: CSV-imported positions have
+    // dividend_yield in stock_positions but NO entries in dividend_payments.
+    // Previously these were silently filtered out; now they surface with source='csv'.
+    mockAuth();
+
+    const schwabPos = {
+      ...IBKR_POS_JEPI,
+      id: 'pos-jepq',
+      account_id: 71,
+      ticker: 'JEPQ',
+      description: 'JPMorgan Nasdaq Equity Premium Income ETF',
+      quantity: 155,
+      mark_price: 59.705,
+      source: 'manual' as const,
+    };
+
+    setupMocks(
+      {
+        household_members: () =>
+          Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+        trading_account_config: () =>
+          Promise.resolve({ data: [{ id: 71, account_id: null }], error: null }),
+        dividend_payments: () => Promise.resolve({ data: [], error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+        // dividend_yield stored as a percentage (10.43 = 10.43%) — Yahoo Finance format
+        stock_positions: () =>
+          Promise.resolve({
+            data: [{ ticker: 'JEPQ', dividend_yield: '10.43' }],
+            error: null,
+          }),
+      },
+    );
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([schwabPos]);
+
+    const result = await getDividendPositions('schwab');
+
+    expect(result).toHaveLength(1);
+    const row = result[0];
+    expect(row.ticker).toBe('JEPQ');
+    expect(row.source).toBe('csv');
+    // TTM metrics are null (no payment history)
+    expect(row.ttm_dividend_total).toBeNull();
+    expect(row.ttm_div_per_share).toBeNull();
+    // Forward estimate: 59.705 × (10.43/100) = 6.227... → rounded = 6.23 per share
+    // forward_dividend_annual = 6.23 × 155 = 965.65
+    expect(row.forward_div_per_share).toBe(6.23);
+    expect(row.forward_dividend_annual).toBe(965.65);
+  });
+
+  it('[regression] yield fallback uses decimal format correctly (yield ≤ 1)', async () => {
+    // dividend_yield stored as decimal fraction (0.056236 = 5.6236%)
+    mockAuth();
+
+    const pos = {
+      ...IBKR_POS_JEPI,
+      ticker: 'BNS',
+      description: 'Bank of Nova Scotia',
+      quantity: 150,
+      mark_price: 76.99,
+      source: 'manual' as const,
+    };
+
+    setupMocks(
+      {
+        household_members: () =>
+          Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+        trading_account_config: () =>
+          Promise.resolve({ data: [{ id: 71, account_id: null }], error: null }),
+        dividend_payments: () => Promise.resolve({ data: [], error: null }),
+        dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+        stock_positions: () =>
+          Promise.resolve({
+            data: [{ ticker: 'BNS', dividend_yield: '0.056236' }],
+            error: null,
+          }),
+      },
+    );
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([pos]);
+
+    const result = await getDividendPositions('schwab');
+
+    expect(result).toHaveLength(1);
+    const row = result[0];
+    expect(row.source).toBe('csv');
+    // 0.056236 ≤ 1 → used as-is: 76.99 × 0.056236 = 4.33... → 4.33/share
+    // forward_dividend_annual = 4.33 × 150 = 649.50
+    expect(row.forward_div_per_share).toBe(4.33);
+    expect(row.forward_dividend_annual).toBe(649.5);
+  });
+
   it('[regression] surfaces positions via accruals when payments table is empty (RLS gate regression)', async () => {
     // Simulates early production state where dividend_payments was empty.
     // Even when payments come back empty, accruals-only code path must still surface positions.
