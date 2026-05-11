@@ -1296,3 +1296,47 @@ Hockney's PR description listed "22 TASE" but the actual count was 18 TASE (typo
   - CI shadow DB missing `supabase_realtime` publication
 
 ---
+testing append
+
+## 2026-05-11 — Yahoo worker + broker parser polish sprint
+
+**User directive (Jony Vesterman Cohen):** Capture cost basis + unrealized P&L on broker import; fix Leumi ticker contamination; deploy Yahoo Finance worker for daily price/yield refresh.
+
+### PR #399 — Parser fixes (Hockney)
+
+**What:**
+- **Schwab cost_basis + unrealized_pnl**: Mapped CSV column to unrealized_pnl via prefix-match lookup with parseCurrency() extraction.
+- **Leumi ticker scrubbing**: Fixed col 0 format to strip Hebrew text using split(/\s+/)[0]. Fixture lesson: hand-crafted test data didn't reflect real Leumi export format; validate against actual broker files at LURVG time.
+- **Leumi market_value + unrealized_pnl**: Extended parser to extract columns 9 and 10. Schema columns pre-existing in stock_positions.
+- **Schema**: No migrations needed — columns pre-existing.
+
+**LURVG result:** GREEN — 625 tests pass; direct parser validation confirms all fixes.
+
+### PR #400 — Yahoo Finance worker (Hockney + TASE fix)
+
+**What:**
+- **Scheduler**: APScheduler in-process, 0 22 * * MON-FRI UTC cron. Follows ndx_daily_sync pattern.
+- **TASE currency**: Yahoo returns ILA (agorot). Worker stores currency=ILA matching broker imports.
+- **TASE map**: DB table corrected via Bizportal verification — 7 entries fixed, 4 ETFs deleted. Canonical source: Bizportal per paper_id.
+- **Exchange fallback**: GBP → LSE (.L); ILA/ILS → TASE map; USD → NYSE/NASDAQ; EUR ambiguous → skip.
+- **Rate limiting**: 200ms sleep + 3-attempt retry on HTTP 429. Per-row session.rollback() — single failure does NOT kill worker.
+
+**Worker contract:** Refreshes mark_price/dividend_yield/market_value/prices_refreshed_at. Preserves description/cost_basis_total/unrealized_pnl (broker-snapshot-only).
+
+**LURVG result:** YELLOW/PASS — 613 tests pass; idempotency confirmed; 2 flags resolved by TASE fix.
+
+**Schema migrations:**
+- a1b2c3d4e5f6 — adds tase_yahoo_map + 4 new columns to stock_positions.
+- c1d2e3f4a5b6 — TASE fix: corrects map entries + deletes 4 ETF rows.
+
+### Banked patterns
+
+1. **Server actions must hit Supabase directly** — no relative fetch calls. Parse in server action, upsert via createClient() user-scoped client (RLS-gated).
+
+2. **SQLAlchemy in async** — Use session.execute(text, params) not .exec(); CAST(:id AS UUID) not :id::uuid.
+
+3. **200ms delay + retry** — Between yfinance calls: 200ms sleep + 3-attempt exponential backoff on HTTP 429.
+
+4. **Per-row error handling** — session.rollback() per row — single failure does NOT kill entire worker run.
+
+---
