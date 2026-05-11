@@ -349,6 +349,9 @@ export interface StockPosition {
   cost_basis: number | null;
   mark_price: number | null;
   market_value: number | null;
+  /** Broker-stamped local-currency market value (ILS for TASE positions). Used
+   *  as a fallback when the Yahoo worker has not yet populated market_value. */
+  market_value_local: number | null;
   unrealized_pnl: number | null;
   currency: string;
   as_of_date: string;
@@ -401,6 +404,7 @@ function coerceStockPosition(row: Record<string, unknown>): StockPosition {
     cost_basis: row.cost_basis != null ? coerceNumber(row.cost_basis as number | string) : null,
     mark_price: row.mark_price != null ? coerceNumber(row.mark_price as number | string) : null,
     market_value: row.market_value != null ? coerceNumber(row.market_value as number | string) : null,
+    market_value_local: row.market_value_local != null ? coerceNumber(row.market_value_local as number | string) : null,
     unrealized_pnl: row.unrealized_pnl != null ? coerceNumber(row.unrealized_pnl as number | string) : null,
     currency: String(row.currency ?? 'USD'),
     as_of_date: String(row.as_of_date ?? ''),
@@ -477,7 +481,7 @@ export async function getStockPositions(accountId?: number | null): Promise<Stoc
 
   let query = supabase
     .from('stock_positions')
-    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, unrealized_pnl, currency, as_of_date, source')
+    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, market_value_local, unrealized_pnl, currency, as_of_date, source')
     .order('ticker', { ascending: true });
 
   if (accountId) query = query.eq('account_id', accountId);
@@ -530,7 +534,7 @@ export async function createStockPosition(
       currency: payload.currency ?? 'USD',
       source: 'manual',
     })
-    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, unrealized_pnl, currency, as_of_date, source')
+    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, market_value_local, unrealized_pnl, currency, as_of_date, source')
     .single();
 
   if (error) {
@@ -605,7 +609,7 @@ export async function updateStockPosition(
     .from('stock_positions')
     .update(updates)
     .eq('id', id)
-    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, unrealized_pnl, currency, as_of_date, source')
+    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, market_value_local, unrealized_pnl, currency, as_of_date, source')
     .single();
 
   if (error) {
