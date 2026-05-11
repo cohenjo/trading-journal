@@ -121,5 +121,11 @@ create policy stock_positions_delete on public.stock_positions
   for delete to authenticated
   using (household_id is not null and public.is_household_writer(household_id));
 
--- Add to realtime publication
-alter publication supabase_realtime add table public.stock_positions;
+-- Add to realtime publication (idempotent: handles missing publication on shadow/CI DBs)
+do $$
+begin
+  alter publication supabase_realtime add table public.stock_positions;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
