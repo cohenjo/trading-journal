@@ -4,6 +4,14 @@
 
 ## Active Architectural Directives
 
+### RLS policies via `is_household_member(household_id)` SECURITY DEFINER function (2026-05-11)
+
+All household-scoped tables use a common RLS pattern: SELECT policies that JOIN through a bridging table (e.g., `trading_account_config`) with a `WHERE is_household_member(household_id)` predicate. The `is_household_member()` function is a SECURITY DEFINER stored procedure that evaluates the authenticated session's household membership. Examples: `stock_positions`, `dividend_payments`, `dividend_accruals` all follow this pattern. Global reference tables (e.g., `security_reference`) disable RLS entirely. No INSERT/UPDATE/DELETE policies are needed for tables updated exclusively by backend workers using service-role direct DB connections. This pattern ensures frontend (PostgREST + cookie-based auth) and backend (service role) have aligned security boundaries.
+
+**References:** PR [#375](https://github.com/cohenjo/trading-journal/pull/375), migration `20260511102251_add_rls_policies_dividend_disable_security_reference`, issue [#374](https://github.com/cohenjo/trading-journal/issues/374)
+
+---
+
 ### Positions as Source of Truth (2026-05-11)
 
 The accounts page mirrors the user's broker positions (synced via Flex Query, CSV, manual entry, or any other ingestion path). The Bonds page and Dividends page are FILTERED, PRODUCT-SPECIFIC VIEWS over those same positions, not independent data stores. The Dividends page displays all dividend-bearing positions held across all configured accounts, enriched with dividend metrics (TTM yield, expected/forward yield). Dividend payments and bond income are PROJECTED from positions — not independently maintained. All future work on `/trading/accounts`, `/dividends`, and `/bonds` must follow this pattern.
@@ -11,6 +19,34 @@ The accounts page mirrors the user's broker positions (synced via Flex Query, CS
 ---
 
 ## Decision Log
+
+### 2026-05-12: RLS Fix — Dividend Tables + security_reference (#375, #374)
+
+**By:** Redfoot (Tester) — Validation
+**By:** Hockney (Backend Dev) — Implementation
+**PR:** [#375](https://github.com/cohenjo/trading-journal/pull/375) — `fix(security): add RLS policies for dividend tables, disable RLS on security_reference (#374)`
+**Issues closed:** [#374](https://github.com/cohenjo/trading-journal/issues/374)
+**Migration:** `20260511102251_add_rls_policies_dividend_disable_security_reference` (applied to prod 2026-05-11)
+
+**What:** 2-part fix resolving RLS silent-deny-all on 3 tables:
+1. **`dividend_payments` + `dividend_accruals`** — Added household-scoped SELECT policies via canonical pattern: `account_id IN (SELECT account_id FROM trading_account_config WHERE is_household_member(household_id))`. Mirrors pattern used by `stock_positions` and `trading_account_config` itself.
+2. **`security_reference`** — Global reference table (ticker → company name, sector, etc.), no per-household data. Disabled RLS entirely (semantically correct, avoids misleading USING(true) policy). Service role writes only; all authenticated users may read.
+3. **Removed admin-client workaround** — `getDividendPositions()` now uses standard `createClient()` (cookie-based, RLS-gated) instead of `createAdminClient()` bypass.
+
+**Why:** RLS was enabled on all 3 tables but zero policies existed → silent deny-all for PostgREST clients. `dividend_payments`/`dividend_accruals` had been hidden behind admin-client workaround (PR #368). The new RLS policies provide proper scoped access; `security_reference` fix unblocks future parsers that read via `createClient()`.
+
+**Tests:** 518/519 passing (1 pre-existing LadderPage coupon_rate formatting failure, unrelated). Playwright LURVG (5/5 tests):
+- `/dividends` IBKR — table populated (JEPI, O, GS) via standard client ✅
+- `/dividends` Schwab — correct empty state ✅
+- `/ladder` IBKR — bonds populated, no regression ✅
+- `/summary` — loads, no regression ✅
+- `/trading/accounts` — 3 tabs visible, no regression ✅
+
+**Key learning (RLS seed strategy):** When RLS joins `dividend_payments.account_id → trading_account_config.account_id`, seed with the REAL broker account number (e.g. `U2515365`), not a fake UUID. Using fake IDs causes RLS join to return 0 rows → test shows empty state (visually correct but semantically wrong). Always pair with `household_id` filter to avoid `.single()` failures on duplicate account_ids.
+
+**Verdict:** 🟢 APPROVED (Redfoot LURVG validation). Safe to merge.
+
+---
 
 ### 2026-05-12: Broker-Form Fix Validated — LURVG Closure (#371 + #359)
 
