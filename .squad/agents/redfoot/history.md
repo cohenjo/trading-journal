@@ -410,3 +410,11 @@ Executed full LURVG validation suite for #363 (Dividends positions-mirror) + #36
 **Verdict: 🟢 APPROVED.** Schema verified via Supabase MCP: `user_id` dropped, `household_id` NOT NULL, 2/2 rows preserved, 4 canonical household-scoped RLS policies intact, 0 wave2 `_own` policies remain. Unit tests: 519/519. Playwright: 3/3 passed (`/insurance` renders clean, no `user_id` errors, Add Policy flow functional). Server log clean. PR #379 ready to squash-merge.
 
 **Learnings banked:** `households` requires `name+created_by+account_type ∈ {individual,joint}` (NOT NULL). `trg_households_add_creator` auto-inserts creator as `owner` — never insert manually into `household_members` or duplicate key violation occurs. `is_household_writer` = role in `('owner','member')`. New seed pattern lives in `e2e/lurvg-pr379-insurance.spec.ts`.
+
+## 2026-05-11: LURVG — PR #381 Leumi IRA XLS Import
+
+**Verdict: 🟢 APPROVED.** All 7 concerns resolved. Unit tests: 568/568 (+49 new). Playwright: 3/3 passed. DB validation: 30 rows in `stock_positions` (18 TASE/ILA + 4 US/USD + 8 LSE/GBP) for account_id=72. Idempotency confirmed (2nd import = 30 rows, not 60).
+
+**One non-blocking doc error:** PR body claims "22 TASE" — actual is 18 TASE (real file has 30 holdings: rows 6–35, not rows 5–35). Algorithm is correct; only PR description is wrong.
+
+**Learnings banked:** SpreadsheetML XML from Leumi IRA fails ET parser on malformed `& ` entity (e.g., `LEGAL & GEN`) at line 278 — regex extraction is the correct approach and matches TS implementation. Jony (account_id=72) uses Google OAuth so no JWT can be programmatically obtained; FastAPI import must be DB-simulated via service role for LURVG. `activeTab` on accounts page defaults to `"ibkr"` and has no URL-param sync — Playwright tests must click `data-testid="account-tab-ira"` explicitly. Jony's 30 IRA positions now live in production (source='manual', as_of_date=2026-05-11) — this is the intended final state.
