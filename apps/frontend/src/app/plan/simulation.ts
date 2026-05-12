@@ -3,10 +3,17 @@ import Decimal from 'decimal.js';
 import type { PlanData, PlanItem, PlanMilestone } from '@/components/Plan/types';
 import type { FinanceSnapshot } from '../finances/actions';
 
+export interface OptionsIncomeProjectionPoint {
+  year: number;
+  expectedIncome: number;
+}
+
 export interface PlanSimulationInput {
   plan: PlanData;
   finances?: FinanceSnapshot | { data?: { items?: unknown[] } } | null;
   settings?: Record<string, unknown>;
+  /** Optional options-income projection from #428. When absent, plan runs as before. */
+  optionsProjection?: OptionsIncomeProjectionPoint[];
 }
 
 export interface PlanSimulationDetail {
@@ -730,6 +737,10 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
   let unallocatedCash = loadedAssets.cashDiff;
   const projection: PlanSimulationResult = [];
 
+  const optionsMap = new Map<number, number>(
+    (planInput.optionsProjection ?? []).map(p => [p.year, p.expectedIncome]),
+  );
+
   for (let year = currentYear; year <= endYear; year += 1) {
     const age = year - birthYear;
     milestoneManager.checkDynamic(year, accountManager.liquidValue().plus(unallocatedCash), new Decimal(0));
@@ -806,6 +817,13 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       taxPaid = taxPaid.plus(annuity.payout.mul(annuity.tax_rate.div(100)));
       taxableIncome = taxableIncome.plus(annuity.payout);
       incomeDetails.push({ name: `Pension: ${annuity.name}`, type: 'Pension Income', value: roundMoney(annuity.payout) });
+    }
+
+    const optionsIncome = new Decimal(optionsMap.get(year) ?? 0);
+    if (optionsIncome.gt(0)) {
+      grossIncome = grossIncome.plus(optionsIncome);
+      taxableIncome = taxableIncome.plus(optionsIncome);
+      incomeDetails.push({ name: 'Options Income', type: 'options', value: roundMoney(optionsIncome) });
     }
 
     const netFlow = grossIncome.minus(taxPaid).minus(expenses);

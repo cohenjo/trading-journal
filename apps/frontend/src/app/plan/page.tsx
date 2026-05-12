@@ -8,19 +8,22 @@ import { Plan, PlanData } from '@/components/Plan/types';
 import { useSettings } from '../settings/SettingsContext';
 import { createPlan, getLatestPlan, runPlanSimulation, updatePlan } from './actions';
 import { getLatestFinanceSnapshot } from '../finances/actions';
+import { getOptionsIncomeEstimation } from '../options/actions';
 
 export default function PlanPage() {
     const { settings } = useSettings();
     const [plan, setPlan] = useState<Plan | null>(null);
     const [finances, setFinances] = useState<any>(null);
+    const [optionsProjection, setOptionsProjection] = useState<Array<{ year: number; expectedIncome: number }>>([]);
     const [projection, setProjection] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
     // Initial Load
     useEffect(() => {
-        Promise.all([getLatestPlan(), getLatestFinanceSnapshot()]).then(([planData, financeData]) => {
+        Promise.all([getLatestPlan(), getLatestFinanceSnapshot(), getOptionsIncomeEstimation()]).then(([planData, financeData, optionsData]) => {
             setFinances(financeData);
+            setOptionsProjection(optionsData.projections);
             if (planData) {
                 setPlan(planData);
             } else {
@@ -60,6 +63,7 @@ export default function PlanPage() {
                 plan: plan.data,
                 finances,
                 settings: settings as unknown as Record<string, unknown>,
+                optionsProjection,
             })
                 .then(data => {
                     const formatted = data.map(p => ({
@@ -80,7 +84,7 @@ export default function PlanPage() {
         }, 500); // 500ms debounce
 
         return () => clearTimeout(timer);
-    }, [plan, finances, settings]); // Re-run when any input changes
+    }, [plan, finances, settings, optionsProjection]); // Re-run when any input changes
 
     // Calculate Markers
     const markers = useMemo(() => {
