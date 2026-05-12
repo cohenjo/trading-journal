@@ -155,3 +155,16 @@ Infrastructure ready (migrations applied, worker rebuilt and healthy, new schema
   - When a root PR has its branch deleted, dependent PRs auto-close; restore the missing base branch only long enough to `gh pr reopen`, retarget with `--base main`, then rebase.
   - Force-pushing after rebase invalidates prior CI runs, so re-check the failure signature before any admin merge.
 - **Follow-up:** The Playwright Node 20 workflow infra issue needs a separate fix; note filed on #419 for Hockney/Kobayashi/Redfoot handoff.
+
+---
+
+## 2026-05-12 — Round 1 review merges (#424, #425, #427)
+
+- **Merged in order:** #424 → #425 → #427 using `--squash --delete-branch --admin` under Keaton's approved Playwright CI infra bypass.
+- **Squash SHAs:**
+  - #424: `f2cdff6f9d9e9e5d1ca9b91890484fd42e911f2f`
+  - #425: `94643208988135aaeee958c32ef756ec863c8385`
+  - #427: `ab4da1fe0337dd55f1d08c6e0c53d392c617a109`
+- **Pre-merge checks:** Each PR was open and mergeable via REST (`mergeable=true`, `mergeable_state=unstable`); failed Playwright logs matched `Error: Node.js 20 detected without native WebSocket support.`
+- **Rebase actions:** None needed for the PR branches.
+- **Worker rebuild:** Correctly skipped for #425 per Keaton's no-op/audit-trail guidance; `./scripts/rebuild-worker.sh` was not run.
