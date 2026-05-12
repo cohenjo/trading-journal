@@ -1,3 +1,15 @@
+## 2026-05-13 — PR #443 squad/440-error-surfacing
+
+Shipped P0 frontend fixes: error surfacing in `/plan` handleUpdatePlanData + empty-state CTA in `/cash-flow`.
+
+- `/plan`: captures `previousPlan` before optimistic write; on `result.ok === false` rolls back state, fires `toast.error()` via sonner, and `console.error`s for devtools. Installed sonner + added `<Toaster>` to root layout.
+- `/cash-flow`: replaced silent `return;` with a proper empty-state component (heading + copy + CTA link to `/plan`) when no plan exists post-load.
+- `CashFlowSankey`: updated zero-nodes message to include a navigable link to `/plan`.
+
+P1 income-stream wiring (dividends + bonds) pending Keaton architectural synthesis.
+
+---
+
 ## 2026-05-09 — #340 follow-up: account label rename
 
 Renamed tab display labels to match Jony's finalized directive:
