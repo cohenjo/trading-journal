@@ -1,6 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { useSettings } from '../settings/SettingsContext';
 import { CashFlowSankey } from '@/components/CashFlow/CashFlowSankey';
 import { PlanData } from '@/components/Plan/types';
@@ -72,6 +73,26 @@ export default function CashFlowPage() {
     const spouseAge = spouseBirthYear ? selectedYear - spouseBirthYear : null;
 
     if (loading) return <div className="min-h-screen bg-slate-950 p-8 text-slate-400">Loading cash flow data...</div>;
+
+    if (!plan || !plan.data) {
+        return (
+            <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+                <div className="text-center max-w-md px-6">
+                    <div className="text-5xl mb-6">📊</div>
+                    <h2 className="text-2xl font-bold text-slate-100 mb-3">No financial plan yet</h2>
+                    <p className="text-slate-400 mb-8">
+                        Cash flow projections appear once you create your financial plan. Add your income, expenses, and accounts to see the full picture.
+                    </p>
+                    <Link
+                        href="/plan"
+                        className="inline-flex items-center gap-2 px-6 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-colors"
+                    >
+                        Create your plan →
+                    </Link>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden flex-col">

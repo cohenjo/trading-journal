@@ -1,6 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { toast } from 'sonner';
 import { PlanChart } from '@/components/Plan/PlanChart';
 import { PlanEditor } from '@/components/Plan/PlanEditor';
 import { PlanDetailsPane } from '@/components/Plan/PlanDetailsPane';
@@ -42,15 +43,32 @@ export default function PlanPage() {
     const handleUpdatePlanData = async (newData: PlanData) => {
         if (!plan) return;
 
+        const previousPlan = plan;
         const updatedPlan = { ...plan, data: newData };
         setPlan(updatedPlan); // Optimistic Update
 
         if (plan.id) {
             const result = await updatePlan(plan.id, { data: newData });
-            if (result.ok) setPlan(result.plan);
+            if (result.ok) {
+                setPlan(result.plan);
+            } else {
+                // Rollback and surface the error
+                setPlan(previousPlan);
+                const message = result.error ?? 'Failed to save plan. Please try again.';
+                console.error('[plan] updatePlan failed:', message);
+                toast.error('Plan not saved', { description: message });
+            }
         } else {
             const result = await createPlan(newData);
-            if (result.ok) setPlan(result.plan);
+            if (result.ok) {
+                setPlan(result.plan);
+            } else {
+                // Rollback and surface the error
+                setPlan(previousPlan);
+                const message = result.error ?? 'Failed to create plan. Please try again.';
+                console.error('[plan] createPlan failed:', message);
+                toast.error('Plan not saved', { description: message });
+            }
         }
     };
 

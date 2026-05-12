@@ -1,6 +1,7 @@
 import "./globals.css";
 import { type Metadata } from "next";
 import { type ReactNode } from "react";
+import { Toaster } from "sonner";
 import { SettingsProvider } from "./settings/SettingsContext";
 import MainLayout from "@/components/Layout/MainLayout";
 import PageLoadMetrics from "@/components/Telemetry/PageLoadMetrics";
@@ -24,6 +25,7 @@ export default function RootLayout({
             {children}
           </MainLayout>
         </SettingsProvider>
+        <Toaster theme="dark" position="bottom-right" richColors />
       </body>
     </html>
   );
