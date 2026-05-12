@@ -1595,3 +1595,86 @@ Issues #408 + #409 closed.
 ### Round 6 — Legacy Worker Container Cleanup (2026-05-12 10:15)
 
 **PR #421** (SHA `a561c81`) — Removed `trading_journal_worker` container, dead code running pre-Yahoo-rebuild stack lacking Supabase env vars, throwing SSL errors on `compute_jobs`. Deleted root `docker-compose.yml`; canonical now `docker-compose.backend.yml`. Worker smoke test: 297/321 positions refreshed. **Principle:** Kill stale containers — they silently run old code and pollute observability.
+
+---
+
+### 2026-05-12: Dividends page TASE/ILA currency fix (PR #422)
+
+**By:** Fenster (Frontend Dev)
+**PR:** [#422](https://github.com/cohenjo/trading-journal/pull/422) — `fix(dividends): TASE/ILA positions show correct ILS amounts (CLIS ₪499.95 not $49,995)`
+**Merged SHA:** `faec8e7e2005c93d6683cafc66c1d1941d026523`
+
+**Bug:** `/dividends` page showed CLIS (TASE ticker 224014, currency=ILA) annual dividend as **$49,995** instead of **₪499.95** — 100x multiplier and USD mislabel. Same class as Round 4's LUMI fix (PR #418), but on dividends page which PR #418 did not cover.
+
+**Root cause:** In `apps/frontend/src/app/dividends/actions.ts`, function `getDividendPositions` computed dividend from `qty × mark_price × yield` without dividing `mark_price` by 100 for ILA (agorot→ILS). For TASE positions with `currency='ILA'`, `mark_price` is in agorot (Israeli cents). Also, `DividendPositionsTable.tsx` formatted all amounts with `'USD'` instead of per-row currency.
+
+**Fix:**
+1. Added `currency: string` field to `DividendPosition` type
+2. In `getDividendPositions`: For ILA positions, `canonicalPrice = mark_price / 100`. Prefer stored `pos.market_value` (canonical ILS) over recomputation.
+3. `getDividendSummary` converts per-position amounts to USD via `convertCurrency()`
+4. `DividendPositionsTable`: Use `fmtMoney(val, row.currency)` — per-row currency display
+
+**Verification:** CLIS (224014, 101 shares): `$49,995` → `₪499.95` = 29,582.90 × 0.0169 ✓. All TASE IRA positions affected by same fix. 634 unit tests passing post-merge.
+
+**Key lesson:** Display-layer fixes must enumerate ALL pages that render the affected data structure. PR #418 fixed `/trading/accounts` but missed `/dividends`. Every new view rendering `stock_positions` with `currency='ILA'` must apply `mark_price / 100` before financial calculations.
+
+---
+
+### 2026-05-11: Idempotent supabase_realtime Publication References (PR #401)
+
+**By:** Hockney (Backend Dev)
+**Issue:** #397
+**PR:** [#401](https://github.com/cohenjo/trading-journal/pull/401) — `fix(migrations): idempotent supabase_realtime publication in shadow DB`
+
+**Root cause:** Migration `20260509180919_add_stock_positions.sql` used a bare `ALTER PUBLICATION` statement that fails with `ERROR: publication "supabase_realtime" does not exist` on fresh Postgres (shadow/CI DB). The publication exists only on real Supabase projects at initialization.
+
+**Fix:** Wrapped statement in DO block with exception handlers:
+```sql
+do $$
+begin
+  alter publication supabase_realtime add table public.stock_positions;
+exception
+  when duplicate_object then null;
+  when undefined_object then null;
+end $$;
+```
+
+- `undefined_object`: catches missing publication on shadow/CI DB
+- `duplicate_object`: catches idempotent re-runs
+- Safe on production: Supabase has publication; `ALTER` succeeds normally
+
+**Convention:** All future migrations referencing `supabase_realtime` MUST use the DO block pattern with exception handlers to remain shadow DB CI compatible.
+
+---
+
+### 2026-05-11: E2E trading-accounts smoke updated for 3-tab UI (PR #396)
+
+**By:** Redfoot (Tester)
+**Issue:** #396
+
+**Root cause:** `/trading/accounts` page was overhauled (PRs #354/#355) to render 3 hardcoded tabs (IBKR / Schwab / LeumiIRA) + Settings, but `e2e/flows/trading-accounts.spec.ts` was never updated. Kept asserting against old single-account card UI.
+
+**Selector changes:**
+| Old assertion | New assertion |
+|---|---|
+| `getByRole('heading', { name: /Trading Accounts/i })` | `getByRole('heading', { name: /Stock Positions/i })` |
+| `getByRole('button', { name: 'E2E IBKR Account' })` | `getByTestId('account-tab-ibkr')` |
+| `getByText(/IBKR Account:/)` | `getByRole('heading', { name: /E2E IBKR Account/i, level: 2 })` |
+| `getByRole('button', { name: 'Settings' })` | `getByTestId('account-tab-settings')` |
+| `getByText('Settings saved successfully!')` | `getByTestId('settings-save-success')` |
+
+**Evidence:** Before fix: E2E Smoke check FAIL (timeout). After fix: CI expected to pass.
+
+---
+
+### 2026-05-11: accounts-phase2 E2E testid prefix convention (PR #405)
+
+**By:** Redfoot (Tester)
+**Issue:** #404
+**PR:** [#405](https://github.com/cohenjo/trading-journal/pull/405)
+
+**Root cause:** `e2e/flows/accounts-phase2.spec.ts` used bare `tab-{ibkr,schwab,ira}` selectors, but implementation renders `data-testid="account-tab-{ibkr,schwab,ira}"` — mismatch with `account-` prefix.
+
+**Fix:** Renamed all selectors to canonical `account-tab-{ibkr,schwab,ira}` form. Added explicit `.click()` calls before assertions to ensure active tab is deterministic.
+
+**Convention:** All account tab selectors in E2E specs must use `account-tab-{type}` pattern, consistent with UI implementation. Bare `tab-{type}` is incorrect and will fail.
