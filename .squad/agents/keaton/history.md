@@ -231,3 +231,29 @@ Triaged all 12 dependabot/chore PRs. E2E Smoke + Auth failures on all PRs confir
 - **Help wanted (1):** #304 — OAuth preview-deploy strategy awaiting @cohenjo decision on 3 design options
 - **Re-routed:** #353 → squad:hockney; #315 → squad:copilot
 - **Kept active:** 21 issues (5 with next-step comments, 16 unchanged)
+
+### 2026-05-12 — Multi-PR Gate Review: Options Income Estimation Sprint
+
+**Requested by:** Jony Vesterman Cohen
+**PRs reviewed:** #433, #434, #435, #436, #437 (5 PRs, ~1800 additions)
+**Verdict:** ✅ ALL 5 APPROVED
+
+**Architecture validation:**
+- All estimation logic lives in frontend server actions (not backend API) — consistent with dividends/bonds pattern ✓
+- Single source of truth via `getOptionsIncomeEstimation()` server action ✓
+- Actuals-win-over-projections merge in /summary page ✓
+- Plan integration is optional/backward compatible ✓
+- Default growth changed from 5% → 2% per Jony's spec (architecture note §3 acknowledged) ✓
+
+**Key findings:**
+1. **#433 CI:** Playwright E2E failure is a workflow YAML configuration issue, not code. Logic is clean.
+2. **#434 negative income:** `optionsIncome.gt(0)` guard silently excludes negative projections from the plan. Conservative and probably intentional, but inconsistent with architecture decision §2 (negative baselines project forward). Noted, not blocking.
+3. **No worker files touched** in any PR — worker redeploy gate NOT triggered.
+4. **Merge order:** #433 → {#434, #435, #436} (any order) → #437. Rebases needed after #433 lands.
+5. **Code quality:** Decimal arithmetic used throughout, proper TypeScript typing, comprehensive test coverage across all PRs.
+
+**Decision-inbox:** No new patterns worth codifying — sprint follows established conventions cleanly.
+
+---
+
+2026-05-12: Authored 5 issues (#428–#432) for options-income-extrapolation. Reviewed all 5 PRs. All approved. Merge order: #433 root → {#434–#436} → #437.

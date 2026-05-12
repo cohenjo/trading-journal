@@ -415,3 +415,7 @@ Naming a Pydantic field same as imported stdlib type (e.g., `date: date | None`)
 **Recommendation:** Add `.eq('account_id', config.account_id)` filter to `dividend_payments` query in getDividendPositions(). Validate that Schwab/IRA tabs handle NULL account_id correctly.
 
 **Follow-up assigned:** Issue #369 (filed by Redfoot during LURVG validation).
+
+---
+
+2026-05-12: Built options income projection engine (PR #433). 3-yr arithmetic mean × 1.02^N. Configurable growth rate via settings. Floor at zero for negative baselines. Fallback to whatever years are available if <3.
