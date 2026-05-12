@@ -1037,6 +1037,7 @@ export async function getDividendPositions(
 
   // Build per-ticker maps from payment rows.
   const ttmTotalByTicker = new Map<string, number>();
+  const ttmCountByTicker = new Map<string, number>();
   const lastPayDateByTicker = new Map<string, string>();
   const allExDatesByTicker = new Map<string, string[]>();
 
@@ -1056,6 +1057,7 @@ export async function getDividendPositions(
     // TTM accumulation — compare effective date against TTM window
     if (effectiveDate >= ttmStartStr) {
       ttmTotalByTicker.set(sym, (ttmTotalByTicker.get(sym) ?? 0) + amt);
+      ttmCountByTicker.set(sym, (ttmCountByTicker.get(sym) ?? 0) + 1);
     }
 
     // Track most recent payment date
@@ -1100,19 +1102,33 @@ export async function getDividendPositions(
     const yieldFraction = yieldByTicker.get(ticker) ?? 0;
     const hasYield = yieldFraction > 0;
 
+    // TTM completeness guard: an incomplete TTM sample (e.g. QQQI with only 2 of
+    // 12 expected monthly payments in the DB) produces a misleadingly low forward
+    // yield. Require at least 3 in-window payments before trusting TTM as a
+    // forward proxy. Positions with an untrustworthy TTM fall through to
+    // hasYield (stock_positions.dividend_yield from Yahoo).
+    const MIN_TTM_PAYMENTS_FOR_TRUST = 3;
+    const ttmCount = ttmCountByTicker.get(ticker) ?? 0;
+    const ttmIsTrustworthy = hasTTM && ttmCount >= MIN_TTM_PAYMENTS_FOR_TRUST;
+
     // Include position only when at least one dividend signal is present
     if (!hasTTM && !hasAccrual && !hasYield) continue;
 
     const qty = pos.quantity;
 
     // ILA (Israeli agorot) is the broker currency code for TASE positions.
-    // mark_price is stored in agorot (1/100 of ILS). Normalise to ILS so that
-    // all dividend calculations use canonical per-share prices, avoiding the
-    // 100× inflation seen in PR #418 (LUMI) and now replicated here.
-    const posCurrency = pos.currency === 'ILA' ? 'ILS' : pos.currency;
+    // GBP (GBp) is the broker code for LSE positions quoted in pence.
+    // mark_price is stored in sub-units (agorot / pence). Normalise to the
+    // major unit (ILS / GBP) so dividend calculations use canonical per-share
+    // prices, avoiding the 100× inflation seen in PR #418 (LUMI/BARC/RIO).
+    const posCurrency = pos.currency === 'ILA' ? 'ILS'
+      : pos.currency === 'GBp' ? 'GBP'
+      : pos.currency;
     const rawPrice = pos.mark_price;
     const canonicalPrice =
-      pos.currency === 'ILA' && rawPrice !== null ? rawPrice / 100 : rawPrice;
+      (pos.currency === 'ILA' || pos.currency === 'GBP' || pos.currency === 'GBp') && rawPrice !== null
+        ? rawPrice / 100
+        : rawPrice;
 
     // Frequency detection from historical ex-dates
     const exDates = allExDatesByTicker.get(ticker) ?? [];
@@ -1128,13 +1144,14 @@ export async function getDividendPositions(
         ? roundDecimal((ttmDivPerShare / canonicalPrice) * 100, 4)
         : null;
 
-    // Forward yield: prefer accruals.gross_rate × frequency; else use TTM (already annualised);
-    // fall back to stock_positions.dividend_yield (Yahoo/CSV) when no payment history at all.
-    // Always use canonicalPrice (ILS for ILA, not agorot) to avoid 100× inflation.
+    // Forward yield: prefer accruals.gross_rate × frequency; else use TTM (already annualised)
+    // when the TTM sample is trustworthy (≥3 payments); fall back to
+    // stock_positions.dividend_yield (Yahoo/CSV) when no payment history at all.
+    // Always use canonicalPrice (ILS for ILA, GBP for GBp, not sub-units) to avoid 100× inflation.
     let forwardDivPerShare: number | null = null;
     if (hasAccrual) {
       forwardDivPerShare = roundCurrency(accrual!.gross_rate * ppy);
-    } else if (hasTTM && ttmDivPerShare !== null) {
+    } else if (ttmIsTrustworthy && ttmDivPerShare !== null) {
       forwardDivPerShare = ttmDivPerShare;
     } else if (hasYield && canonicalPrice !== null && canonicalPrice > 0) {
       // Estimate: annualised dividend per share = canonical_price × yield fraction

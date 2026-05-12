@@ -1,3 +1,20 @@
+## 2026-05-12 — Round 8 Phase 2.5: Worker Redeploy Skill + Rebuild Script
+
+**Task:** Codify the Round 8 root cause as an enforced protocol to prevent recurrence.
+
+**Problem:** The Docker worker container was never rebuilt after PR #420 merged. A stale image (`33fd12cab77e`, built 2026-05-11 pre-PR-#420) fired the daily 06:59 UTC refresh and silently overwrote migration `20260512090000`'s corrections. This single miss caused Rounds 5–8 (7 rounds, 4 reactive PRs).
+
+**Deliverables:**
+1. `scripts/rebuild-worker.sh` — POSIX shell, phases A–F (pre-flight → stop/rm → build --no-cache → deploy → verify → summary). Flags: `--force`, `--prune`, `--no-verify`, `--dry-run`, `--help`.
+2. `.copilot/skills/worker-redeploy/SKILL.md` — coordinator playbook; auto-triggers on `apps/backend/app/worker/**` PRs; includes manual fallback, verification checklist, history table.
+3. `.squad/skills/worker-redeploy/SKILL.md` — pointer to canonical version.
+4. `.squad/agents/keaton/charter.md` — Worker redeploy gate section added (mandatory before merge).
+5. `apps/backend/README.md` — "Rebuilding the worker" section inserted under Local development.
+6. `.squad/decisions/inbox/hockney-round8-redeploy-skill-2026-05-12.md` — decision record.
+
+**PR:** squad/round8-meta-worker-redeploy-skill → main
+**Confirmed working:** smoke test `--help` and `--dry-run` pass; canonical compose file `docker-compose.backend.yml`, service `backend`, container `trading_journal_backend_supabase`.
+
 ## 2026-05-12 — Dividend accuracy + Leumi IRA + chore-PR triage sprint
 
 **Sprint by:** Jony Vesterman Cohen
@@ -55,6 +72,26 @@ Container rebuild root-causes the regression: `trading_journal_backend_supabase`
 - **Currency labels ≠ unit contracts.** LSE GBP = mark_price in pence, market_value in pounds. TASE ILA = mark_price in agorot, market_value in shekels. Enforce at write-time layer.
 - **CHECK constraints as defense-in-depth.** `dividend_yield BETWEEN 0 AND 1` prevents silent corruption by stale worker on next run.
 - **Deterministic ratio over upstream aggregate.** `rate × 100 / price` is unit-free and survives currency/unit conversions. Upstream `trailingAnnualDividendYield` carries hidden assumptions.
+
+## 2026-05-12 — Round 8 Phase 2: Container rebuild + SQL fallback + issue filing
+
+**PR #425** — `fix(currency): Round 8 Phase 2 — worker rebuild + market_value sync migration`
+
+**Root cause confirmed:** Docker container was running pre-PR-#420 code (image `33fd12cab77e`, built 2026-05-11 before PR #420 merged). Daily refresh at 06:59 UTC on 2026-05-12 re-inflated GBP market_values and re-shrank GBP+ILA yields after migration `20260512090000` had corrected them.
+
+**Actions taken:**
+1. Rebuilt container `--no-cache` → new image `f524b85d7383` (picks up d853426)
+2. Triggered `refresh_stock_positions()`: 297 refreshed, 17 skipped, 7 failed (delisted)
+3. Verified post-refresh: BARC MV=£8,897 ✅ (was £926k), RIO yield=3.78% ✅, LUMI yield=4.56% ✅
+4. Migration `20260512170000`: `market_value = market_value_local` for 7 no-Yahoo TASE mutual funds
+5. Cross-account bleed (QQQI 0.48% → 14%): `ttmIsTrustworthy` guard already in `actions.ts` from prior round — no change needed
+6. Filed issue **#423**: Keaton's architectural migration (ILA→ILS, GBp÷100 at DB layer)
+
+**Tests:** 625 backend ✅, 88 frontend (dividends) ✅
+
+**Learnings:**
+- Always rebuild container immediately after merging worker code PRs. The `docker inspect --format='{{.Created}}'` check is a fast sanity check.
+- `ttmIsTrustworthy` guard (MIN_TTM_PAYMENTS=3) is the right defense for cross-account payment bleed until `dividend_payments.account_id` is properly wired through.
 
 ## 2026-05-11 — PR #401 (Idempotent supabase_realtime Publication)
 
