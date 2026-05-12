@@ -141,8 +141,14 @@ def _make_yfinance_mock(
     div_yield: float | None = 0.05,
     history_empty: bool = False,
     raise_exc: Exception | None = None,
+    yahoo_currency: str | None = None,
 ) -> MagicMock:
-    """Build a minimal yfinance.Ticker mock."""
+    """Build a minimal yfinance.Ticker mock.
+
+    Args:
+        yahoo_currency: Value for info['currency'] (e.g. 'USD', 'GBp', 'ILA').
+                        If None, the currency key is omitted from info.
+    """
     mock_ticker = MagicMock()
 
     if raise_exc is not None:
@@ -156,7 +162,10 @@ def _make_yfinance_mock(
         )
         mock_ticker.history.return_value = df
 
-    mock_ticker.info = {"trailingAnnualDividendYield": div_yield}
+    info: dict[str, Any] = {"trailingAnnualDividendYield": div_yield}
+    if yahoo_currency is not None:
+        info["currency"] = yahoo_currency
+    mock_ticker.info = info
     return mock_ticker
 
 
@@ -213,6 +222,95 @@ class TestFetchYahooData:
         assert result["dividend_yield"] is not None
         # 10.43 / 100 = 0.1043 (stored as decimal)
         assert abs(float(result["dividend_yield"]) - 0.1043) < 1e-9
+
+    @patch("app.worker.yahoo_refresh.time.sleep")
+    def test_lse_yield_prefers_dividendYield_over_trailingAnnualDividendYield(self, _mock_sleep: MagicMock) -> None:
+        """For GBp-currency tickers (LSE), the worker uses dividendRate × 100 / previousClose
+        to compute a unit-free yield (rate in GBP, price in GBp = pence).
+
+        BARC.L empirical: dividendRate=0.09 GBP, previousClose=435 GBp.
+        Expected: 0.09 × 100 / 435 = 0.0207 (≈2.07%).
+        """
+        mock_tkr = _make_yfinance_mock(close=435.0, div_yield=None, yahoo_currency="GBp")
+        mock_tkr.info = {
+            "currency": "GBp",
+            "dividendRate": 0.09,
+            "trailingAnnualDividendRate": 0.086,
+            "previousClose": 435.0,
+            "dividendYield": 2.0,
+            "trailingAnnualDividendYield": 0.000197,
+        }
+        with patch("yfinance.Ticker", return_value=mock_tkr):
+            result = _fetch_yahoo_data("BARC.L")
+
+        assert result is not None
+        assert result["dividend_yield"] is not None
+        # 0.09 GBP × 100 / 435 GBp = 0.020689... ≈ 2.07%
+        expected = 0.09 * 100 / 435.0
+        assert abs(float(result["dividend_yield"]) - expected) < 1e-9
+
+    @patch("app.worker.yahoo_refresh.time.sleep")
+    def test_lse_yield_falls_back_to_dividendYield_when_no_rate(self, _mock_sleep: MagicMock) -> None:
+        """If dividendRate is absent, fall back to dividendYield/100 for GBp tickers."""
+        mock_tkr = _make_yfinance_mock(close=500.0, div_yield=None, yahoo_currency="GBp")
+        mock_tkr.info = {
+            "currency": "GBp",
+            "dividendYield": 3.5,
+            "trailingAnnualDividendYield": 0.00035,
+        }
+        with patch("yfinance.Ticker", return_value=mock_tkr):
+            result = _fetch_yahoo_data("SOMEETF.L")
+
+        assert result is not None
+        assert result["dividend_yield"] is not None
+        # 3.5 / 100 = 0.035
+        assert abs(float(result["dividend_yield"]) - 0.035) < 1e-9
+
+    @patch("app.worker.yahoo_refresh.time.sleep")
+    def test_tase_yield_prefers_dividendYield_over_trailingAnnualDividendYield(self, _mock_sleep: MagicMock) -> None:
+        """For ILA-currency tickers (TASE), dividendRate (ILS) × 100 / previousClose (ILA).
+
+        LUMI.TA empirical: dividendRate=3.44 ILS, previousClose=7786 ILA.
+        Expected: 3.44 × 100 / 7786 = 0.04419 (≈4.42%).
+        """
+        mock_tkr = _make_yfinance_mock(close=7786.0, div_yield=None, yahoo_currency="ILA")
+        mock_tkr.info = {
+            "currency": "ILA",
+            "dividendRate": 3.44,
+            "trailingAnnualDividendRate": 3.018,
+            "previousClose": 7786.0,
+            "dividendYield": 4.56,
+            "trailingAnnualDividendYield": 0.000388,
+        }
+        with patch("yfinance.Ticker", return_value=mock_tkr):
+            result = _fetch_yahoo_data("LUMI.TA")
+
+        assert result is not None
+        assert result["dividend_yield"] is not None
+        # 3.44 ILS × 100 / 7786 ILA = 0.04419...
+        expected = 3.44 * 100.0 / 7786.0
+        assert abs(float(result["dividend_yield"]) - expected) < 1e-9
+
+    @patch("app.worker.yahoo_refresh.time.sleep")
+    def test_usd_yield_uses_trailingAnnualDividendYield_unchanged(self, _mock_sleep: MagicMock) -> None:
+        """USD tickers: trailingAnnualDividendYield is a proper decimal fraction.
+        Should be used as-is (no /100 needed) — existing behaviour must not regress.
+
+        JPXN empirical: trailingAnnualDividendYield=0.010755814 → stored 0.0108.
+        """
+        mock_tkr = _make_yfinance_mock(close=99.76, div_yield=0.010755814, yahoo_currency="USD")
+        mock_tkr.info = {
+            "currency": "USD",
+            "trailingAnnualDividendYield": 0.010755814,
+            "dividendYield": 2.81,
+        }
+        with patch("yfinance.Ticker", return_value=mock_tkr):
+            result = _fetch_yahoo_data("JPXN")
+
+        assert result is not None
+        assert result["dividend_yield"] is not None
+        # trailingAnnualDividendYield preferred for USD → 0.010755814 (not 2.81/100)
+        assert abs(float(result["dividend_yield"]) - 0.010755814) < 1e-9
 
 
 # ---------------------------------------------------------------------------
@@ -506,8 +604,104 @@ class TestTaseCurrencyNormalization:
 
 
 # ---------------------------------------------------------------------------
-# Schedule registration test
+# LSE (GBp) market_value normalisation tests
 # ---------------------------------------------------------------------------
+
+
+class TestLseMarketValueNormalisation:
+    """LSE mark_price comes from Yahoo in GBp (pence). market_value must be stored in GBP.
+
+    The contract:
+      mark_price = raw Yahoo close (e.g. 435 GBp)
+      market_value = quantity × mark_price / 100  (e.g. 2159 × 435 / 100 = 9391.65 GBP)
+    """
+
+    def test_lse_market_value_divided_by_100(self) -> None:
+        """BARC.L: 2159 shares × 435 GBp / 100 = 9391.65 GBP (not 939,165 GBp)."""
+        lse_pos = _pos(ticker="BARC", currency="GBP", listing_exchange=None, quantity=2159.0)
+        mock_yf = _make_yfinance_mock(close=435.0, div_yield=None, yahoo_currency="GBp")
+        mock_yf.info = {
+            "currency": "GBp",
+            "dividendRate": 0.09,
+            "previousClose": 435.0,
+            "dividendYield": 2.0,
+            "trailingAnnualDividendYield": 0.000197,
+        }
+
+        captured_params: list[dict] = []
+
+        def capture_execute(stmt, params=None):
+            if params and "market_value" in params:
+                captured_params.append(dict(params))
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            return mock_result
+
+        mock_sess = MagicMock()
+        mock_sess.__enter__ = MagicMock(return_value=mock_sess)
+        mock_sess.__exit__ = MagicMock(return_value=False)
+        mock_sess.execute.side_effect = capture_execute
+
+        with (
+            patch("app.worker.yahoo_refresh.Session", return_value=mock_sess),
+            patch("app.worker.yahoo_refresh._load_tase_map", return_value={}),
+            patch("app.worker.yahoo_refresh._fetch_active_positions", return_value=[lse_pos]),
+            patch("yfinance.Ticker", return_value=mock_yf),
+            patch("app.worker.yahoo_refresh.time.sleep"),
+        ):
+            result = refresh_stock_positions()
+
+        assert result["refreshed"] == 1
+        assert captured_params, "Expected upsert params to be captured"
+        stored_market_value = Decimal(captured_params[0]["market_value"])
+        expected = Decimal("9391.65")
+        assert stored_market_value == expected, (
+            f"LSE market_value must be quantity × GBp / 100 = {expected} GBP, "
+            f"got {stored_market_value} (100× too high = stored in pence)"
+        )
+
+    def test_lse_yield_stored_as_decimal_not_percent(self) -> None:
+        """BARC.L dividendRate=0.09 GBP / (435 GBp / 100) = 0.0207 (2.07%) not 77%."""
+        lse_pos = _pos(ticker="BARC", currency="GBP", listing_exchange=None, quantity=100.0)
+        mock_yf = _make_yfinance_mock(close=435.0, div_yield=None, yahoo_currency="GBp")
+        mock_yf.info = {
+            "currency": "GBp",
+            "dividendRate": 0.09,
+            "previousClose": 435.0,
+            "dividendYield": 2.0,
+            "trailingAnnualDividendYield": 0.000197,
+        }
+
+        captured_params: list[dict] = []
+
+        def capture_execute(stmt, params=None):
+            if params and "dividend_yield" in params:
+                captured_params.append(dict(params))
+            mock_result = MagicMock()
+            mock_result.all.return_value = []
+            return mock_result
+
+        mock_sess = MagicMock()
+        mock_sess.__enter__ = MagicMock(return_value=mock_sess)
+        mock_sess.__exit__ = MagicMock(return_value=False)
+        mock_sess.execute.side_effect = capture_execute
+
+        with (
+            patch("app.worker.yahoo_refresh.Session", return_value=mock_sess),
+            patch("app.worker.yahoo_refresh._load_tase_map", return_value={}),
+            patch("app.worker.yahoo_refresh._fetch_active_positions", return_value=[lse_pos]),
+            patch("yfinance.Ticker", return_value=mock_yf),
+            patch("app.worker.yahoo_refresh.time.sleep"),
+        ):
+            result = refresh_stock_positions()
+
+        assert result["refreshed"] == 1
+        assert captured_params, "Expected upsert params to be captured"
+        stored_yield = Decimal(captured_params[0]["dividend_yield"])
+        expected_yield = 0.09 * 100.0 / 435.0  # ≈ 0.0207
+        assert abs(float(stored_yield) - expected_yield) < 1e-9, (
+            f"LSE dividend_yield must be stored as {expected_yield:.6f}, got {stored_yield}"
+        )
 
 
 def test_yahoo_refresh_registered_in_job_schedules() -> None:

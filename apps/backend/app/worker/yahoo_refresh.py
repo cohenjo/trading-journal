@@ -181,19 +181,44 @@ def _fetch_yahoo_data(yahoo_ticker: str) -> dict[str, Any] | None:
             raw_price = float(close_series.iloc[-1])
             mark_price = Decimal(str(raw_price))
 
-            raw_yield = info.get("trailingAnnualDividendYield") or info.get("dividendYield")
+            # For sub-unit-priced currencies (GBp = pence, ILA = agorot),
+            # trailingAnnualDividendYield is 100× too small (Yahoo computes it as
+            # rate-in-major-unit / price-in-sub-unit). dividendYield is usually
+            # correct as a percentage but has known bad values (e.g. RR.L = 0.77
+            # stored as a decimal rather than a percent).
+            # Most reliable: dividendRate (in major currency) × 100 / previousClose
+            # (in sub-unit) gives a unit-free ratio.
+            # Example: BARC.L  0.09 GBP × 100 / 435 GBp = 0.0207 = 2.07% ✓
+            # Example: LUMI.TA 3.44 ILS × 100 / 7786 ILA = 0.0442 = 4.42% ✓
+            # Fall back to dividendYield/100 if dividendRate is unavailable.
+            yahoo_currency = info.get("currency", "") or ""
             dividend_yield: Decimal | None = None
-            if raw_yield is not None:
-                try:
-                    raw_float = float(raw_yield)
-                    # Yahoo's `dividendYield` field occasionally returns a percentage
-                    # (e.g. 10.43 for 10.43%) rather than a decimal fraction (0.1043).
-                    # Normalise to [0, 1] so the DB always stores the decimal form.
-                    if raw_float > 1:
-                        raw_float = raw_float / 100
-                    dividend_yield = Decimal(str(raw_float))
-                except (InvalidOperation, ValueError):
-                    pass
+            if yahoo_currency in ("GBp", "ILA"):
+                rate = info.get("dividendRate") or info.get("trailingAnnualDividendRate")
+                price = info.get("previousClose") or info.get("regularMarketPrice")
+                if rate is not None and price and float(price) > 0:
+                    computed = float(rate) * 100.0 / float(price)
+                    dividend_yield = Decimal(str(computed))
+                else:
+                    dY = info.get("dividendYield")
+                    if dY is not None:
+                        v = float(dY)
+                        if v > 1:
+                            v /= 100
+                        dividend_yield = Decimal(str(v))
+            else:
+                raw_yield = info.get("trailingAnnualDividendYield") or info.get("dividendYield")
+                if raw_yield is not None:
+                    try:
+                        raw_float = float(raw_yield)
+                        # Yahoo's `dividendYield` field returns a percentage (e.g. 10.43
+                        # for 10.43%) rather than a decimal fraction (0.1043).
+                        # Normalise to [0, 1] so the DB always stores the decimal form.
+                        if raw_float > 1:
+                            raw_float = raw_float / 100
+                        dividend_yield = Decimal(str(raw_float))
+                    except (InvalidOperation, ValueError):
+                        pass
 
             return {"mark_price": mark_price, "dividend_yield": dividend_yield}
 
@@ -345,6 +370,10 @@ def refresh_stock_positions() -> dict[str, Any]:
                 continue
 
             is_tase = currency.upper() in ("ILA", "ILS") and not listing_exchange
+            # LSE: Yahoo returns prices in GBp (pence). Divide market_value by 100
+            # so it is stored in GBP canonical — same contract as TASE ILA→ILS.
+            # mark_price is kept in GBp (native, matching broker imports).
+            is_lse = yahoo_ticker.endswith(".L")
 
             data = _fetch_yahoo_data(yahoo_ticker)
             if data is None:
@@ -361,9 +390,9 @@ def refresh_stock_positions() -> dict[str, Any]:
             mark_price: Decimal = data["mark_price"]
             dividend_yield: Decimal | None = data["dividend_yield"]
             # TASE mark_price is in ILA (agorot = 1/100 ILS).
-            # Divide by 100 so market_value is stored in ILS, matching the
-            # broker XLS "שווי אחזקה ב ₪" column and all non-TASE positions.
-            if is_tase:
+            # LSE mark_price is in GBp (pence = 1/100 GBP).
+            # Divide by 100 so market_value is stored in the major currency unit.
+            if is_tase or is_lse:
                 market_value = (quantity * mark_price / Decimal("100")).quantize(Decimal("0.01"))
             else:
                 market_value = (quantity * mark_price).quantize(Decimal("0.01"))
