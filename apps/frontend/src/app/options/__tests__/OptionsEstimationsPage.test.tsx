@@ -8,7 +8,7 @@
  *  - Settings changes propagate to SettingsContext
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ReactNode } from 'react';
 import { SettingsProvider } from '../../settings/SettingsContext';
@@ -124,5 +124,51 @@ describe('OptionsEstimationsPage (#429)', () => {
     await waitFor(() => {
       expect(screen.getByText(/No historical options cash flow data found/i)).toBeInTheDocument();
     });
+  });
+
+  it('displays loading indicators while actuals fetch is in flight', () => {
+    // Never-resolving promise keeps the component in the loading state indefinitely.
+    mockGetOptionsYearlyCashFlow.mockReturnValue(new Promise(() => {}));
+
+    // Do NOT wrap in act so we observe the synchronous initial render.
+    render(
+      <SettingsProvider>
+        <OptionsEstimationsPage />
+      </SettingsProvider>,
+    );
+
+    // Both placeholders are rendered while isLoading is true.
+    expect(screen.getByText(/Loading chart data/i)).toBeInTheDocument();
+    expect(screen.getByText(/Loading history/i)).toBeInTheDocument();
+    // The history table header must not appear yet.
+    expect(screen.queryByText('Yearly Cash Flow History')).not.toBeInTheDocument();
+  });
+
+  it('re-fetches estimation with updated params when growth rate setting changes', async () => {
+    await act(async () => { renderWithSettings(<OptionsEstimationsPage />); });
+
+    // Initial fetch uses default settings (2% growth, finalYear 2064).
+    expect(mockGetOptionsIncomeEstimation).toHaveBeenCalledTimes(1);
+    expect(mockGetOptionsIncomeEstimation).toHaveBeenCalledWith({
+      growthRate: 0.02,
+      finalYear: 2064,
+    });
+
+    // The mock settings panel fires onChange({ growth_rate: 0.05, final_year: 2070 }).
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('change-settings-btn'));
+    });
+
+    // A second estimation fetch must be triggered with the new params.
+    await waitFor(() => {
+      expect(mockGetOptionsIncomeEstimation).toHaveBeenCalledTimes(2);
+      expect(mockGetOptionsIncomeEstimation).toHaveBeenLastCalledWith({
+        growthRate: 0.05,
+        finalYear: 2070,
+      });
+    });
+
+    // Growth tile must reflect the new rate immediately.
+    expect(screen.getByTestId('options-growth-tile')).toHaveTextContent('5.0%');
   });
 });
