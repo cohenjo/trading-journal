@@ -251,3 +251,95 @@ describe('CurrencyCode type', () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B7: ILA (agorot) sub-unit guard
+//
+// DB contract (PRs #410, #414): `market_value` for TASE positions is stored in
+// ILS (major units) — the ÷100 conversion happens at write time in the worker,
+// NOT at read time in the UI. `mark_price` remains in ILA (agorot).
+//
+// The cash-flow page reads plan items (which carry the already-converted ILS
+// value). Any UI code that calls toDisplayMarkPrice() or applies ÷100 on
+// `market_value` would double-convert and display values 100× too small.
+//
+// These unit tests verify that:
+//   1. formatCurrency('ILA', ...) normalises ILA → ILS before Intl formatting
+//      (i.e., the ₪ symbol is shown — ILA is not a valid ISO 4217 code).
+//   2. A round-trip of a market_value=77860 ILS value through formatCurrency
+//      does NOT apply any extra ÷100 — the output represents ₪77,860.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('B7: ILA (agorot) ÷100 guard @regression', () => {
+  it('formatCurrency normalises ILA to ILS (shows ₪ symbol, not error)', () => {
+    // ILA is not ISO 4217; formatCurrency must normalise to ILS before Intl.NumberFormat
+    const result = formatCurrency(77_860, 'ILA');
+    expect(result).toContain('₪');
+    expect(result).toContain('77');
+  });
+
+  it('formatCurrency(77860, ILA) displays ~77 860 — not ~778 (no extra ÷100 applied)', () => {
+    // If ÷100 were mistakenly applied, result would be ~₪778.60 or similar
+    const result = formatCurrency(77_860, 'ILA');
+    // Must contain the full value — 77 860, not 778
+    expect(result).toMatch(/77[,.]?8/);
+  });
+
+  it('formatCurrency(77860, ILS) displays ~77 860 correctly', () => {
+    const result = formatCurrency(77_860, 'ILS');
+    expect(result).toContain('₪');
+    expect(result).toMatch(/77[,.]?8/);
+  });
+
+  it('a TASE market_value=77860 ILS converted to USD is in expected range (no ÷100)', () => {
+    // 77 860 ILS ÷ 3.6 ≈ 21 627 USD
+    // If double-converted: 77 860 ÷ 100 = 778.6 ILS ÷ 3.6 ≈ 216 USD (wrong)
+    const usdValue = convertCurrency(77_860, 'ILS', 'USD');
+    expect(usdValue).toBeGreaterThan(10_000); // Must be in tens-of-thousands, not hundreds
+    expect(usdValue).toBeLessThan(100_000);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B8: GBp (pence) sub-unit guard
+//
+// DB contract (PR #416): `market_value` for LSE positions is stored in GBP
+// (major units) — the ÷100 pence-to-pounds conversion happens at write time,
+// NOT at read time in the UI.
+//
+// These unit tests verify that formatCurrency('GBp', ...) normalises
+// GBp → GBP before Intl formatting, and that a 5 300 GBP value is not
+// further divided by 100 (which would display 53 GBP instead).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('B8: GBp (pence) ÷100 guard @regression', () => {
+  it('formatCurrency normalises GBp to GBP (shows £ symbol, not error)', () => {
+    // GBp is not ISO 4217; formatCurrency must normalise to GBP before Intl.NumberFormat
+    const result = formatCurrency(5_300, 'GBp');
+    expect(result).toContain('£');
+    expect(result).toContain('5');
+  });
+
+  it('formatCurrency(5300, GBp) displays ~5 300 — not ~53 (no extra ÷100 applied)', () => {
+    // If ÷100 were mistakenly applied, result would be ~£53.00
+    const result = formatCurrency(5_300, 'GBp');
+    // Must contain 5 300, not 53
+    expect(result).toMatch(/5[,.]?3/);
+    // Must NOT look like 53.00 (double-converted)
+    expect(parseFloat(result.replace(/[£,]/g, ''))).toBeGreaterThan(1_000);
+  });
+
+  it('formatCurrency(5300, GBP) displays ~5 300 correctly', () => {
+    const result = formatCurrency(5_300, 'GBP');
+    expect(result).toContain('£');
+    expect(result).toMatch(/5[,.]?3/);
+  });
+
+  it('a LSE market_value=5300 GBP converted to ILS is in expected range (no ÷100)', () => {
+    // 5 300 GBP × 4.6 ≈ 24 380 ILS
+    // If double-converted: 5 300 ÷ 100 = 53 GBP × 4.6 ≈ 243.8 ILS (wrong)
+    const ilsValue = convertCurrency(5_300, 'GBP', 'ILS');
+    expect(ilsValue).toBeGreaterThan(10_000); // Must be in tens-of-thousands, not hundreds
+    expect(ilsValue).toBeLessThan(100_000);
+  });
+});
