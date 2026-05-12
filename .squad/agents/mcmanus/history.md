@@ -1,4 +1,20 @@
 
+## 2026-05-13 — PR squad/440-441-tests (draft) — PR #444
+
+Implemented 22 scenarios as Playwright E2E + vitest integration code (issues #440 + #441).
+
+**E2E tests (18):** A1–A5, A7–A10 in `plan-persistence.spec.ts` + `plan-rls.spec.ts`; B1–B5, B7–B12 in `cash-flow.spec.ts`. A6/B6 marked `test.fixme` (pending Fenster P1 income-stream wiring, Keaton Decision 1).
+
+**Integration/unit tests (4 + 16):** `plan-rls-integration.test.ts` — A5 RLS unit proxy (4 tests) + A9 null-safety (3 tests). `currency.test.ts` — B7 ILA guard (4 new cases) + B8 GBp guard (4 new cases). All 57 unit tests pass now.
+
+**Fixtures:** `e2e/fixtures/plan-fixtures.ts` — `seedPlan()`, `cleanupPlanData()`, canonical seed constants.
+
+**test.fixme discipline:** A6/B6 have full seed code + TODO comments "Unfixme after PR-C lands". Updated `anticipatory-test-authoring` SKILL.md with Round 3 fixme best practices.
+
+Tests intentionally red on main until PR-A (Hockney) + PR-B (Fenster P0) land. Will unfixme A6/B6 after PR-C.
+
+---
+
 **Requested by:** Jony Vesterman Cohen
 **Work:** Created `20260430115000_baseline_legacy_schema.sql` migration establishing all 21 legacy public schema tables for trading journal. This migration consolidates the baseline schema from 22 Alembic migrations (8250ff809a39 through 4d9a58ecd93b), creating tables in their final form after all schema evolutions.
 
