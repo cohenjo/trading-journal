@@ -22,22 +22,31 @@ function formatCurrency(value: number | null | undefined, currency = "USD"): str
 }
 
 /**
- * Normalises 'ILA' (Israeli agorot) to 'ILS' for display purposes.
- * market_value is stored in ILS even when currency='ILA'; using 'ILA' as the
- * Intl currency code is misleading so we always render as ILS.
+ * Normalises broker sub-unit currency codes to their ISO 4217 parents:
+ *   ILA (Israeli agorot) → ILS
+ *   GBp (pence)          → GBP
+ *
+ * market_value is already stored in the major unit (ILS / GBP), so using the
+ * raw broker code as an Intl currency code would either crash (ILA is not ISO)
+ * or display the wrong symbol (GBp renders as 'GBP' anyway but is non-standard).
  */
 function toDisplayCurrency(currency: string): string {
-  return currency.toUpperCase() === "ILA" ? "ILS" : currency;
+  const upper = currency.toUpperCase();
+  if (upper === "ILA") return "ILS";
+  if (upper === "GBP") return "GBP"; // normalises 'GBp' → 'GBP' too
+  return currency;
 }
 
 /**
- * Converts a per-share mark_price to its display value.
- * TASE positions store mark_price in agorot (ILA = 1/100 ILS), so divide by
- * 100 before rendering to show the familiar ILS per-share price.
+ * Converts a per-share price (mark_price, cost_basis, unrealized_pnl) to its
+ * display value.  Brokers store TASE and LSE prices in sub-units:
+ *   ILA (agorot)  = 1/100 ILS  → divide by 100 before display
+ *   GBP / GBp (pence) = 1/100 GBP → divide by 100 before display
  */
 function toDisplayMarkPrice(price: number | null, currency: string): number | null {
   if (price == null) return null;
-  return currency.toUpperCase() === "ILA" ? price / 100 : price;
+  const upper = currency.toUpperCase();
+  return (upper === "ILA" || upper === "GBP") ? price / 100 : price;
 }
 
 function formatQuantity(value: number): string {
@@ -169,7 +178,7 @@ function PositionRow({ position, mode, onDelete, onEdit }: PositionRowProps) {
       <td className={`px-4 py-3 text-right font-medium ${pnlColor}`}>
         {position.unrealized_pnl == null
           ? "—"
-          : `${position.unrealized_pnl >= 0 ? "+" : ""}${formatCurrency(position.unrealized_pnl, position.currency)}`}
+          : `${position.unrealized_pnl >= 0 ? "+" : ""}${formatCurrency(toDisplayMarkPrice(position.unrealized_pnl, position.currency), toDisplayCurrency(position.currency))}`}
       </td>
       {mode === "editable" && (
         <td className="px-4 py-3 text-center">

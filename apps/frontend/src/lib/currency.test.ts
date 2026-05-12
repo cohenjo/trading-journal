@@ -5,8 +5,9 @@ describe('CURRENCY_RATES', () => {
   it('should define all supported currencies', () => {
     expect(CURRENCY_RATES).toEqual({
       ILS: 1,
-      USD: 3,
-      EUR: 3.5,
+      USD: 3.6,
+      GBP: 4.6,
+      EUR: 3.9,
     });
   });
 
@@ -14,8 +15,9 @@ describe('CURRENCY_RATES', () => {
     expect(CURRENCY_RATES.ILS).toBe(1);
   });
 
-  it('should have valid exchange rates for USD and EUR', () => {
+  it('should have valid exchange rates for USD, GBP and EUR', () => {
     expect(CURRENCY_RATES.USD).toBeGreaterThan(0);
+    expect(CURRENCY_RATES.GBP).toBeGreaterThan(0);
     expect(CURRENCY_RATES.EUR).toBeGreaterThan(0);
   });
 });
@@ -33,39 +35,50 @@ describe('convertCurrency', () => {
     it('should return same amount when converting EUR to EUR', () => {
       expect(convertCurrency(100, 'EUR', 'EUR')).toBe(100);
     });
+
+    it('should return same amount when converting GBP to GBP', () => {
+      expect(convertCurrency(100, 'GBP', 'GBP')).toBe(100);
+    });
   });
 
   describe('known conversion values', () => {
-    it('should convert 300 ILS to 100 USD correctly', () => {
-      // 300 ILS * 1 = 300 in ILS base
-      // 300 / 3 = 100 USD
-      expect(convertCurrency(300, 'ILS', 'USD')).toBe(100);
+    it('should convert 360 ILS to 100 USD correctly', () => {
+      // 360 ILS * 1 = 360 in ILS base; 360 / 3.6 = 100 USD
+      expect(convertCurrency(360, 'ILS', 'USD')).toBe(100);
     });
 
-    it('should convert 100 USD to 300 ILS correctly', () => {
-      // 100 USD * 3 = 300 in ILS base
-      // 300 / 1 = 300 ILS
-      expect(convertCurrency(100, 'USD', 'ILS')).toBe(300);
+    it('should convert 100 USD to 360 ILS correctly', () => {
+      // 100 USD * 3.6 = 360 in ILS base; 360 / 1 = 360 ILS
+      expect(convertCurrency(100, 'USD', 'ILS')).toBe(360);
     });
 
-    it('should convert 350 ILS to 100 EUR correctly', () => {
-      // 350 ILS * 1 = 350 in ILS base
-      // 350 / 3.5 = 100 EUR
-      expect(convertCurrency(350, 'ILS', 'EUR')).toBe(100);
+    it('should convert 390 ILS to 100 EUR correctly', () => {
+      // 390 ILS * 1 = 390 in ILS base; 390 / 3.9 = 100 EUR
+      expect(convertCurrency(390, 'ILS', 'EUR')).toBe(100);
     });
 
-    it('should convert 100 USD to 85.71428... EUR correctly', () => {
-      // 100 USD * 3 = 300 in ILS base
-      // 300 / 3.5 = 85.714285... EUR
+    it('should convert 100 USD to ~92.31 EUR correctly', () => {
+      // 100 USD * 3.6 = 360 in ILS base; 360 / 3.9 ≈ 92.308 EUR
       const result = convertCurrency(100, 'USD', 'EUR');
-      expect(result).toBeCloseTo(85.714285, 5);
+      expect(result).toBeCloseTo(92.307692, 5);
     });
 
-    it('should convert 100 EUR to 116.666... USD correctly', () => {
-      // 100 EUR * 3.5 = 350 in ILS base
-      // 350 / 3 = 116.66666... USD
+    it('should convert 100 EUR to ~108.33 USD correctly', () => {
+      // 100 EUR * 3.9 = 390 in ILS base; 390 / 3.6 ≈ 108.333 USD
       const result = convertCurrency(100, 'EUR', 'USD');
-      expect(result).toBeCloseTo(116.666666, 5);
+      expect(result).toBeCloseTo(108.333333, 5);
+    });
+
+    it('[GBP] should convert 100 GBP to ~127.78 USD', () => {
+      // 100 GBP * 4.6 = 460 ILS; 460 / 3.6 ≈ 127.78 USD (not ~28 USD with old missing rate)
+      const result = convertCurrency(100, 'GBP', 'USD');
+      expect(result).toBeCloseTo(127.777, 2);
+    });
+
+    it('[GBP] should convert 100 USD to ~78.26 GBP', () => {
+      // 100 * 3.6 = 360 ILS; 360 / 4.6 ≈ 78.26 GBP
+      const result = convertCurrency(100, 'USD', 'GBP');
+      expect(result).toBeCloseTo(78.260869, 4);
     });
   });
 
@@ -85,18 +98,18 @@ describe('convertCurrency', () => {
     });
 
     it('should handle negative amounts', () => {
-      expect(convertCurrency(-100, 'USD', 'ILS')).toBe(-300);
+      expect(convertCurrency(-100, 'USD', 'ILS')).toBe(-360);
     });
 
     it('should handle very large amounts', () => {
       const largeAmount = 1000000000; // 1 billion
       const result = convertCurrency(largeAmount, 'USD', 'ILS');
-      expect(result).toBe(3000000000); // 3 billion
+      expect(result).toBe(3600000000); // 3.6 billion
     });
 
     it('should handle decimal amounts with precision', () => {
       const result = convertCurrency(123.456, 'ILS', 'USD');
-      expect(result).toBeCloseTo(41.152, 3);
+      expect(result).toBeCloseTo(34.293, 3);
     });
   });
 
@@ -106,20 +119,20 @@ describe('convertCurrency', () => {
     });
 
     it('should default to ILS for "to" currency when only from is specified', () => {
-      expect(convertCurrency(100, 'USD')).toBe(300);
+      expect(convertCurrency(100, 'USD')).toBe(360);
     });
   });
 
   describe('invalid currency codes', () => {
     it('should fallback to rate 1 for unknown "from" currency', () => {
-      // Unknown currency uses rate 1, treated as ILS
+      // Unknown currency uses rate 1, treated as ILS; JPY is not in CURRENCY_RATES
       // @ts-expect-error - testing runtime behavior
-      expect(convertCurrency(100, 'GBP', 'USD')).toBe(100 / 3);
+      expect(convertCurrency(100, 'JPY', 'USD')).toBeCloseTo(100 / 3.6, 5);
     });
 
     it('should fallback to rate 1 for unknown "to" currency', () => {
       // @ts-expect-error - testing runtime behavior
-      expect(convertCurrency(100, 'USD', 'GBP')).toBe(300);
+      expect(convertCurrency(100, 'USD', 'JPY')).toBe(360);
     });
   });
 });
@@ -140,6 +153,29 @@ describe('formatCurrency', () => {
       const result = formatCurrency(1234.56, 'EUR');
       expect(result).toContain('1,234.56');
       expect(result).toContain('€');
+    });
+
+    it('should format GBP with pound sign and 2 decimals', () => {
+      const result = formatCurrency(1234.56, 'GBP');
+      expect(result).toContain('1,234.56');
+      expect(result).toContain('£');
+    });
+  });
+
+  describe('broker sub-unit code normalisation', () => {
+    it('[ILA] normalises ILA to ILS — does not throw RangeError', () => {
+      // ILA is not an ISO 4217 code; Intl.NumberFormat would throw without normalisation.
+      expect(() => formatCurrency(100, 'ILA')).not.toThrow();
+      const result = formatCurrency(100, 'ILA');
+      expect(result).toContain('₪');
+      expect(result).toContain('100.00');
+    });
+
+    it('[GBp] normalises GBp to GBP — does not throw RangeError', () => {
+      expect(() => formatCurrency(100, 'GBp')).not.toThrow();
+      const result = formatCurrency(100, 'GBp');
+      expect(result).toContain('£');
+      expect(result).toContain('100.00');
     });
   });
 
@@ -209,7 +245,7 @@ describe('formatCurrency', () => {
 
 describe('CurrencyCode type', () => {
   it('should be a valid union type of supported currencies', () => {
-    const currencies: CurrencyCode[] = ['ILS', 'USD', 'EUR'];
+    const currencies: CurrencyCode[] = ['ILS', 'USD', 'GBP', 'EUR'];
     currencies.forEach(code => {
       expect(CURRENCY_RATES[code]).toBeDefined();
     });

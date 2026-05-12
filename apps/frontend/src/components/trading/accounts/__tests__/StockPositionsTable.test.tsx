@@ -145,4 +145,43 @@ describe("StockPositionsTable", () => {
     expect(screen.getByText(/Total Market Value/)).toBeInTheDocument();
     expect(screen.getByTestId("positions-table")).toHaveTextContent("$8,392.40");
   });
+
+  // ── GBP / pence display (÷100 guard) ─────────────────────────────────────────
+
+  it("divides GBP mark_price by 100 before display (pence → GBP)", () => {
+    const gbpPos = makePosition({
+      ticker: "RIO",
+      currency: "GBP",
+      mark_price: 7927,          // stored in pence
+      cost_basis: 7800,          // stored in pence
+      market_value: 15774.73,    // already in GBP
+    });
+    render(<StockPositionsTable mode="readonly" positions={[gbpPos]} />);
+    // mark_price displayed as £79.27 (not £7,927)
+    expect(screen.getByTestId("positions-table")).toHaveTextContent("£79.27");
+    // market_value shown as-is in GBP
+    expect(screen.getByTestId("positions-table")).toHaveTextContent("£15,774.73");
+  });
+
+  it("formats GBP market values correctly", () => {
+    render(<StockPositionsTable mode="readonly" positions={[makePosition({ market_value: 15774.73, currency: "GBP" })]} />);
+    expect(screen.getByTestId("positions-table")).toHaveTextContent("£15,774.73");
+  });
+
+  // ── ILA crash prevention ──────────────────────────────────────────────────────
+
+  it("renders ILA position without crashing (ILA→ILS Intl normalisation)", () => {
+    const ilaPos = makePosition({
+      ticker: "1083",
+      currency: "ILA",
+      mark_price: 7550,        // agorot
+      cost_basis: 7400,        // agorot
+      market_value: 76255.0,   // canonical ILS
+      unrealized_pnl: 855.0,   // ILS
+    });
+    // Prior to fix, passing 'ILA' to Intl.NumberFormat threw RangeError
+    expect(() => render(<StockPositionsTable mode="readonly" positions={[ilaPos]} />)).not.toThrow();
+    // mark_price displayed as ₪75.50 (agorot ÷ 100 = ILS)
+    expect(screen.getByTestId("positions-table")).toHaveTextContent("₪75.50");
+  });
 });

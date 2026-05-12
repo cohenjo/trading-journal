@@ -712,6 +712,197 @@ describe('getDividendPositions', () => {
     // currency normalised from ILA → ILS
     expect(row.currency).toBe('ILS');
   });
+
+  it('[regression] GBP position (RIO) uses canonicalPrice ÷ 100, yield computed in GBP not pence', async () => {
+    // RIO (Rio Tinto, LSE): broker reports mark_price in pence (GBp = 1/100 GBP).
+    // Pre-fix: canonicalPrice = 7927 pence → yield denominator 100× too large → ~0.05% yield.
+    // Post-fix: canonicalPrice = 79.27 GBP → yield ~5.22%.
+    mockAuth();
+
+    const RIO_POS = {
+      id: 'pos-rio',
+      account_id: 1,
+      ticker: 'RIO',
+      description: 'Rio Tinto PLC',
+      sub_category: 'Stock',
+      quantity: 199,
+      cost_basis: null,
+      mark_price: 7927,          // pence (GBp)
+      market_value: 15774.73,    // GBP (already in major unit)
+      market_value_local: 15774.73,
+      unrealized_pnl: null,
+      currency: 'GBP',           // IBKR sends 'GBP' but stores pence in mark_price
+      as_of_date: '2026-05-12',
+      source: 'manual' as const,
+    };
+
+    setupMocks({
+      household_members: () =>
+        Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+      trading_account_config: () =>
+        Promise.resolve({ data: [{ id: 1, account_id: IBKR_ACCOUNT_ID_TEXT }], error: null }),
+      dividend_payments: () => Promise.resolve({ data: [], error: null }),
+      dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      stock_positions: () =>
+        Promise.resolve({
+          data: [{ ticker: 'RIO', dividend_yield: '0.0522' }],
+          error: null,
+        }),
+    });
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([RIO_POS]);
+
+    const result = await getDividendPositions('ibkr');
+
+    expect(result).toHaveLength(1);
+    const row = result[0];
+    expect(row.ticker).toBe('RIO');
+    expect(row.source).toBe('csv');
+
+    // canonical price = 7927 pence ÷ 100 = 79.27 GBP (NOT 7927)
+    expect(row.current_price).toBeCloseTo(79.27, 2);
+
+    // market_value from stored canonical GBP value, not qty × pence price
+    expect(row.market_value).toBe(15774.73);
+
+    // currency stays GBP (not ILA-style normalisation needed for GBP itself)
+    expect(row.currency).toBe('GBP');
+
+    // forward div/share = 79.27 × 0.0522 = 4.14 GBP/share
+    expect(row.forward_div_per_share).toBe(4.14);
+
+    // forward yield = 4.14 / 79.27 × 100 ≈ 5.22% (not 0.05% which would result from pence denominator)
+    expect(row.forward_yield_pct).toBeGreaterThan(5.0);
+    expect(row.forward_yield_pct).toBeLessThan(5.5);
+  });
+
+  it('[regression] LUMI ILA position ÷100 guard: yield 4.56%, market value in ILS not agorot', async () => {
+    // Leumi bank (TASE): broker reports mark_price in agorot, market_value in ILS.
+    // mark_price = 7550 agorot → canonicalPrice = 75.50 ILS
+    // forward yield = 0.0456 × 75.50 = 3.44 ILS/sh → yield ~4.56%
+    mockAuth();
+
+    const LUMI_POS = {
+      id: 'pos-lumi',
+      account_id: 72,
+      ticker: '1083',
+      description: 'Bank Leumi',
+      sub_category: 'Stock',
+      quantity: 1010,
+      cost_basis: null,
+      mark_price: 7550,          // agorot
+      market_value: 76255.0,     // canonical ILS (≈ 1010 × 75.50)
+      market_value_local: 76255.0,
+      unrealized_pnl: null,
+      currency: 'ILA',
+      as_of_date: '2026-05-12',
+      source: 'manual' as const,
+    };
+
+    setupMocks({
+      household_members: () =>
+        Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+      trading_account_config: () =>
+        Promise.resolve({ data: [{ id: 72, account_id: null }], error: null }),
+      dividend_payments: () => Promise.resolve({ data: [], error: null }),
+      dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      stock_positions: () =>
+        Promise.resolve({
+          data: [{ ticker: '1083', dividend_yield: '0.0456' }],
+          error: null,
+        }),
+    });
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([LUMI_POS]);
+
+    const result = await getDividendPositions('ira');
+
+    expect(result).toHaveLength(1);
+    const row = result[0];
+    expect(row.ticker).toBe('1083');
+    expect(row.source).toBe('csv');
+
+    // canonical price = 7550 ÷ 100 = 75.50 ILS
+    expect(row.current_price).toBeCloseTo(75.50, 2);
+
+    expect(row.market_value).toBe(76255.0);
+    expect(row.currency).toBe('ILS');
+
+    // forward div/share = 75.50 × 0.0456 = 3.44 ILS/share (NOT 0.03 from agorot denominator)
+    expect(row.forward_div_per_share).toBe(3.44);
+    expect(row.forward_yield_pct).toBeGreaterThan(4.5);
+    expect(row.forward_yield_pct).toBeLessThan(4.7);
+  });
+
+  it('[regression] QQQI incomplete TTM (1 payment) falls back to DB dividend_yield 13.96%', async () => {
+    // QQQI is a monthly ETF. DB has only 2 of ~12 expected monthly payments
+    // (cross-account bleed from IBKR, showing up against LeumiIRA shares).
+    // With < 3 TTM payments ttmIsTrustworthy=false, forward yield uses DB 13.96%
+    // instead of the distorted ~0.48% derived from the 2-payment TTM total.
+    mockAuth();
+
+    const QQQI_POS = {
+      id: 'pos-qqqi',
+      account_id: 72,
+      ticker: 'QQQI',
+      description: 'Nasdaq-100 Hedged Equity Income ETF',
+      sub_category: 'ETF',
+      quantity: 700,
+      cost_basis: null,
+      mark_price: 56.59,
+      market_value: 39613.0,  // 700 × 56.59
+      market_value_local: null,
+      unrealized_pnl: null,
+      currency: 'USD',
+      as_of_date: '2026-05-12',
+      source: 'manual' as const,
+    };
+
+    // Only 2 TTM payments (incomplete — should be ~12 for a monthly ETF)
+    const ONE_YEAR_AGO = new Date();
+    ONE_YEAR_AGO.setDate(ONE_YEAR_AGO.getDate() - 30);
+    const recentDate = ONE_YEAR_AGO.toISOString().split('T')[0];
+    const twoMonthsAgo = new Date();
+    twoMonthsAgo.setDate(twoMonthsAgo.getDate() - 60);
+    const olderDate = twoMonthsAgo.toISOString().split('T')[0];
+
+    const payments = [
+      { symbol: 'QQQI', amount: '50.00', ex_date: recentDate, report_date: recentDate, type: 'Dividends' },
+      { symbol: 'QQQI', amount: '50.00', ex_date: olderDate, report_date: olderDate, type: 'Dividends' },
+    ];
+
+    setupMocks({
+      household_members: () =>
+        Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+      trading_account_config: () =>
+        Promise.resolve({ data: [{ id: 72, account_id: null }], error: null }),
+      dividend_payments: () => Promise.resolve({ data: payments, error: null }),
+      dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      stock_positions: () =>
+        Promise.resolve({
+          data: [{ ticker: 'QQQI', dividend_yield: '0.1396' }],
+          error: null,
+        }),
+    });
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([QQQI_POS]);
+
+    const result = await getDividendPositions('ira');
+
+    expect(result).toHaveLength(1);
+    const row = result[0];
+    expect(row.ticker).toBe('QQQI');
+
+    // TTM data is still shown (hasTTM=true), but it reflects the incomplete 2-payment sample
+    expect(row.ttm_dividend_total).not.toBeNull();
+
+    // Forward yield must use DB 13.96% NOT the distorted TTM yield
+    // TTM-derived would be ~100/700/56.59 × 100 ≈ 0.25% — nowhere near 13.96%
+    // DB-derived: 56.59 × 0.1396 ≈ 7.90/share → yield ≈ 13.96%
+    expect(row.forward_div_per_share).toBeGreaterThan(7.0);
+    expect(row.forward_yield_pct).toBeGreaterThan(13.0);
+    expect(row.forward_yield_pct).toBeLessThan(15.0);
+  });
 });
 
 // ── getDividendSummary ────────────────────────────────────────────────────────

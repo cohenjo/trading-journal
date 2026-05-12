@@ -34,12 +34,15 @@ function accountMarketValue(positions: StockPosition[]): number {
     // Use market_value_local as fallback for positions the Yahoo worker hasn't
     // refreshed yet (market_value=null).
     const mv = p.market_value ?? p.market_value_local ?? 0;
-    // TASE positions (currency='ILA') store market_value in ILS.
-    // Convert to USD for a consistent portfolio-wide display currency.
-    if (p.currency.toUpperCase() === "ILA") {
-      return sum + convertCurrency(mv, "ILS", "USD");
-    }
-    return sum + mv;
+    // Normalise broker sub-unit codes to ISO major units before conversion:
+    //   ILA (Israeli agorot) → ILS  (market_value is already in ILS)
+    //   GBp (pence)          → GBP  (market_value is already in GBP)
+    // All other currencies (USD, EUR…) are passed through; convertCurrency
+    // handles them via CURRENCY_RATES.
+    const sourceCurrency = p.currency === "ILA" ? "ILS"
+      : p.currency === "GBp" ? "GBP"
+      : p.currency;
+    return sum + convertCurrency(mv, sourceCurrency, "USD");
   }, 0);
 }
 
@@ -52,9 +55,10 @@ function topFiveHoldings(accounts: AccountBalance[]): string {
   for (const { positions } of accounts) {
     for (const p of positions) {
       const mv = p.market_value ?? p.market_value_local ?? 0;
-      const usdValue = p.currency.toUpperCase() === "ILA"
-        ? convertCurrency(mv, "ILS", "USD")
-        : mv;
+      const sourceCurrency = p.currency === "ILA" ? "ILS"
+        : p.currency === "GBp" ? "GBP"
+        : p.currency;
+      const usdValue = convertCurrency(mv, sourceCurrency, "USD");
       valueByTicker.set(p.ticker, (valueByTicker.get(p.ticker) ?? 0) + usdValue);
     }
   }
