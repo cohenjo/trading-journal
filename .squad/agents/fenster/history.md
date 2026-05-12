@@ -155,3 +155,7 @@ DB correct (LUMI `market_value` = 78,639 ILS); 3 stacked display-layer bugs fixe
 ## Learnings
 
 **PR #422 (`faec8e7`) — TASE dividends page wasn't covered by PR #418.** Same fix pattern: currency-aware display + don't recompute from agorot. **Lesson: display-layer fixes must enumerate ALL pages, not just the page that triggered the report.** When fixing `stock_positions` with `currency='ILA'`, audit all pages rendering that table (accounts, dividends, bonds, reports, etc.). The `/dividends` page was an easy miss because PR #418 never mentioned it.
+
+---
+
+2026-05-12: Wired options estimation into /options/estimations (#436), /summary (#435), and /plan (#434). Mirrors dividends estimation patterns. Actuals-win merge in /summary per Keaton's arch decision §4.

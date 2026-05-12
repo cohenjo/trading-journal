@@ -466,3 +466,7 @@ Executed full LURVG validation suite for #363 (Dividends positions-mirror) + #36
 - **PR comment EMU restriction:** `gh pr comment` blocked by Enterprise Managed User policy. Verdicts must be delivered via other channels (drop note in `.squad/decisions/inbox/`, direct message to team).
 - **TASE price unit ambiguity:** Yahoo Finance returns TASE prices in ILS; broker exports use agorot (ILA = 1/100 ILS). If mark_price is stored raw from Yahoo, the units differ from broker values. Always flag this for the developer to confirm conversion is handled.
 - **`trading_account_config` required columns (update):** In addition to previously learned columns, `account_status` or `is_active` may also be required for the UI to render the upload input.
+
+---
+
+2026-05-12: Regression tests for options estimation (PR #437). Math verified with known fixtures (100% growth doubling, 0% growth flat). Edge cases: <3 years, negative baseline, large N projection.

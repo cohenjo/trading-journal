@@ -26,6 +26,57 @@ The accounts page mirrors the user's broker positions (synced via Flex Query, CS
 
 ---
 
+### Options Income Estimation — Architecture Decisions (2026-05-12)
+
+**By:** Keaton (Lead)
+**Issues:** #428, #429, #430, #431, #432
+
+#### 1. Projection lives in a server action, not a backend API
+
+The estimation function `getOptionsIncomeEstimation()` lives in `apps/frontend/src/app/options/actions.ts` as a `"use server"` action — co-located with `getOptionsYearlyCashFlow()`. This follows the established dividends pattern where projections are computed in Next.js server actions, not in the Python backend.
+
+**Rationale:** All existing income projections (dividends, bonds) are computed in the frontend server actions layer. Adding a new backend endpoint would create an inconsistent pattern.
+
+#### 2. Negative baselines are projected forward (not floored at zero)
+
+If the 3-year average of options income is negative (net losses), the projection carries the negative forward with growth. This honestly represents the trajectory.
+
+**Rationale:** Flooring at zero would hide real loss trends. Users need accurate projections for financial planning.
+
+#### 3. Reuse existing settings (`optionsGrowthRate`, `optionsFinalYear`)
+
+The SettingsContext already has `optionsGrowthRate` (default 5%) and `optionsFinalYear` (default 2064). The estimation engine uses these — no new settings fields needed.
+
+**Note:** The user mentioned "default 2% growth" but the existing setting defaults to 5%. McManus should verify with Jony whether to change the default or keep 5%.
+
+#### 4. Summary page: actuals win over projections for overlapping years
+
+When merging historical actuals from `getOptionsYearlyCashFlow()` with projections from the estimation engine, actuals take precedence for any overlapping year. This prevents double-counting.
+
+#### 5. Plan page: options income is an optional additive income line
+
+The plan simulation engine accepts options projections as an optional input. When absent, the plan works exactly as before (backward compatible). Options income appears in `income_details` as `{ name: "Options Income", type: "options" }`.
+
+---
+
+### Stacked-Branch Merge Protocol (2026-05-12)
+
+**By:** Ralph (Work Monitor)
+**Sprint:** options-income-extrapolation (#428–#432)
+
+When feature branches are stacked (dependent branches based off a root feature branch rather than `main`), merge ordering is mandatory and must be explicitly documented. PRs targeting `main` while their base is a dependency branch will show `unstable` CI until the root is merged first.
+
+**Protocol:**
+1. The root PR (root feature branch → `main`) must merge first.
+2. Dependent PRs must be rebased onto `main` after the root merges, then merged in any order.
+3. Final test/regression PR (if any) merges last.
+
+**Anti-pattern:** Spawning dependent agents before the root branch is merged to `main` results in PRs that appear to target `main` but carry unmerged root changes. This is intentional only when explicitly instructed ("once stable on branch"). Future sprints should either: (a) wait for root merge before spawning dependents, or (b) explicitly instruct dependents to target the dependency branch, not `main`.
+
+**References:** Sprint #428–#432, merge order: #433 → {#434, #435, #436} → #437.
+
+---
+
 ## Decision Log
 
 ### 2026-05-12: A11y & Test Alignment — htmlFor + LadderPage coupon test (#372, #376)
