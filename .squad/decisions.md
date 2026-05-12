@@ -1729,3 +1729,59 @@ end $$;
 **Fix:** Renamed all selectors to canonical `account-tab-{ibkr,schwab,ira}` form. Added explicit `.click()` calls before assertions to ensure active tab is deterministic.
 
 **Convention:** All account tab selectors in E2E specs must use `account-tab-{type}` pattern, consistent with UI implementation. Bare `tab-{type}` is incorrect and will fail.
+
+---
+
+## Round 8 — Currency Display Final Fix (2026-05-12)
+
+### Keaton-4 — 3-currency contract (architectural spec, deferred to Issue #423)
+
+**Author:** Keaton (Lead)
+**Date:** 2026-05-12
+
+Authoritative spec defining permanent 3-currency architecture. **Key decision:** eliminate sub-unit storage entirely — all monetary columns store major canonical currency (ILS/GBP/USD), never agorot/pence. `currency` column uses ISO 4217 codes, never broker sub-unit codes (ILA/GBp). Conversion from sub-unit to major happens exactly once at write boundary (worker + parsers). This eliminates the recurring "forgot to divide by 100 in surface X" bug class. **Deferred to Issue #423** in favour of pragmatic Phase 2 fixes.
+
+---
+
+### Hockney-14 — DB audit (30-position breakdown, root cause: stale container)
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-05-12
+
+Three-way comparison (spreadsheet ↔ DB ↔ UI) across all 30 Leumi IRA positions in account 72. Identified stale Docker container `33fd12cab77e` (pre-PR-#420) as systemic root cause: container writes `market_value = qty × mark_price` without `÷100` for LSE positions, computes `dividend_yield` via 100× inflated method instead of deterministic formula, overwrites post-migration corrections on next daily run. **Verification protocol:** compare container Created timestamp vs. latest worker commit timestamp; rebuild if stale.
+
+---
+
+### Fenster-11 — Display surface audit (9 surfaces, 0 currency-aware)
+
+**Author:** Fenster (Frontend Dev)
+**Date:** 2026-05-12
+
+Inventory of all 9 currency-displaying surfaces across `/dividends`, `/trading/accounts`, `/summary`, `/bonds`, `/ladder`. **Key finding:** 0 out of 9 surfaces correctly handle all 3 currencies (GBP missing from CURRENCY_RATES, ÷100 guard absent on GBP mark_price, no FX conversion on GBP aggregates). Systematic fixes addressed in Phase 2 (PR #424).
+
+---
+
+### Hockney-15 — Phase 2 container rebuild + migration (PR #425)
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-05-12
+
+**Operational decision:** After every PR modifying `apps/backend/app/worker/yahoo_refresh.py`, container MUST be rebuilt before next scheduled run. Protocol: (1) compare container Created timestamp vs. PR merge time; (2) if stale, rebuild with `docker compose -f docker-compose.backend.yml build --no-cache backend` + `up -d backend`. Rationale: daily refresh (06:59 UTC) overwrites `market_value` + `dividend_yield` for all positions; stale container code silently corrupts entire dataset. Migrations that fix DB values are worthless if next refresh reverts them.
+
+---
+
+### Fenster-12 — Phase 2 GBP display fixes + QQQI TTM gate (PR #424)
+
+**Author:** Fenster (Frontend Dev)
+**Date:** 2026-05-12
+
+**Decision 1:** GBP mark_price stored in pence (GBp = 1/100 GBP); apply ÷100 guard wherever ILA applies. Canonical form: `isSubUnit(c) = c === 'ILA' || c === 'GBP' || c === 'GBp'` then `canonicalPrice = isSubUnit(...) ? price / 100 : price`. **Decision 2:** CURRENCY_RATES now includes `GBP: 4.6`. GBP positions silently undervalued by ~3.6× in USD aggregates due to missing rate (unknown currencies defaulted to rate 1). **Decision 3:** QQQI TTM yield gated by trustworthiness: `MIN_TTM_PAYMENTS_FOR_TRUST = 3`, `MAX_DAYS_SINCE_LAST_PAYMENT = 60`. DB value used only if ≥3 payments AND ≤60 days since last. Test results: 646 regression tests pass ✅. PR #424 OPEN (awaiting merge).
+
+---
+
+### Hockney-16 — Operational automation: rebuild script + redeploy skill (PR #426 ✅ MERGED)
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-05-12
+
+**Automation protocol:** Round 8 confirmed (again) that Docker container never automatically rebuilt after worker-code PR merged — same silent corruption pattern Rounds 5–7. **Decision:** (1) `scripts/rebuild-worker.sh` is canonical rebuild tool (idempotent, POSIX Phases A–F, flags: `--force/--prune/--no-verify/--dry-run/--help`); (2) Keaton (Lead) enforces mandatory redeploy gate — no PR touching `apps/backend/app/worker/**`, `Dockerfile`, `pyproject.toml`/`uv.lock` considered merged until script runs (or documented manual fallback) + Phase E verification passes; (3) Copilot coordinator surfaces `.copilot/skills/worker-redeploy/SKILL.md` whenever session involves those paths; (4) verification minimum: image SHA changed + healthcheck healthy + `refresh_stock_positions()` returns without exception. Appended gate to Keaton's charter; added "Rebuilding the worker" block to `apps/backend/README.md`. **PR #426 merged** ✅; skill now active in coordinator routing.
