@@ -6,7 +6,7 @@ import { useSettings } from "../settings/SettingsContext";
 import { getDividendEstimations, getDividendSummary } from "@/app/dividends/actions";
 import StackedIncomeBarChart, { YearlyIncomeData, SERIES_COLORS } from "../../components/Summary/StackedIncomeBarChart";
 import { getLadderIncome } from "../ladder/actions";
-import { getOptionsYearlyCashFlow } from "../options/actions";
+import { getOptionsYearlyCashFlow, getOptionsIncomeEstimation } from "../options/actions";
 import type { IncomePoint } from "@/components/Ladder/types";
 import { buildYearlyIncomeData } from "./buildYearlyIncomeData";
 
@@ -30,6 +30,7 @@ export default function SummaryPage() {
   ]);
 
   const optionsFinalYear = settings.optionsFinalYear;
+  const optionsGrowthRate = settings.optionsGrowthRate;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -37,7 +38,22 @@ export default function SummaryPage() {
         const currentYear = new Date().getFullYear();
 
         // 1. Fetch Options yearly cumulative cash flow (actuals only)
-        const optionsYearly = await getOptionsYearlyCashFlow();
+        const optionsActuals = await getOptionsYearlyCashFlow();
+
+        // 2. Fetch options income projections from the estimation engine (#428)
+        const optionsEstimation = await getOptionsIncomeEstimation({
+          growthRate: optionsGrowthRate,
+          finalYear: optionsFinalYear,
+        });
+
+        // Merge: actuals take precedence for any overlapping year.
+        const actualsYearSet = new Set(optionsActuals.map(a => a.year));
+        const optionsYearly = [
+          ...optionsActuals,
+          ...optionsEstimation.projections
+            .filter(p => !actualsYearSet.has(p.year))
+            .map(p => ({ year: p.year, amount: p.expectedIncome, isProjected: true as const })),
+        ];
 
         // 2. Fetch Ladder Income (bonds - future cash flows)
         const ladderResult = await getLadderIncome();
@@ -81,7 +97,7 @@ export default function SummaryPage() {
     };
 
     fetchData();
-  }, [divParams, optionsFinalYear]);
+  }, [divParams, optionsFinalYear, optionsGrowthRate]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -105,7 +121,7 @@ export default function SummaryPage() {
         </div>
         <p className="text-xs text-slate-400 mb-4">
           <strong>Projection assumptions:</strong> Options show actual cumulative cash flow for past years,
-          0 for future (conservative). Dividends use your estimations where entered, otherwise project with {(divParams.growth_rate * 100).toFixed(1)}% growth rate.
+          then project forward using a {(optionsGrowthRate * 100).toFixed(1)}% growth rate baseline. Dividends use your estimations where entered, otherwise project with {(divParams.growth_rate * 100).toFixed(1)}% growth rate.
           Bonds show scheduled coupon and maturity payments. Projected years are shown with reduced opacity.
         </p>
         <StackedIncomeBarChart data={chartData} cutoffYear={settings.cutoffYear} />

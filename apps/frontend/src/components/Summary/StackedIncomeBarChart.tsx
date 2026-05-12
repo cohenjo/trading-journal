@@ -35,6 +35,8 @@ export type YearlyIncomeData = {
   bondInterestIncome?: number;
   isProjected: boolean;
   dividendsSource?: 'estimation' | 'projection';
+  /** Distinguishes projected options income from historical actuals. */
+  optionsSource?: 'actual' | 'projection';
 };
 
 type Props = {

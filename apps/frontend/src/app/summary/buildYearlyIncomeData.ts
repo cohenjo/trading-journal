@@ -13,7 +13,7 @@ export interface BuildYearlyIncomeParams {
   reinvestRate: number;
   finalYear: number;
   optionsFinalYear: number;
-  optionsYearly: Array<{ year: number; amount: number }>;
+  optionsYearly: Array<{ year: number; amount: number; isProjected?: boolean }>;
   ladderSeries: IncomePoint[];
   /** Optional realized bond interest per year. Comes from getYearlyBondInterest(). */
   bondInterest?: Array<{ year: number; net_amount: number }>;
@@ -44,6 +44,9 @@ export function buildYearlyIncomeData(params: BuildYearlyIncomeParams): YearlyIn
   } = params;
 
   const optionsMap = new Map(optionsYearly.map(o => [o.year, o.amount]));
+  const optionsSourceMap = new Map(
+    optionsYearly.map(o => [o.year, o.isProjected ? 'projection' as const : 'actual' as const]),
+  );
 
   const ladderMap = new Map<number, number>();
   for (const point of ladderSeries) {
@@ -104,6 +107,7 @@ export function buildYearlyIncomeData(params: BuildYearlyIncomeParams): YearlyIn
   return sortedYears.map(year => ({
     year,
     optionsIncome: optionsMap.get(year) ?? 0,
+    optionsSource: optionsSourceMap.get(year),
     dividendsIncome: divMap.get(year) ?? 0,
     dividendsSource: divSourceMap.get(year),
     bondsIncome: ladderMap.get(year) ?? 0,
