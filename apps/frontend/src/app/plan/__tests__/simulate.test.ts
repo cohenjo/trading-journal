@@ -327,4 +327,53 @@ describe('runPlanSimulation', () => {
     const atPoint = result.find(p => p.year === targetYear);
     if (atPoint) expect(atPoint.income).toBe(30_000);
   });
+
+  it('incorporates options income for the matching year into income and income_details', async () => {
+    const targetYear = CURRENT_YEAR + 2;
+    const plan: PlanData = { items: [], milestones: [], settings: {} };
+    const result = await runPlanSimulation({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: SETTINGS,
+      optionsProjection: [{ year: targetYear, expectedIncome: 5_000 }],
+    });
+
+    const point = result.find(p => p.year === targetYear);
+    expect(point).toBeDefined();
+    expect(point!.income).toBe(5_000);
+    expect(point!.income_details).toContainEqual({
+      name: 'Options Income',
+      type: 'options',
+      value: 5_000,
+    });
+  });
+
+  it('does not include options income in years without a matching projection entry', async () => {
+    const plan: PlanData = { items: [], milestones: [], settings: {} };
+    const result = await runPlanSimulation({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: SETTINGS,
+      optionsProjection: [{ year: CURRENT_YEAR + 5, expectedIncome: 8_000 }],
+    });
+
+    const current = result.find(p => p.year === CURRENT_YEAR);
+    expect(current!.income).toBe(0);
+    expect(current!.income_details.some(d => d.type === 'options')).toBe(false);
+  });
+
+  it('is backward compatible — no optionsProjection produces identical results', async () => {
+    const plan: PlanData = {
+      items: [baseItem({ id: 'sal', name: 'Salary', category: 'Income', value: 100_000, start_condition: 'Date', start_date: `${CURRENT_YEAR}-01-01` })],
+      milestones: [],
+      settings: {},
+    };
+
+    const withoutOptions = await simulate(plan);
+    const withEmptyOptions = await runPlanSimulation({ plan, finances: EMPTY_FINANCES, settings: SETTINGS, optionsProjection: [] });
+
+    expect(withoutOptions[0].income).toBe(withEmptyOptions[0].income);
+    expect(withoutOptions[0].net_worth).toBe(withEmptyOptions[0].net_worth);
+    expect(withEmptyOptions[0].income_details.some(d => d.type === 'options')).toBe(false);
+  });
 });
