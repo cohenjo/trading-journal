@@ -79,9 +79,9 @@ All limits are taken from official pricing/docs pages fetched on **2026-05-05**.
 
 ### 3.1 Measurement status
 
-**Local Docker stack was NOT running at audit time.** The `docker-compose.yml` Postgres
-container (`trading_journal_db`) was confirmed stopped via `docker ps`. Size measurement
-via `pg_database_size()` was therefore not possible.
+**Local Docker stack baseline note (2026-05-09):** The legacy `docker-compose.yml` Postgres
+container (`trading_journal_db`) was confirmed stopped via `docker ps`. That compose file has
+since been removed (PR #421); the canonical worker is `docker-compose.backend.yml`.
 
 ### 3.2 Migration-file-based estimate
 
