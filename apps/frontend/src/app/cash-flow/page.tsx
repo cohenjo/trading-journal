@@ -7,25 +7,50 @@ import { CashFlowSankey } from '@/components/CashFlow/CashFlowSankey';
 import { PlanData } from '@/components/Plan/types';
 import { getLatestPlan, runPlanSimulation } from '../plan/actions';
 import { getLatestFinanceSnapshot } from '../finances/actions';
+import { getDividendSummary } from '../dividends/actions';
+import { getLadderIncome } from '../ladder/actions';
+import type { BondIncomePoint, DividendIncomeTotal } from '../plan/simulation';
 
 export default function CashFlowPage() {
     const { settings } = useSettings();
     const [plan, setPlan] = useState<any>(null);
     const [finances, setFinances] = useState<any>(null);
+    const [dividendTotal, setDividendTotal] = useState<DividendIncomeTotal | undefined>(undefined);
+    const [bondProjection, setBondProjection] = useState<BondIncomePoint[]>([]);
     const [projection, setProjection] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
-    // Initial Load
+    // Initial Load — fetch plan, finances, and the 3 summary income streams in parallel
     useEffect(() => {
-        Promise.all([getLatestPlan(), getLatestFinanceSnapshot()]).then(([planData, financeData]) => {
+        Promise.all([
+            getLatestPlan(),
+            getLatestFinanceSnapshot(),
+            getDividendSummary(),
+            getLadderIncome(),
+        ]).then(([planData, financeData, dividendData, bondData]) => {
             setFinances(financeData);
             if (planData) setPlan(planData);
+
+            // Dividend: total_forward_annual is already USD, major units (Round 8 contract)
+            setDividendTotal({ annualTotal: dividendData.total_forward_annual });
+
+            // Bond ladder: income_series is per-year { date: "YYYY-01-01", value: number }
+            if (bondData.ok && bondData.data) {
+                const bondPoints: BondIncomePoint[] = bondData.data.income_series.map(
+                    (pt: { date: string; value: number }) => ({
+                        year: new Date(pt.date).getUTCFullYear(),
+                        amount: pt.value,
+                    }),
+                );
+                setBondProjection(bondPoints);
+            }
+
             setLoading(false);
         });
     }, []);
 
-    // Simulation Effect
+    // Simulation Effect — includes virtual income streams so Sankey reflects all 3 (#441)
     useEffect(() => {
         if (!plan || !plan.data || !finances) return;
 
@@ -35,6 +60,8 @@ export default function CashFlowPage() {
                 plan: plan.data,
                 finances,
                 settings: settings as unknown as Record<string, unknown>,
+                dividendTotal,
+                bondProjection,
             })
                 .then(data => {
                     const formatted = data.map(p => ({
@@ -55,7 +82,7 @@ export default function CashFlowPage() {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [plan, finances, settings]);
+    }, [plan, finances, settings, dividendTotal, bondProjection]);
 
     // Derived Data
     const selectedData = useMemo(() => {

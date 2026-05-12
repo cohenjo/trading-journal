@@ -10,21 +10,49 @@ import { useSettings } from '../settings/SettingsContext';
 import { createPlan, getLatestPlan, runPlanSimulation, updatePlan } from './actions';
 import { getLatestFinanceSnapshot } from '../finances/actions';
 import { getOptionsIncomeEstimation } from '../options/actions';
+import { getDividendSummary } from '../dividends/actions';
+import { getLadderIncome } from '../ladder/actions';
+import type { BondIncomePoint, DividendIncomeTotal } from './simulation';
 
 export default function PlanPage() {
     const { settings } = useSettings();
     const [plan, setPlan] = useState<Plan | null>(null);
     const [finances, setFinances] = useState<any>(null);
     const [optionsProjection, setOptionsProjection] = useState<Array<{ year: number; expectedIncome: number }>>([]);
+    const [dividendTotal, setDividendTotal] = useState<DividendIncomeTotal | undefined>(undefined);
+    const [bondProjection, setBondProjection] = useState<BondIncomePoint[]>([]);
     const [projection, setProjection] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
 
     // Initial Load
     useEffect(() => {
-        Promise.all([getLatestPlan(), getLatestFinanceSnapshot(), getOptionsIncomeEstimation()]).then(([planData, financeData, optionsData]) => {
+        Promise.all([
+            getLatestPlan(),
+            getLatestFinanceSnapshot(),
+            getOptionsIncomeEstimation(),
+            getDividendSummary(),
+            getLadderIncome(),
+        ]).then(([planData, financeData, optionsData, dividendData, bondData]) => {
             setFinances(financeData);
             setOptionsProjection(optionsData.projections);
+
+            // Wire dividend summary: total_forward_annual is already USD, major units.
+            // Display as constant annual income across all plan years.
+            setDividendTotal({ annualTotal: dividendData.total_forward_annual });
+
+            // Wire bond ladder income: income_series is per-year { date, value } from buildIncome().
+            // Parse year from "YYYY-01-01" date strings.
+            if (bondData.ok && bondData.data) {
+                const bondPoints: BondIncomePoint[] = bondData.data.income_series.map(
+                    (pt: { date: string; value: number }) => ({
+                        year: new Date(pt.date).getUTCFullYear(),
+                        amount: pt.value,
+                    }),
+                );
+                setBondProjection(bondPoints);
+            }
+            // If bondData.ok === false, leave bondProjection empty — no bond rows shown.
             if (planData) {
                 setPlan(planData);
             } else {
@@ -82,6 +110,8 @@ export default function PlanPage() {
                 finances,
                 settings: settings as unknown as Record<string, unknown>,
                 optionsProjection,
+                dividendTotal,
+                bondProjection,
             })
                 .then(data => {
                     const formatted = data.map(p => ({
@@ -102,7 +132,7 @@ export default function PlanPage() {
         }, 500); // 500ms debounce
 
         return () => clearTimeout(timer);
-    }, [plan, finances, settings, optionsProjection]); // Re-run when any input changes
+    }, [plan, finances, settings, optionsProjection, dividendTotal, bondProjection]); // Re-run when any input changes
 
     // Calculate Markers
     const markers = useMemo(() => {
@@ -283,7 +313,21 @@ export default function PlanPage() {
                     {/* Editor Section */}
                     <div>
                         <h2 className="text-xl font-semibold mb-4 text-slate-200">Plan Inputs</h2>
-                        {plan && <PlanEditor data={plan.data} onChange={handleUpdatePlanData} finances={finances} />}
+                        {plan && <PlanEditor
+                            data={plan.data}
+                            onChange={handleUpdatePlanData}
+                            finances={finances}
+                            virtualIncomeStreams={{
+                                // Options: use current year's expected income from the projection
+                                optionsAnnual: optionsProjection.find(p => p.year === new Date().getFullYear())?.expectedIncome
+                                    ?? (optionsProjection.length > 0 ? optionsProjection[0].expectedIncome : undefined),
+                                // Dividends: forward annual total in USD (constant across years)
+                                dividendAnnual: dividendTotal?.annualTotal,
+                                // Bonds: current or nearest year's coupon+principal income
+                                bondAnnual: bondProjection.find(p => p.year === new Date().getFullYear())?.amount
+                                    ?? (bondProjection.length > 0 ? bondProjection[0].amount : undefined),
+                            }}
+                        />}
                     </div>
                 </div>
             </div>

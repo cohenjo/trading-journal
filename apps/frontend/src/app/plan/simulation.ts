@@ -8,12 +8,52 @@ export interface OptionsIncomeProjectionPoint {
   expectedIncome: number;
 }
 
+/**
+ * Per-year bond ladder income point, as returned by getLadderIncome() → buildIncome().
+ * Shape: { date: "YYYY-01-01", value: number }
+ *
+ * NOTE on currency: buildIncome() sums cashflows per year without FX conversion.
+ * Amounts are in each bond's native currency (often USD, sometimes ILS/GBP).
+ * For plan simulation we treat them as-is in the simulation's base currency.
+ * Full multi-currency normalization is tracked as future work (#441).
+ * Round 8 contract: values are already in major units — do NOT divide by 100.
+ */
+export interface BondIncomePoint {
+  year: number;
+  amount: number;
+}
+
+/**
+ * Total forward annual dividend income, as returned by getDividendSummary().
+ * Shape: { total_forward_annual: number; ... }
+ *
+ * getDividendSummary() already converts all positions to USD via convertCurrency(),
+ * so total_forward_annual is a single USD amount. Treated as constant across all
+ * future years (forward yield projection, not per-year decay).
+ * Round 8 contract: value is in major units — do NOT divide by 100.
+ */
+export interface DividendIncomeTotal {
+  annualTotal: number; // USD, forward annual, constant across all plan years
+}
+
 export interface PlanSimulationInput {
   plan: PlanData;
   finances?: FinanceSnapshot | { data?: { items?: unknown[] } } | null;
   settings?: Record<string, unknown>;
   /** Optional options-income projection from #428. When absent, plan runs as before. */
   optionsProjection?: OptionsIncomeProjectionPoint[];
+  /**
+   * Optional dividend income total from getDividendSummary() (#441).
+   * Applied as a constant annual income across all simulation years.
+   * When absent, dividend income from /summary is not reflected in the plan.
+   */
+  dividendTotal?: DividendIncomeTotal;
+  /**
+   * Optional bond ladder income series from getLadderIncome() → buildIncome() (#441).
+   * Each entry is a per-year coupon + principal sum. Applied per year.
+   * When absent, bond ladder income from /summary is not reflected in the plan.
+   */
+  bondProjection?: BondIncomePoint[];
 }
 
 export interface PlanSimulationDetail {
@@ -741,6 +781,19 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     (planInput.optionsProjection ?? []).map(p => [p.year, p.expectedIncome]),
   );
 
+  // --- Virtual income maps: dividends + bonds (#441) ---
+  // Dividend income: constant annual total in USD across all years.
+  // Source: getDividendSummary().total_forward_annual (already FX-converted to USD).
+  const dividendAnnualTotal = planInput.dividendTotal?.annualTotal ?? 0;
+
+  // Bond ladder income: per-year coupon + principal from getLadderIncome() → buildIncome().
+  // Source: income_series[].{ date: "YYYY-01-01", value: number }.
+  // Currency note: amounts may be in mixed bond currencies (see BondIncomePoint JSDoc).
+  // TODO: McManus to cover virtual-income merge in simulation unit tests.
+  const bondMap = new Map<number, number>(
+    (planInput.bondProjection ?? []).map(p => [p.year, p.amount]),
+  );
+
   for (let year = currentYear; year <= endYear; year += 1) {
     const age = year - birthYear;
     milestoneManager.checkDynamic(year, accountManager.liquidValue().plus(unallocatedCash), new Decimal(0));
@@ -824,6 +877,22 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       grossIncome = grossIncome.plus(optionsIncome);
       taxableIncome = taxableIncome.plus(optionsIncome);
       incomeDetails.push({ name: 'Options Income', type: 'options', value: roundMoney(optionsIncome) });
+    }
+
+    // Virtual dividend income — forward annual total, constant every year (#441)
+    const dividendIncome = new Decimal(dividendAnnualTotal);
+    if (dividendIncome.gt(0)) {
+      grossIncome = grossIncome.plus(dividendIncome);
+      taxableIncome = taxableIncome.plus(dividendIncome);
+      incomeDetails.push({ name: 'Dividend Income', type: 'dividends', value: roundMoney(dividendIncome) });
+    }
+
+    // Virtual bond ladder income — per-year coupon + principal amounts (#441)
+    const bondIncome = new Decimal(bondMap.get(year) ?? 0);
+    if (bondIncome.gt(0)) {
+      grossIncome = grossIncome.plus(bondIncome);
+      taxableIncome = taxableIncome.plus(bondIncome);
+      incomeDetails.push({ name: 'Bond Ladder Income', type: 'bonds', value: roundMoney(bondIncome) });
     }
 
     const netFlow = grossIncome.minus(taxPaid).minus(expenses);

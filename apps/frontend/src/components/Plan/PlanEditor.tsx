@@ -11,6 +11,15 @@ interface Props {
     data: PlanData;
     onChange: (data: PlanData) => void;
     finances?: any; // Finance Snapshot
+    /** Virtual income streams (#441): computed live from /summary, NOT stored in plan.data */
+    virtualIncomeStreams?: {
+        /** Options income for current year (from getOptionsIncomeEstimation) */
+        optionsAnnual?: number;
+        /** Forward annual dividend income in USD (from getDividendSummary().total_forward_annual) */
+        dividendAnnual?: number;
+        /** Bond ladder coupon+principal income for the current (or nearest) year */
+        bondAnnual?: number;
+    };
 }
 
 const Tab: React.FC<{ label: string; count: number; active: boolean; onClick: () => void }> = ({ label, count, active, onClick }) => (
@@ -23,7 +32,7 @@ const Tab: React.FC<{ label: string; count: number; active: boolean; onClick: ()
     </button>
 );
 
-export const PlanEditor: React.FC<Props> = ({ data, onChange, finances }) => {
+export const PlanEditor: React.FC<Props> = ({ data, onChange, finances, virtualIncomeStreams }) => {
     const { settings } = useSettings();
     const mainCurrency = settings.mainCurrency;
     const [activeTab, setActiveTab] = useState<'Account' | 'Income' | 'Expense' | 'Asset' | 'Milestone'>('Account');
@@ -243,6 +252,71 @@ export const PlanEditor: React.FC<Props> = ({ data, onChange, finances }) => {
         });
     }, [mergedAccounts]);
 
+    // --- Virtual Income Streams: dividends, bonds, options (#441) ---
+    // These are auto-computed from server actions that feed /summary.
+    // They are read-only (isVirtual: true) — edit the underlying holdings to change them.
+    // Placed at the top of the Income list so they're visible first.
+    // Edge case: if annualTotal === 0 or undefined, we still show a $0 row so users
+    // understand the structure exists. This matches the Fenster decision for #441.
+    const virtualSummaryIncomeItems = React.useMemo((): (PlanItem & { isVirtual: true; isLinked: true })[] => {
+        const streams = virtualIncomeStreams ?? {};
+        const currentYear = new Date().getFullYear();
+        const items: (PlanItem & { isVirtual: true; isLinked: true })[] = [];
+
+        // Options income — forward projection from /options (already per-year in plan currency)
+        if (streams.optionsAnnual !== undefined) {
+            items.push({
+                id: 'virtual:options',
+                name: 'Options Income (from /options)',
+                category: 'Income',
+                sub_category: 'options',
+                value: streams.optionsAnnual,
+                frequency: 'Yearly',
+                currency: 'USD',
+                growth_rate: 0,
+                isLinked: true,
+                isVirtual: true,
+                start_date: String(currentYear),
+            } as PlanItem & { isVirtual: true; isLinked: true });
+        }
+
+        // Dividend income — forward annual total in USD from /dividends
+        if (streams.dividendAnnual !== undefined) {
+            items.push({
+                id: 'virtual:dividends',
+                name: 'Dividend Income (from /dividends)',
+                category: 'Income',
+                sub_category: 'dividends',
+                value: streams.dividendAnnual,
+                frequency: 'Yearly',
+                currency: 'USD',
+                growth_rate: 0,
+                isLinked: true,
+                isVirtual: true,
+                start_date: String(currentYear),
+            } as PlanItem & { isVirtual: true; isLinked: true });
+        }
+
+        // Bond ladder income — per-year coupon + principal from /ladder
+        if (streams.bondAnnual !== undefined) {
+            items.push({
+                id: 'virtual:bonds',
+                name: 'Bond Ladder Income (from /ladder)',
+                category: 'Income',
+                sub_category: 'bonds',
+                value: streams.bondAnnual,
+                frequency: 'Yearly',
+                currency: 'USD',
+                growth_rate: 0,
+                isLinked: true,
+                isVirtual: true,
+                start_date: String(currentYear),
+            } as PlanItem & { isVirtual: true; isLinked: true });
+        }
+
+        return items;
+    }, [virtualIncomeStreams]);
+
 
     // --- Derived Pension Milestones ---
     const pensionMilestones = React.useMemo(() => {
@@ -327,14 +401,14 @@ export const PlanEditor: React.FC<Props> = ({ data, onChange, finances }) => {
 
     const currentItems = activeTab === 'Account' ? mergedAccounts :
         activeTab === 'Asset' ? mergedRealAssets :
-            activeTab === 'Income' ? [...data.items.filter(i => i.category === 'Income'), ...pensionIncomeItems] :
+            activeTab === 'Income' ? [...virtualSummaryIncomeItems, ...data.items.filter(i => i.category === 'Income'), ...pensionIncomeItems] :
                 data.items.filter(i => i.category === activeTab);
 
     return (
         <div className="mt-8 bg-slate-900/20 p-6 rounded-xl border border-slate-800/50">
             <div className="flex border-b border-slate-800 mb-6 overflow-x-auto">
                 <Tab label="Accounts" count={mergedAccounts.length} active={activeTab === 'Account'} onClick={() => setActiveTab('Account')} />
-                <Tab label="Income" count={data.items.filter(i => i.category === 'Income').length + pensionIncomeItems.length} active={activeTab === 'Income'} onClick={() => setActiveTab('Income')} />
+                <Tab label="Income" count={data.items.filter(i => i.category === 'Income').length + pensionIncomeItems.length + virtualSummaryIncomeItems.length} active={activeTab === 'Income'} onClick={() => setActiveTab('Income')} />
                 <Tab label="Expenses" count={data.items.filter(i => i.category === 'Expense').length} active={activeTab === 'Expense'} onClick={() => setActiveTab('Expense')} />
                 <Tab label="Real Assets" count={data.items.filter(i => i.category === 'Asset').length} active={activeTab === 'Asset'} onClick={() => setActiveTab('Asset')} />
                 <Tab label="Milestones" count={data.milestones.length + virtualPensionMilestones.length} active={activeTab === 'Milestone'} onClick={() => setActiveTab('Milestone')} />
@@ -344,11 +418,23 @@ export const PlanEditor: React.FC<Props> = ({ data, onChange, finances }) => {
                 {activeTab !== 'Milestone' ? (
                     currentItems.length > 0 ? (
                         currentItems.map(item => (
-                            <div key={item.id} className="bg-slate-900 p-4 rounded-lg border border-slate-800 flex justify-between items-center group hover:border-slate-700 transition-colors">
+                            <div key={item.id} className={`p-4 rounded-lg border flex justify-between items-center group transition-colors ${
+                                item.id?.toString().startsWith('virtual:')
+                                    ? 'bg-slate-900/40 border-slate-700/50 hover:border-slate-600/50 opacity-90'
+                                    : 'bg-slate-900 border-slate-800 hover:border-slate-700'
+                            }`}>
                                 <div>
                                     <h4 className="font-semibold text-slate-200 flex items-center gap-2">
                                         {item.name}
-                                        {item.isLinked && <span className="text-[10px] bg-blue-900/50 text-blue-400 px-1.5 py-0.5 rounded">Linked</span>}
+                                        {item.id?.toString().startsWith('virtual:') && (
+                                            <span
+                                                className="text-[10px] bg-emerald-900/50 text-emerald-400 px-1.5 py-0.5 rounded"
+                                                title={`Auto-computed from your /${(item as any).sub_category ?? 'summary'} holdings. Edit your holdings there to change this value.`}
+                                            >
+                                                Auto
+                                            </span>
+                                        )}
+                                        {item.isLinked && !item.id?.toString().startsWith('virtual:') && <span className="text-[10px] bg-blue-900/50 text-blue-400 px-1.5 py-0.5 rounded">Linked</span>}
                                         {item.category === 'Account' && !item.hasPlan && !item.growth_rate && item.isLinked &&
                                             <span className="text-[10px] bg-slate-800 text-slate-500 px-1.5 py-0.5 rounded">Unconfigured</span>
                                         }
@@ -367,12 +453,21 @@ export const PlanEditor: React.FC<Props> = ({ data, onChange, finances }) => {
                                                 <span className="flex items-center gap-1">💸 {item.account_settings?.dividend_yield || 0}% Div</span>
                                             </>
                                         ) : (item as any).isVirtual ? (
-                                            // Virtual (Pension Income)
-                                            <>
-                                                <span className="text-violet-400">Derived from Pension</span>
-                                                <span>•</span>
-                                                <span>Starts at Age {item.start_reference}</span>
-                                            </>
+                                            // Virtual item — distinguish summary streams from pension
+                                            item.id?.toString().startsWith('virtual:') ? (
+                                                <>
+                                                    <span className="text-emerald-500/80">Auto-computed from portfolio</span>
+                                                    <span>•</span>
+                                                    <span>Read-only</span>
+                                                </>
+                                            ) : (
+                                                // Pension Income virtual row
+                                                <>
+                                                    <span className="text-violet-400">Derived from Pension</span>
+                                                    <span>•</span>
+                                                    <span>Starts at Age {item.start_reference}</span>
+                                                </>
+                                            )
                                         ) : (
                                             // Standard
                                             <>
