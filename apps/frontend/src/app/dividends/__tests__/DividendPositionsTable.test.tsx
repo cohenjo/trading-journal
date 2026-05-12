@@ -20,6 +20,7 @@ const makePosition = (overrides: Partial<DividendPosition> = {}): DividendPositi
   avg_cost: 50.00,
   current_price: 55.00,
   market_value: 5500.00,
+  currency: "USD",
   ttm_div_per_share: 2.50,
   ttm_dividend_total: 250.00,
   ttm_yield_pct: 4.545,
@@ -97,10 +98,27 @@ describe("DividendPositionsTable", () => {
     expect(headers).toHaveLength(14);
   });
 
-  it("monetary values include $ prefix via formatCurrency", () => {
-    render(<DividendPositionsTable rows={[makePosition({ market_value: 5500 })]} />);
+  it("monetary values include $ prefix for USD positions via formatCurrency", () => {
+    render(<DividendPositionsTable rows={[makePosition({ market_value: 5500, currency: "USD" })]} />);
     // formatCurrency(5500, 'USD') → '$5,500.00'
     expect(screen.getByText("$5,500.00")).toBeInTheDocument();
+  });
+
+  it("uses ILS symbol (₪) for ILA/ILS positions", () => {
+    render(
+      <DividendPositionsTable
+        rows={[
+          makePosition({
+            ticker: "224014",
+            market_value: 29582.9,
+            currency: "ILS",
+            forward_dividend_annual: 499.95,
+          }),
+        ]}
+      />,
+    );
+    // formatCurrency(499.95, 'ILS') → '₪499.95'
+    expect(screen.getByText("₪499.95")).toBeInTheDocument();
   });
 
   it("yield percentage shows 2 decimals with % suffix", () => {

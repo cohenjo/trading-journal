@@ -5,9 +5,9 @@ import { formatCurrency } from "@/lib/currency";
 
 // ── Formatters ─────────────────────────────────────────────────────────────────
 
-function fmtMoney(val: number | null): string {
+function fmtMoney(val: number | null, currency = "USD"): string {
   if (val === null || val === undefined) return "—";
-  return formatCurrency(val, "USD");
+  return formatCurrency(val, currency);
 }
 
 function fmtPct(val: number | null): string {
@@ -86,16 +86,16 @@ export default function DividendPositionsTable({ rows }: Props) {
                 {row.name ?? "—"}
               </td>
               <td className="px-3 py-2 text-right">{fmtQty(row.quantity)}</td>
-              <td className="px-3 py-2 text-right">{fmtMoney(row.avg_cost)}</td>
-              <td className="px-3 py-2 text-right">{fmtMoney(row.current_price)}</td>
-              <td className="px-3 py-2 text-right">{fmtMoney(row.market_value)}</td>
-              <td className="px-3 py-2 text-right">{fmtMoney(row.ttm_div_per_share)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.avg_cost, row.currency)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.current_price, row.currency)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.market_value, row.currency)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.ttm_div_per_share, row.currency)}</td>
               <td className="px-3 py-2 text-right">{fmtPct(row.ttm_yield_pct)}</td>
-              <td className="px-3 py-2 text-right">{fmtMoney(row.ttm_dividend_total)}</td>
-              <td className="px-3 py-2 text-right">{fmtMoney(row.forward_div_per_share)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.ttm_dividend_total, row.currency)}</td>
+              <td className="px-3 py-2 text-right">{fmtMoney(row.forward_div_per_share, row.currency)}</td>
               <td className="px-3 py-2 text-right">{fmtPct(row.forward_yield_pct)}</td>
               <td className="px-3 py-2 text-right font-medium text-green-400">
-                {fmtMoney(row.forward_dividend_annual)}
+                {fmtMoney(row.forward_dividend_annual, row.currency)}
                 {row.source === 'csv' && (
                   <span
                     className="ml-1 inline-block rounded-full bg-amber-900/60 px-1.5 py-0.5 text-[10px] font-normal text-amber-300 align-middle"
