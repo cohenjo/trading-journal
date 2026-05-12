@@ -57,17 +57,24 @@ Rotation policies:
 
 ---
 
-### 1.3 Docker Compose — Worker (`docker-compose.yml`)
+### 1.3 Docker Compose — Backend Worker (`docker-compose.backend.yml`)
 
-> **Note:** IB Gateway has been removed from the stack. The architecture now uses Flex queries (`apps/backend/scripts/flex_probe.py`, `flex_parser.py`) for IBKR data.
+> **Note:** `docker-compose.yml` (legacy standalone worker) was removed in PR #421.
+> The canonical worker is `docker-compose.backend.yml` (`trading_journal_backend_supabase`),
+> rebuilt and extended with Yahoo Finance refresh in PRs #410 #413 #417 #420.
 
 | Variable | Tier | Description | Source of Truth | Rotation |
 |----------|------|-------------|-----------------|----------|
-| `DATABASE_URL` | 🔴 | Supabase connection string | `.env` local | 90d |
+| `DIRECT_DATABASE_URL` | 🔴 | Supabase Postgres direct/pooler connection string | `.env` local | 90d |
+| `SUPABASE_URL` | 🔴 | Supabase project URL | `.env` local | never |
+| `SUPABASE_SERVICE_ROLE_KEY` | 🔴 | Supabase service-role key for server-side operations | `.env` local | 90d |
+| `SUPABASE_JWT_SECRET` | 🔴 | Supabase JWT secret | `.env` local | per-leak |
+| `WORKER_TIMEZONE` | 🟡 | Scheduler timezone (default: `Asia/Jerusalem`) | `.env` local | never |
+| `WORKER_POLL_INTERVAL_SECONDS` | 🟡 | Compute jobs polling interval (default: `5`) | `.env` local | never |
+| `YAHOO_REFRESH_CRON` | 🟡 | Cron expression for Yahoo price refresh (default: `0 22 * * MON-FRI`) | `.env` local | never |
 | `WORKER_HEARTBEAT_FILE` | 🟡 | Heartbeat file path (default: `/app/worker_heartbeat`) | `.env` local | never |
-| `WORKER_POLL_INTERVAL_SECONDS` | 🟡 | Compute jobs polling interval (default: 5) | `.env` local | never |
 
-> 📍 **Source confirmation:** Confirmed in `docker-compose.yml` `worker` service environment block (as of 2026-05-09).
+> 📍 **Source confirmation:** Confirmed in `docker-compose.backend.yml` `backend` service environment block (as of 2026-05-12).
 
 ---
 
@@ -317,6 +324,6 @@ See [`.env.example`](../../../.env.example) at repo root.
 
 - `apps/frontend/src/**/*.ts`, `*.tsx`
 - `apps/backend/app/**/*.py`
-- `docker-compose.yml`
+- `docker-compose.backend.yml` (legacy `docker-compose.yml` removed in PR #421)
 - `.github/workflows/**/*.yml`
 - `docs/design-hosting/runbooks/**/*.md`
