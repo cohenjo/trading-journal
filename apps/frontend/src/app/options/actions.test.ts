@@ -242,4 +242,48 @@ describe('getOptionsIncomeEstimation', () => {
     expect(result.projections[0].year).toBe(currentYear + 1);
     expect(result.projections[result.projections.length - 1].year).toBe(2064);
   });
+
+  // ── Growth rate edge cases ────────────────────────────────────────────────
+
+  it('100% growth rate: each projection year doubles the previous year income', async () => {
+    // 3 equal years → baseline = 10 000
+    makeEstimationClient([
+      { period_start: '2022-01-01', cash_flow_total: '10000' },
+      { period_start: '2023-01-01', cash_flow_total: '10000' },
+      { period_start: '2024-01-01', cash_flow_total: '10000' },
+    ]);
+
+    const currentYear = new Date().getFullYear();
+    const result = await getOptionsIncomeEstimation({ growthRate: 1.0, finalYear: currentYear + 3 });
+
+    expect(result.baselineAverage).toBeCloseTo(10_000, 5);
+    expect(result.growthRate).toBe(1.0);
+
+    // baseline × 2^1 = 20 000
+    expect(result.projections[0].expectedIncome).toBeCloseTo(20_000, 4);
+    // baseline × 2^2 = 40 000
+    expect(result.projections[1].expectedIncome).toBeCloseTo(40_000, 4);
+    // baseline × 2^3 = 80 000
+    expect(result.projections[2].expectedIncome).toBeCloseTo(80_000, 4);
+    expect(result.projections[0].isProjected).toBe(true);
+  });
+
+  it('0.001% growth rate: compound effect is negligible over one year', async () => {
+    // 0.001% = 0.00001 as a decimal fraction
+    makeEstimationClient([
+      { period_start: '2022-01-01', cash_flow_total: '10000' },
+      { period_start: '2023-01-01', cash_flow_total: '10000' },
+      { period_start: '2024-01-01', cash_flow_total: '10000' },
+    ]);
+
+    const currentYear = new Date().getFullYear();
+    const result = await getOptionsIncomeEstimation({ growthRate: 0.00001, finalYear: currentYear + 2 });
+
+    expect(result.baselineAverage).toBeCloseTo(10_000, 5);
+    // 10 000 × 1.00001^1 = 10 000.1 — only a 10-cent difference from baseline
+    expect(result.projections[0].expectedIncome).toBeCloseTo(10_000.1, 3);
+    // 10 000 × 1.00001^2 ≈ 10 000.2 — still nearly identical to baseline
+    expect(result.projections[1].expectedIncome).toBeGreaterThan(10_000);
+    expect(result.projections[1].expectedIncome).toBeLessThan(10_001);
+  });
 });
