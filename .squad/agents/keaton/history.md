@@ -265,3 +265,9 @@ Triaged all 12 dependabot/chore PRs. E2E Smoke + Auth failures on all PRs confir
 **Verdict:** APPROVE. Administrative-only (4 `.squad/` files), no source/test changes. `merge=union` gitattribute auto-resolves append conflicts with Round 9 wrap (#438). All 6 Round 8 decisions (Keaton-4, Hockney-14, Fenster-11, Hockney-15, Fenster-12, Hockney-16) captured accurately. Worker redeploy skill shipped separately in PR #426.
 
 **Pattern:** Scribe wrap PRs are safe to approve when: (1) diff touches only `.squad/`, `.copilot/skills/` paths; (2) `merge=union` covers all append-only files; (3) GitHub reports MERGEABLE; (4) decision entries match PR body claims.
+
+### 2026-05-12 — Reviewer Gate: PR #424 (Round 8 Phase 2 Frontend Currency Fix)
+
+**Verdict:** APPROVE. Surgical Round 8 Phase 2 frontend fix — extends ÷100 display guard to GBP, adds GBP rate, QQQI TTM guard. 7 frontend-only files, 370 additions (191 tests), 61 deletions. Fully compliant with Round 8 currency contract (mark_price in native unit, ÷100 at display, market_value from DB). No Round 9 drift (zero file overlap with #433–#438). CI failure is known Node.js 20 WebSocket infra issue — safe to bypass. Merge standalone before #425.
+
+**Pattern:** Post-merge drift check for stacked/delayed PRs — compare touched files against all PRs merged to main since the branch point. Zero overlap = no rebase needed even when multiple sprints have elapsed.
