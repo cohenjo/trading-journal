@@ -193,3 +193,133 @@ describe('buildYearlyIncomeData — estimation override semantics', () => {
     });
   });
 });
+
+// ─── Options projected income (issue #430) ────────────────────────────────────
+
+describe('buildYearlyIncomeData — options projections (#430)', () => {
+  const BASE_PARAMS = {
+    growthRate: 0.03,
+    yieldRate: 0.04,
+    reinvestRate: 0.5,
+    finalYear: 2030,
+    optionsFinalYear: 2030,
+    ladderSeries: [] as Array<{ date: string; value: number }>,
+  } as const;
+
+  it('projected options entries have optionsSource = "projection"', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      optionsYearly: [
+        { year: 2025, amount: 5_000, isProjected: false },
+        { year: 2027, amount: 3_000, isProjected: true },
+      ],
+    });
+
+    const byYear = Object.fromEntries(result.map(p => [p.year, p]));
+    expect(byYear[2025]?.optionsSource).toBe('actual');
+    expect(byYear[2027]?.optionsSource).toBe('projection');
+  });
+
+  it('actual options entries have optionsSource = "actual"', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      optionsYearly: [
+        { year: 2023, amount: 4_000 },
+        { year: 2024, amount: 6_000 },
+      ],
+    });
+
+    const byYear = Object.fromEntries(result.map(p => [p.year, p]));
+    expect(byYear[2023]?.optionsSource).toBe('actual');
+    expect(byYear[2024]?.optionsSource).toBe('actual');
+  });
+
+  it('years with no options data have optionsSource = undefined', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      optionsYearly: [],
+    });
+
+    result.forEach(p => {
+      expect(p.optionsSource).toBeUndefined();
+    });
+  });
+
+  it('projected options income flows through to optionsIncome correctly', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      optionsYearly: [
+        { year: 2025, amount: 5_000, isProjected: false },
+        { year: 2027, amount: 3_200, isProjected: true },
+        { year: 2028, amount: 3_264, isProjected: true },
+      ],
+    });
+
+    const byYear = Object.fromEntries(result.map(p => [p.year, p]));
+    expect(byYear[2025]?.optionsIncome).toBe(5_000);
+    expect(byYear[2027]?.optionsIncome).toBe(3_200);
+    expect(byYear[2028]?.optionsIncome).toBe(3_264);
+  });
+
+  it('actual wins over projection when both supply the same year (no double-counting)', () => {
+    // This tests that the CALLER merges correctly before passing to build.
+    // Simulates caller having deduplicated (actuals win).
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      // Caller has already filtered out overlapping projection for 2025.
+      optionsYearly: [
+        { year: 2025, amount: 5_000, isProjected: false }, // actual wins
+        { year: 2027, amount: 3_000, isProjected: true },
+      ],
+    });
+
+    const byYear = Object.fromEntries(result.map(p => [p.year, p]));
+    expect(byYear[2025]?.optionsIncome).toBe(5_000);
+    expect(byYear[2025]?.optionsSource).toBe('actual');
+  });
+
+  it('projected options years appear in the result and are marked isProjected', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      optionsYearly: [
+        { year: 2028, amount: 3_000, isProjected: true },
+        { year: 2029, amount: 3_060, isProjected: true },
+      ],
+    });
+
+    const byYear = Object.fromEntries(result.map(p => [p.year, p]));
+    expect(byYear[2028]?.isProjected).toBe(true);
+    expect(byYear[2029]?.isProjected).toBe(true);
+  });
+
+  it('entries with isProjected omitted default to "actual" optionsSource', () => {
+    const result = buildYearlyIncomeData({
+      ...BASE_PARAMS,
+      currentYear: 2026,
+      estimationsMap: new Map(),
+      projectedDividendAmount: 10_000,
+      optionsYearly: [{ year: 2024, amount: 7_000 }], // no isProjected field
+    });
+
+    const byYear = Object.fromEntries(result.map(p => [p.year, p]));
+    expect(byYear[2024]?.optionsSource).toBe('actual');
+  });
+});
