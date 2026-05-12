@@ -5,7 +5,7 @@ const { mockGetUser } = vi.hoisted(() => ({ mockGetUser: vi.fn() }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 
 import { createClient } from '@/lib/supabase/server';
-import { getOptionsMonthlyMetrics, getUserAccountsWithOptionsEnabled } from './actions';
+import { getOptionsMonthlyMetrics, getUserAccountsWithOptionsEnabled, getOptionsIncomeEstimation } from './actions';
 
 const MOCK_USER_ID = 'user-uuid-1234';
 const MOCK_HOUSEHOLD_ID = 'household-uuid-5678';
@@ -96,5 +96,150 @@ describe('options dashboard actions', () => {
 
     await expect(getUserAccountsWithOptionsEnabled()).resolves.toEqual([{ id: '7', label: 'DU777', accountId: 'DU777', accountType: 'IBKR' }]);
     expect(accountsQuery.eq).toHaveBeenCalledWith('compute_options_income', true);
+  });
+});
+
+// ── getOptionsIncomeEstimation ─────────────────────────────────────────────────
+
+/**
+ * Helper: build a mock supabase client whose `options_dashboard_monthly` query
+ * returns the supplied rows, and whose `household_members` query resolves normally.
+ */
+function makeEstimationClient(
+  rows: Array<{ period_start: string; cash_flow_total: string | number }>,
+  queryError: null | { message: string } = null,
+) {
+  const order = vi.fn().mockResolvedValue({ data: queryError ? null : rows, error: queryError });
+  const estimationQuery = {
+    select: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    order,
+  };
+  const from = vi.fn((table: string) => {
+    if (table === 'household_members') return householdQuery();
+    if (table === 'options_dashboard_monthly') return estimationQuery;
+    throw new Error(`Unexpected table: ${table}`);
+  });
+  (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from });
+}
+
+describe('getOptionsIncomeEstimation', () => {
+  it('computes 3-year average baseline and projects forward with default 2% growth', async () => {
+    // 3 full years: 2022 = 12000, 2023 = 15000, 2024 = 18000 → avg = 15000
+    makeEstimationClient([
+      { period_start: '2022-01-01', cash_flow_total: '6000' },
+      { period_start: '2022-07-01', cash_flow_total: '6000' },
+      { period_start: '2023-01-01', cash_flow_total: '7500' },
+      { period_start: '2023-07-01', cash_flow_total: '7500' },
+      { period_start: '2024-01-01', cash_flow_total: '9000' },
+      { period_start: '2024-07-01', cash_flow_total: '9000' },
+    ]);
+
+    const currentYear = new Date().getFullYear();
+    const result = await getOptionsIncomeEstimation({ growthRate: 0.02, finalYear: currentYear + 2 });
+
+    expect(result.baselineAverage).toBeCloseTo(15000, 5);
+    expect(result.growthRate).toBe(0.02);
+    expect(result.projections).toHaveLength(2);
+
+    // Year 1: 15000 × 1.02^1 = 15300
+    expect(result.projections[0].year).toBe(currentYear + 1);
+    expect(result.projections[0].expectedIncome).toBeCloseTo(15300, 4);
+    expect(result.projections[0].isProjected).toBe(true);
+
+    // Year 2: 15000 × 1.02^2 = 15606
+    expect(result.projections[1].year).toBe(currentYear + 2);
+    expect(result.projections[1].expectedIncome).toBeCloseTo(15606, 4);
+  });
+
+  it('falls back to <3 years of history (2-year average)', async () => {
+    // Only 2 years available: 2023 = 10000, 2024 = 20000 → avg = 15000
+    makeEstimationClient([
+      { period_start: '2023-06-01', cash_flow_total: '10000' },
+      { period_start: '2024-06-01', cash_flow_total: '20000' },
+    ]);
+
+    const currentYear = new Date().getFullYear();
+    const result = await getOptionsIncomeEstimation({ growthRate: 0, finalYear: currentYear + 1 });
+
+    expect(result.baselineAverage).toBeCloseTo(15000, 5);
+  });
+
+  it('falls back to 1-year history when only one year exists', async () => {
+    makeEstimationClient([
+      { period_start: '2024-03-01', cash_flow_total: '8000' },
+      { period_start: '2024-09-01', cash_flow_total: '4000' },
+    ]);
+
+    const result = await getOptionsIncomeEstimation({ growthRate: 0, finalYear: new Date().getFullYear() + 1 });
+
+    expect(result.baselineAverage).toBeCloseTo(12000, 5);
+  });
+
+  it('projects 0% growth — every year equals baseline exactly', async () => {
+    makeEstimationClient([
+      { period_start: '2022-01-01', cash_flow_total: '5000' },
+      { period_start: '2023-01-01', cash_flow_total: '5000' },
+      { period_start: '2024-01-01', cash_flow_total: '5000' },
+    ]);
+
+    const currentYear = new Date().getFullYear();
+    const result = await getOptionsIncomeEstimation({ growthRate: 0, finalYear: currentYear + 3 });
+
+    expect(result.projections).toHaveLength(3);
+    for (const p of result.projections) {
+      expect(p.expectedIncome).toBeCloseTo(5000, 5);
+    }
+  });
+
+  it('projects negative baseline forward without flooring at zero', async () => {
+    // 3 years of net losses → avg = -3000
+    makeEstimationClient([
+      { period_start: '2022-01-01', cash_flow_total: '-3000' },
+      { period_start: '2023-01-01', cash_flow_total: '-3000' },
+      { period_start: '2024-01-01', cash_flow_total: '-3000' },
+    ]);
+
+    const currentYear = new Date().getFullYear();
+    const result = await getOptionsIncomeEstimation({ growthRate: 0.02, finalYear: currentYear + 1 });
+
+    expect(result.baselineAverage).toBeCloseTo(-3000, 5);
+    // -3000 × 1.02^1 = -3060
+    expect(result.projections[0].expectedIncome).toBeCloseTo(-3060, 4);
+    expect(result.projections[0].expectedIncome).toBeLessThan(0);
+  });
+
+  it('returns empty projections for empty history', async () => {
+    makeEstimationClient([]);
+
+    const result = await getOptionsIncomeEstimation({ growthRate: 0.02, finalYear: 2064 });
+
+    expect(result.baselineAverage).toBe(0);
+    expect(result.projections).toHaveLength(0);
+  });
+
+  it('returns empty projections when unauthenticated', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: new Error('no session') });
+    (createClient as ReturnType<typeof vi.fn>).mockResolvedValue({ auth: { getUser: mockGetUser }, from: vi.fn() });
+
+    const result = await getOptionsIncomeEstimation({ growthRate: 0.02, finalYear: 2064 });
+
+    expect(result.baselineAverage).toBe(0);
+    expect(result.projections).toHaveLength(0);
+  });
+
+  it('uses default growthRate 0.02 and finalYear 2064 when no params are passed', async () => {
+    makeEstimationClient([
+      { period_start: '2024-01-01', cash_flow_total: '10000' },
+    ]);
+
+    const result = await getOptionsIncomeEstimation();
+
+    expect(result.growthRate).toBe(0.02);
+    // finalYear defaults to 2064 — projections span from currentYear+1 to 2064
+    const currentYear = new Date().getFullYear();
+    expect(result.projections.length).toBe(2064 - currentYear);
+    expect(result.projections[0].year).toBe(currentYear + 1);
+    expect(result.projections[result.projections.length - 1].year).toBe(2064);
   });
 });
