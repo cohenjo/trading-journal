@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   dividendReinvestRate: 0.8,
   cutoffYear: 2040,
   dividendFinalYear: 2064,
-  optionsGrowthRate: 0.05,
+  optionsGrowthRate: 0.02, // Default 2% per user spec (Jony, 2026-05-12). Configurable via settings.optionsGrowthRate.
   optionsFinalYear: 2064,
 
   mainCurrency: 'ILS',

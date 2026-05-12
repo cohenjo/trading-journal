@@ -486,3 +486,116 @@ export async function getEfficiencyGaugesData(accountId?: string): Promise<impor
     isStale: isOlderThanOneHour(marginAsOf),
   };
 }
+
+// ── Options Income Estimation ─────────────────────────────────────────────────
+
+export interface OptionsIncomeProjection {
+  year: number;
+  expectedIncome: number;
+  isProjected: true;
+}
+
+export interface OptionsIncomeEstimationResult {
+  baselineAverage: number;
+  growthRate: number;
+  projections: OptionsIncomeProjection[];
+}
+
+export interface OptionsIncomeEstimationParams {
+  /**
+   * Annual growth rate applied to the baseline.
+   * Default 2% per user spec (Jony, 2026-05-12). Configurable via settings.optionsGrowthRate.
+   */
+  growthRate?: number;
+  /** Last calendar year to include in the projection horizon. Default 2064. */
+  finalYear?: number;
+}
+
+/**
+ * Computes a forward-looking options income estimation series.
+ *
+ * **Baseline**: averages the last 3 calendar years of realized options cash flow
+ * from `options_dashboard_monthly` (same source as `getOptionsYearlyCashFlow()`).
+ * Monthly `cash_flow_total` values are summed per calendar year, then the most
+ * recent N years (up to 3) are averaged.
+ *
+ * **Fallback**: if fewer than 3 years of history exist, averages whatever is
+ * available (1 or 2 years). If no history exists at all, returns empty projections.
+ *
+ * **Negative baseline**: a negative average is projected forward as-is — no
+ * floor at zero — to honestly represent a loss trajectory.
+ *
+ * **Projection formula** for offset Y (1-indexed from current year + 1):
+ * ```
+ *   expectedIncome(year) = baselineAverage × (1 + growthRate)^Y
+ * ```
+ * All intermediate calculations use `Decimal` for monetary precision.
+ *
+ * @param params.growthRate - Annual growth rate (default 0.02). Pass
+ *   `settings.optionsGrowthRate` from the client SettingsContext.
+ * @param params.finalYear - Last year to include in projections (default 2064).
+ *   Pass `settings.optionsFinalYear` from the client SettingsContext.
+ */
+export async function getOptionsIncomeEstimation(
+  params: OptionsIncomeEstimationParams = {},
+): Promise<OptionsIncomeEstimationResult> {
+  // Default 2% per user spec (Jony, 2026-05-12). Configurable via settings.optionsGrowthRate.
+  const growthRate = typeof params.growthRate === 'number' ? params.growthRate : 0.02;
+  const finalYear = typeof params.finalYear === 'number' ? params.finalYear : 2064;
+
+  const { householdId } = await getAuthenticatedHousehold();
+  if (!householdId) return { baselineAverage: 0, growthRate, projections: [] };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('options_dashboard_monthly')
+    .select('period_start, cash_flow_total')
+    .eq('household_id', householdId)
+    .order('period_start', { ascending: true });
+
+  if (error) {
+    console.error('[getOptionsIncomeEstimation] query error:', error.message);
+    return { baselineAverage: 0, growthRate, projections: [] };
+  }
+
+  const rows = (data ?? []) as Array<{ period_start: string; cash_flow_total: string | number | null }>;
+
+  // Aggregate monthly rows → yearly totals using Decimal arithmetic.
+  const yearlyMap = new Map<number, Decimal>();
+  for (const row of rows) {
+    const year = new Date(row.period_start).getFullYear();
+    const monthly = new Decimal(decimalString(row.cash_flow_total as NumericLike));
+    yearlyMap.set(year, (yearlyMap.get(year) ?? new Decimal(0)).plus(monthly));
+  }
+
+  if (yearlyMap.size === 0) {
+    return { baselineAverage: 0, growthRate, projections: [] };
+  }
+
+  // Take the last 3 calendar years (up to all available if fewer than 3).
+  const sortedYears = Array.from(yearlyMap.keys()).sort((a, b) => a - b);
+  const lookbackYears = sortedYears.slice(-3);
+
+  const sum = lookbackYears.reduce(
+    (acc, yr) => acc.plus(yearlyMap.get(yr)!),
+    new Decimal(0),
+  );
+  const baselineDecimal = sum.dividedBy(new Decimal(lookbackYears.length));
+  const baselineAverage = baselineDecimal.toDecimalPlaces(10).toNumber();
+
+  // Project from (currentYear + 1) through finalYear.
+  const currentYear = new Date().getFullYear();
+  const projections: OptionsIncomeProjection[] = [];
+  const growthDecimal = new Decimal(1).plus(new Decimal(growthRate));
+
+  for (let year = currentYear + 1; year <= finalYear; year++) {
+    const offset = year - currentYear; // 1-indexed exponent
+    const expectedIncome = baselineDecimal
+      .times(growthDecimal.pow(offset))
+      .toDecimalPlaces(10)
+      .toNumber();
+    projections.push({ year, expectedIncome, isProjected: true });
+  }
+
+  return { baselineAverage, growthRate, projections };
+}
