@@ -257,3 +257,11 @@ Triaged all 12 dependabot/chore PRs. E2E Smoke + Auth failures on all PRs confir
 ---
 
 2026-05-12: Authored 5 issues (#428–#432) for options-income-extrapolation. Reviewed all 5 PRs. All approved. Merge order: #433 root → {#434–#436} → #437.
+
+## Learnings
+
+### 2026-05-12 — Scribe Wrap Review: PR #427 (Round 8)
+
+**Verdict:** APPROVE. Administrative-only (4 `.squad/` files), no source/test changes. `merge=union` gitattribute auto-resolves append conflicts with Round 9 wrap (#438). All 6 Round 8 decisions (Keaton-4, Hockney-14, Fenster-11, Hockney-15, Fenster-12, Hockney-16) captured accurately. Worker redeploy skill shipped separately in PR #426.
+
+**Pattern:** Scribe wrap PRs are safe to approve when: (1) diff touches only `.squad/`, `.copilot/skills/` paths; (2) `merge=union` covers all append-only files; (3) GitHub reports MERGEABLE; (4) decision entries match PR body claims.
