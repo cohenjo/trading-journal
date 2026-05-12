@@ -143,3 +143,15 @@ Infrastructure ready (migrations applied, worker rebuilt and healthy, new schema
 **PR:** [#370](https://github.com/cohenjo/trading-journal/pull/370) — `chore(infra): backup workflow hardening + dedupe (#344-#349)`
 
 **Outcome:** One open backup-failure issue at any given time; repeated manual re-triggers no longer spam issue tracker.
+
+---
+
+## Learnings
+
+### 2026-05-12 — Options-extrapolation sprint merge orchestration
+
+- **Summary:** Merged options-extrapolation sprint PRs #433–#438 with the coordinator-approved Playwright-infra bypass extension for the known Node 20 WebSocket workflow failure.
+- **Patterns observed:**
+  - When a root PR has its branch deleted, dependent PRs auto-close; restore the missing base branch only long enough to `gh pr reopen`, retarget with `--base main`, then rebase.
+  - Force-pushing after rebase invalidates prior CI runs, so re-check the failure signature before any admin merge.
+- **Follow-up:** The Playwright Node 20 workflow infra issue needs a separate fix; note filed on #419 for Hockney/Kobayashi/Redfoot handoff.
