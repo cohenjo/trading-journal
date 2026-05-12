@@ -1,3 +1,12 @@
+## Archive (compressed)
+
+### 2026-05-01–2026-05-02
+- **2026-05-01 Supabase Branching:** Evaluated Supabase Branch feature (Pro-only, $9.68/month). Recommended keeping 2-project model (prod+dev) for Free tier. Branches clone schema but not data; merging uses automated DAG.
+- **2026-05-01 Phase 3 Plan:** Planned frontend↔Supabase direct compute architecture (TJ-019/TJ-020). Scoped schema, API routes, and auth flow.
+- **2026-05-02 E2E Testing Strategy:** Designed comprehensive E2E strategy with test-user provisioning, CI split (smoke+auth blocking, full flows nightly), tag-based suite selection. Produced 8 GitHub issues (#144–#151).
+
+---
+
 ### 2026-05-06 — Merge Review: IBKR Flex Backfill Resilience Branch
 
 **Requested by:** Jony Vesterman Cohen
@@ -103,46 +112,6 @@
 ## Learnings
 
 ### 2026-05-01 — Phase 3 Execution Plan: Frontend↔Supabase Direct
-
-**Context:** User reaffirmed architecture directive—"frontend to function with the DB and not be dependent on backend; simple CRUD things can go directly to the DB." Production bug exposed this: POST /api/finances → 404 because the Vercel rewrite expects a non-deployed FastAPI backend.
-
-**Key Deliverable:** Created `docs/design-hosting/phase-3-execution-plan.md`—a disposition matrix, priority order, and stop-the-bleed recommendation for migrating CRUD endpoints from FastAPI to Server Actions.
-
-**Disposition Framework:**
-- **MOVE → Server Action:** Simple CRUD (finances, plans CRUD, holdings, dividends, trades, insurance, pension, bonds, summary dashboards). RLS-protected single-table or cooked-table reads/writes. 15+ routers.
-- **KEEP → backend worker:** Heavy compute (backtest, analyze, tax_condor, plans/simulate). Multi-API orchestration, portfolio simulations, financial projections. 4 routers + subsets.
-- **DEPRECATE:** auth router (replaced by Supabase Auth); metrics router (replaced by Vercel Analytics + Supabase logs).
-
-**Priority Order:** Broken features first (finances), then high-traffic CRUD (plans/holdings/dividends/trades), then read-only dashboards, then lower-traffic features.
-
-**Stop-the-Bleed Pattern:** For immediate prod unblock, implement a single Server Action for the broken endpoint (POST /api/finances) rather than deploying the entire FastAPI backend. This proves the migration pattern and takes ~30 min vs. hosting setup. Proper fix > band-aid.
-
-**Reaffirmation:** User's "frontend to DB" directive matches design doc's "Server Actions calling Supabase-direct" recommendation. Both converge on the same architecture—only phrasing differs. Phase 3 is go.
-
-**Risks Catalogued:** RLS gaps, household_id injection loss, Pydantic validation loss, Supabase rate limits, audit trail loss. Each has mitigation (Rabin RLS audit, Fenster injection helper, Zod schema ports, connection pooling, audit log preservation).
-
-**Decision file:** `.squad/decisions/inbox/keaton-phase-3-execution-plan.md`
-
-### 2026-05-02 — E2E Testing Strategy Design
-
-**Requested by:** Jony Vesterman Cohen
-**Work:** Designed end-to-end automated testing strategy for the trading-journal app. Evaluated 3 test environment options; recommended hybrid (dev Supabase for CI + local for dev iteration). Production gets read-only smoke only.
-
-**Key Decisions:**
-- **Test environment:** Hybrid dev Supabase + local. No mutations against prod. Dev project `zvbwgxdgxwgduhhzdwjj` is the CI target.
-- **Test directory:** Stay in existing `apps/frontend/e2e/` — don't create a separate package. Playwright config, fixtures, npm scripts already wired.
-- **Test-user strategy:** Throwaway `e2e_*` users per test run, with household provisioning wait. Cleanup script as safety net.
-- **CI split:** Smoke + auth on PR (blocking), full flows nightly, prod smoke post-deploy.
-- **Provisioning helper:** TypeScript (not Python) — same runtime as test suite, avoids cross-process coordination.
-- **Tag-based suite selection:** `@smoke`, `@auth`, `@flow`, `@rls` annotations + `--grep` in CI.
-
-**Deliverables:**
-- Strategy document: `docs/testing/e2e-strategy.md` (PR #143)
-- 8 GitHub issues: #144–#151, assigned to Redfoot (tests), Hockney (provisioning/seed), Kujan (CI/deploy)
-- Dependency graph documented in strategy doc §11
-
-**Decision file:** `.squad/decisions/inbox/keaton-e2e-testing-strategy.md`
-
 ### 2026-05-06 — Flex Backfill Failure: Strategy & Recommendations
 
 **Requested by:** Jony Vesterman Cohen
