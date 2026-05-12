@@ -1,3 +1,13 @@
+## 2026-05-12 10:15 — PR #421 closes #416: Legacy `trading_journal_worker` container removal
+
+**Scope:** Remove dead `trading_journal_worker` container (28h uptime, running stale pre-Yahoo-rebuild code, missing Supabase env vars, SSL EOF errors on `compute_jobs`).
+
+**Action:** Deleted root `docker-compose.yml` (contained only the legacy service); restarted `trading_journal_backend_supabase` (canonical via `docker-compose.backend.yml`). Worker smoke test verified healthy: 297/321 positions refreshed.
+
+**Key insight:** The legacy container had every cron job (Yahoo refresh, price cache, NDX sync) identical to the backend, just running old code. No exclusive functionality. Pure dead code that silently polluted running state.
+
+---
+
 ## 2026-05-12 — Leumi TASE currency tagging + market_value normalisation (issue #407 Round 2)
 
 **Scope:** Fix the Leumi XLS parser's `market_value=null` for TASE rows, and repair

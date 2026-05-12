@@ -1589,3 +1589,9 @@ Issues #408 + #409 closed.
 **Decision/principle reinforced:**
 > **When DB is correct but UI is wrong, dig into the display layer.** `mark_price` unit (agorot vs ILS), Intl currency code label, FX conversion in aggregators, and `market_value_local` fallback are all separate axes — migrations that fix DB storage do not automatically fix display bugs.
 > **Composite display bugs stack multiplicatively.** `mark_price` ÷100 error + ILA/ILS label mismatch + missing FX conversion produced a combined ~100–300× inflation of IRA displayed values.
+
+---
+
+### Round 6 — Legacy Worker Container Cleanup (2026-05-12 10:15)
+
+**PR #421** (SHA `a561c81`) — Removed `trading_journal_worker` container, dead code running pre-Yahoo-rebuild stack lacking Supabase env vars, throwing SSL errors on `compute_jobs`. Deleted root `docker-compose.yml`; canonical now `docker-compose.backend.yml`. Worker smoke test: 297/321 positions refreshed. **Principle:** Kill stale containers — they silently run old code and pollute observability.
