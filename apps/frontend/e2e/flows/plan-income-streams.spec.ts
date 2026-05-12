@@ -48,7 +48,7 @@ testWithUser.describe('A6: 3 income streams appear on /plan @plan-persistence @i
   //   (c) referenced by type. Until then, the test scenario cannot be
   //   implementation-agnostic.
   // Reference: issue #441, .squad/decisions/inbox/mcmanus-plan-cashflow-tests.md
-  testWithUser.fixme(
+  testWithUser(
     'A6: bonds/dividends/options appear as income lines on /plan and survive reload @plan-persistence @income-streams',
     async ({ testUser: { page, householdId } }) => {
       householdIdForCleanup = householdId;

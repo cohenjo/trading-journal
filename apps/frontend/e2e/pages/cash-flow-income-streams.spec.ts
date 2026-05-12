@@ -60,7 +60,7 @@ testWithUser.describe('B6: 3 income streams flow through Sankey @cash-flow @inco
   //   - If they're referenced by type (path c), different seeding is needed.
   // Until Keaton's Decision 1 is finalised, the assertion strategy may change.
   // Reference: issue #441, .squad/decisions/inbox/mcmanus-plan-cashflow-tests.md
-  testWithUser.fixme(
+  testWithUser(
     'B6: bonds, dividends, and options all appear as source nodes in the Sankey @cash-flow @income-streams',
     async ({ testUser: { page, householdId } }) => {
       householdIdForCleanup = householdId;
