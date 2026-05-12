@@ -1,5 +1,6 @@
 'use client';
 import React, { useMemo } from 'react';
+import Link from 'next/link';
 import { ResponsiveSankey } from '@nivo/sankey';
 
 interface Props {
@@ -87,7 +88,7 @@ export const CashFlowSankey: React.FC<Props> = ({ data, currency }) => {
 
         safeWithdrawalDetails.forEach((item: any) => {
             const rawName = item.name || 'Withdrawal';
-            // const rawType = item.type || 'Inflow'; 
+            // const rawType = item.type || 'Inflow';
             // Map all withdrawals to "Investment Income" type so they get grouped on the right side of the left block
             const rawType = 'Investment Income';
 
@@ -197,7 +198,14 @@ export const CashFlowSankey: React.FC<Props> = ({ data, currency }) => {
     })();
 
     if (!data) return <div className="text-slate-500 text-center p-10">No data available for this year</div>;
-    if (nodes.length === 0) return <div className="text-slate-500 text-center p-10">Use the Plan Editor to add Income and Expenses</div>;
+    if (nodes.length === 0) return (
+        <div className="text-slate-500 text-center p-10">
+            <p className="mb-3">No income or expenses found for this year.</p>
+            <Link href="/plan" className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2">
+                Open the Plan Editor to add Income and Expenses →
+            </Link>
+        </div>
+    );
 
     return (
         <div className="h-[600px] w-full bg-slate-900/50 rounded-xl border border-slate-800 p-4 transition-all duration-500">
