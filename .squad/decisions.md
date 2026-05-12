@@ -1785,3 +1785,68 @@ Inventory of all 9 currency-displaying surfaces across `/dividends`, `/trading/a
 **Date:** 2026-05-12
 
 **Automation protocol:** Round 8 confirmed (again) that Docker container never automatically rebuilt after worker-code PR merged — same silent corruption pattern Rounds 5–7. **Decision:** (1) `scripts/rebuild-worker.sh` is canonical rebuild tool (idempotent, POSIX Phases A–F, flags: `--force/--prune/--no-verify/--dry-run/--help`); (2) Keaton (Lead) enforces mandatory redeploy gate — no PR touching `apps/backend/app/worker/**`, `Dockerfile`, `pyproject.toml`/`uv.lock` considered merged until script runs (or documented manual fallback) + Phase E verification passes; (3) Copilot coordinator surfaces `.copilot/skills/worker-redeploy/SKILL.md` whenever session involves those paths; (4) verification minimum: image SHA changed + healthcheck healthy + `refresh_stock_positions()` returns without exception. Appended gate to Keaton's charter; added "Rebuilding the worker" block to `apps/backend/README.md`. **PR #426 merged** ✅; skill now active in coordinator routing.
+
+---
+
+## Round 9 — Plan Persistence + Cashflow Sprint (2026-05-12 / #440 + #441)
+
+### Fenster-13 — Frontend recon: /plan optimistic UI + /cash-flow empty state
+
+**Author:** Fenster (Frontend Dev)
+**Date:** 2026-05-13 | **Issue:** #440, #441
+
+Root cause (frontend): `handleUpdatePlanData` in `/plan` performs optimistic update with silent error swallow. Server action returns `{ok: false}` → UI never checks result → changes lost on reload. `/cash-flow` page has no empty-state CTA when plan is null; Sankey silently renders blank. Secondary: `getAuthenticatedHouseholdId()` returns null if auth misconfigured, causing every write to fail. **P0 fix:** surface `result.ok` errors via sonner toast + revert optimistic update. **P1 fix:** wire dividends + bonds as virtual read-only income items (follow options pattern: `virtualIncomeStreams` prop, `isVirtual: true`). Empty-state rendering added; 3-income integration documented in decision inbox.
+
+---
+
+### Hockney-17 — Backend recon: plans table NOT NULL without defaults
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-05-13 | **Issue:** #440
+
+**Root cause (backend):** `plans.created_at` and `plans.updated_at` declared `NOT NULL` in baseline migration without defaults. Follow-up migration attempted `ADD COLUMN IF NOT EXISTS ... DEFAULT now()` — Postgres silently no-op'd (column pre-exists, DEFAULT ignored). Every INSERT failed with NOT NULL violation. Migration footgun documented separately. **Verification:** `pg_attrdef` query confirmed both columns have `column_default IS NULL`. Server action swallowed error silently → `{ok: false}` → table stayed at 0 rows. **Fix:** `ALTER COLUMN SET DEFAULT now()` as separate statement (idempotent, always applies). Trigger extended to fire on INSERT as well.
+
+---
+
+### Hockney-18 — Migration idempotency footgun: ADD COLUMN IF NOT EXISTS with DEFAULT
+
+**Author:** Hockney (Backend Dev)
+**Date:** 2026-05-13 | **PR:** #442
+
+```sql
+-- UNSAFE: silently skips DEFAULT if column pre-exists
+ALTER TABLE t ADD COLUMN IF NOT EXISTS c type NOT NULL DEFAULT <expr>;
+
+-- SAFE: always applies default regardless of pre-existence
+ALTER TABLE t ALTER COLUMN c SET DEFAULT <expr>;
+```
+
+Postgres no-ops the entire `ADD COLUMN` statement (including DEFAULT) when column already exists. No error, no warning. Correct fix: separate `ALTER COLUMN SET DEFAULT` statement. Pattern now documented in skill `.squad/skills/migration-idempotency-gotchas/SKILL.md`.
+
+---
+
+### McManus-13 — Anticipatory test authoring: 22 scenarios for #440 + #441
+
+**Author:** McManus (Data/Finance Dev)
+**Date:** 2026-05-13 | **PR:** #444
+
+Two flows: **Flow A** (/plan persistence) — 10 scenarios (add/edit/delete income+expense items, RLS isolation, multi-user verification, null-safety). **Flow B** (/cash-flow rendering) — 12 scenarios (Sankey rendering, currency guards, empty states, edge cases). 18 Playwright E2E tests + 4 vitest integration tests. A6/B6 test.fixme'd pending Fenster P1. Discipline: all tests written red before implementation begins; seeds use `household_id` scope for RLS. Test fixtures document anticipatory approach in `.squad/skills/anticipatory-test-authoring/SKILL.md`.
+
+---
+
+### Fenster-14 — Virtual income stream wiring: bonds + dividends + options
+
+**Author:** Fenster (Frontend Dev)
+**Date:** 2026-05-13 | **PR:** #445
+
+Data shapes verified: `getDividendSummary()` returns constant annual total (USD, FX-converted); `getLadderIncome()` returns per-year income_series (native bond currency, no FX conversion for multi-currency bonds — documented as known limitation); `getOptionsIncomeEstimation()` already wired. Three maps in simulation.ts keyed by year. PlanEditor displays virtual rows with "Auto" badge (emerald), `isVirtual: true` (read-only). Year-bucket key: plain integer. All 3 streams appear in `incomeDetails` of Sankey. Edge cases: zero values shown (always display structure), missing streams show as undefined/omitted from output. FX limitation on bonds noted with TODO for Round 10.
+
+---
+
+**Skills produced:**
+- `.squad/skills/migration-idempotency-gotchas/SKILL.md`
+- `.squad/skills/anticipatory-test-authoring/SKILL.md`
+
+**Open follow-ups:**
+- FX on bond income (multi-currency aggregate sums native amounts without conversion)
+- Dividend constant vs growth (current implementation uses flat forward total; should it apply dividendGrowthRate?)

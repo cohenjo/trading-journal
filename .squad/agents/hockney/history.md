@@ -113,3 +113,7 @@ end $$;
 **Key learning:** All migrations referencing `supabase_realtime` MUST use the DO block pattern. This pattern is already used in other migrations (`20260503161310`, `20260503162842`, etc.); made it universal.
 
 **Worker status:** Round 5 yield + Round 5 LSE/100 fixes now shipping correctly in production DB. UI surfaces (frontend display-layer fixes) are catching up (Round 7 dividend display).
+
+## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
+
+Backend recon (sonnet-4.6): root-caused NOT NULL without defaults on plans.created_at / updated_at; confirmed migration 20260430130000 silent-skip of DEFAULT due to ADD COLUMN IF NOT EXISTS footgun. PR #442: `ALTER COLUMN SET DEFAULT now()` ×2 + trigger extended to BEFORE INSERT OR UPDATE. Decision: migration idempotency footgun pattern documented in `.squad/skills/migration-idempotency-gotchas/SKILL.md`. Verified Vercel green post-merge, no worker redeploy needed.

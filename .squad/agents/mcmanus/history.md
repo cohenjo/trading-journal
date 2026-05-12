@@ -435,3 +435,7 @@ Naming a Pydantic field same as imported stdlib type (e.g., `date: date | None`)
 ---
 
 2026-05-12: Built options income projection engine (PR #433). 3-yr arithmetic mean × 1.02^N. Configurable growth rate via settings. Floor at zero for negative baselines. Fallback to whatever years are available if <3.
+
+## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
+
+Anticipatory test authoring (sonnet-4.6): 22 test scenarios across Flow A (/plan persistence: 10 E2E) + Flow B (/cash-flow rendering: 12 E2E + 4 vitest). PR #444 (draft): A1–A5, A7–A10 in plan-persistence.spec.ts + plan-rls.spec.ts; B1–B5, B7–B12 in cash-flow.spec.ts. A6/B6 test.fixme'd pending PR-C (Fenster P1). Fixtures: plan-fixtures.ts (seedPlan, cleanupPlanData). Unit tests (4 RLS proxy + 3 null-safety) in plan-rls-integration.test.ts; currency guards (8 new test.cases) in currency.test.ts. Total: 57 unit tests pass. Skill `.squad/skills/anticipatory-test-authoring/SKILL.md` updated with Round 3 fixme discipline. PR #444 rebased ×1 post-Hockney; A6/B6 un-fixme'd after all 3 implementation PRs merged.

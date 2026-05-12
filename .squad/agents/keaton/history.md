@@ -240,3 +240,7 @@ Triaged all 12 dependabot/chore PRs. E2E Smoke + Auth failures on all PRs confir
 **Verdict:** APPROVE. Surgical Round 8 Phase 2 frontend fix — extends ÷100 display guard to GBP, adds GBP rate, QQQI TTM guard. 7 frontend-only files, 370 additions (191 tests), 61 deletions. Fully compliant with Round 8 currency contract (mark_price in native unit, ÷100 at display, market_value from DB). No Round 9 drift (zero file overlap with #433–#438). CI failure is known Node.js 20 WebSocket infra issue — safe to bypass. Merge standalone before #425.
 
 **Pattern:** Post-merge drift check for stacked/delayed PRs — compare touched files against all PRs merged to main since the branch point. Zero overlap = no rebase needed even when multiple sprints have elapsed.
+
+## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
+
+Synthesis call (opus-4.6): triaged root causes (frontend optimistic UI swallow, backend NOT NULL without defaults, migration idempotency footgun). Routed 4 parallel agents: Fenster (frontend recon), Hockney (backend recon + migration audit), McManus (22 test scenarios), self (architecture synthesis). Blocked on migration fix before testing; PR merge order: Hockney #442 → Fenster #443 → Fenster #445 → McManus #444. Final HEAD 215fb8b verified green on Vercel. Worker redeploy not needed (no code changes to worker, Dockerfile, pyproject.toml). 6 decisions synthesized to Round 9; inbox files merged to decisions.md.

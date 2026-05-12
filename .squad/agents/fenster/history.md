@@ -179,3 +179,11 @@ DB correct (LUMI `market_value` = 78,639 ILS); 3 stacked display-layer bugs fixe
 ---
 
 2026-05-12: Wired options estimation into /options/estimations (#436), /summary (#435), and /plan (#434). Mirrors dividends estimation patterns. Actuals-win merge in /summary per Keaton's arch decision §4.
+
+## 2026-05-13 — Plan persistence + cashflow sprint, PR #443 (Round 9, Issue #440)
+
+Frontend recon (sonnet-4.6) + P0 error surfacing: identified optimistic UI with silent error swallow in handleUpdatePlanData. PR #443: captures previousPlan, rolls back on {ok: false}, fires sonner toast + console.error. Added empty-state CTA in /cash-flow page when plan is null. Installed sonner, added <Toaster> to root layout. Verified Vercel green post-merge.
+
+## 2026-05-13 — Plan persistence + cashflow sprint, PR #445 (Round 9, Issue #441)
+
+P1 income-stream wiring (sonnet-4.6): dividends + bonds + options as virtual read-only rows. PR #445: extended Promise.all to fetch getDividendSummary() + getLadderIncome(); added dividendTotal + bondProjection inputs to simulation.ts (follow optionsMap pattern); PlanEditor renders virtualIncomeStreams with "Auto" badge (emerald), isVirtual: true. Edge cases documented (zero values shown, missing streams undefined). FX limitation on multi-currency bonds noted as Round 10 follow-up. Verified Vercel green post-merge, PR #445 rebased ×1 post-Hockney.
