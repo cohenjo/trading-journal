@@ -158,6 +158,16 @@ Infrastructure ready (migrations applied, worker rebuilt and healthy, new schema
 
 ---
 
+## 2026-05-12 — Plan-persistence sprint merges (#442, #443, #445, #444)
+
+- **Merged in order:** #442 → #443 → #445 → #444 using `--squash --delete-branch --admin` under Keaton's pre-authorized Playwright CI infra bypass.
+- **Squash SHAs:** #442: `bdf568f`, #443: `71917fe`, #445: `282660d`, #444: `b4c1143`
+- **Rebase actions:** #445 (`squad/441-income-streams`) rebased onto main after #443 landed (both touched `plan/page.tsx` in different regions — clean, zero conflicts). #444 (`squad/440-441-tests`) rebased onto main after #445 merged; A6 and B6 `test.fixme()` calls un-fixme'd via commit `chore(tests): un-fixme A6 and B6 — PR-C (#445) shipped the wiring` before push. PR #444 marked ready with `gh pr ready 444` before final merge.
+- **Worker rebuild:** Not needed — no `apps/backend/app/worker/`, `Dockerfile`, `pyproject.toml`, or `uv.lock` files touched across all 4 PRs.
+- **Vercel production:** SHA `b4c1143c` deployed successfully (state: success, 2026-05-12T22:00:25Z).
+
+---
+
 ## 2026-05-12 — Round 1 review merges (#424, #425, #427)
 
 - **Merged in order:** #424 → #425 → #427 using `--squash --delete-branch --admin` under Keaton's approved Playwright CI infra bypass.
