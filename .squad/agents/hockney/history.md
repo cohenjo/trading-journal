@@ -1,3 +1,20 @@
+## 2026-05-12 — Round 8 Phase 2.5: Worker Redeploy Skill + Rebuild Script
+
+**Task:** Codify the Round 8 root cause as an enforced protocol to prevent recurrence.
+
+**Problem:** The Docker worker container was never rebuilt after PR #420 merged. A stale image (`33fd12cab77e`, built 2026-05-11 pre-PR-#420) fired the daily 06:59 UTC refresh and silently overwrote migration `20260512090000`'s corrections. This single miss caused Rounds 5–8 (7 rounds, 4 reactive PRs).
+
+**Deliverables:**
+1. `scripts/rebuild-worker.sh` — POSIX shell, phases A–F (pre-flight → stop/rm → build --no-cache → deploy → verify → summary). Flags: `--force`, `--prune`, `--no-verify`, `--dry-run`, `--help`.
+2. `.copilot/skills/worker-redeploy/SKILL.md` — coordinator playbook; auto-triggers on `apps/backend/app/worker/**` PRs; includes manual fallback, verification checklist, history table.
+3. `.squad/skills/worker-redeploy/SKILL.md` — pointer to canonical version.
+4. `.squad/agents/keaton/charter.md` — Worker redeploy gate section added (mandatory before merge).
+5. `apps/backend/README.md` — "Rebuilding the worker" section inserted under Local development.
+6. `.squad/decisions/inbox/hockney-round8-redeploy-skill-2026-05-12.md` — decision record.
+
+**PR:** squad/round8-meta-worker-redeploy-skill → main
+**Confirmed working:** smoke test `--help` and `--dry-run` pass; canonical compose file `docker-compose.backend.yml`, service `backend`, container `trading_journal_backend_supabase`.
+
 ## 2026-05-12 — Dividend accuracy + Leumi IRA + chore-PR triage sprint
 
 **Sprint by:** Jony Vesterman Cohen

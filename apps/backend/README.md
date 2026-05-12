@@ -116,11 +116,17 @@ docker compose -f docker-compose.backend.yml ps
 docker compose -f docker-compose.backend.yml logs -f backend
 ```
 
-Stop it with:
+### Rebuilding the worker
+
+After ANY change to `apps/backend/app/worker/`, `Dockerfile`, or `pyproject.toml`, you MUST rebuild the local Docker worker container:
 
 ```bash
-docker compose -f docker-compose.backend.yml down
+./scripts/rebuild-worker.sh
 ```
+
+A stale container will overwrite DB values with old code's logic and produce silent data corruption (see Round 8, May 2026). See `.copilot/skills/worker-redeploy/SKILL.md` for the full procedure, manual fallback, and verification checklist.
+
+
 
 The compose worker publishes no ports. Do not expose this container through a public tunnel, router port, or Vercel rewrite.
 
