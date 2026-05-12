@@ -7,6 +7,14 @@ Shipped P0 frontend fixes: error surfacing in `/plan` handleUpdatePlanData + emp
 - `CashFlowSankey`: updated zero-nodes message to include a navigable link to `/plan`.
 
 P1 income-stream wiring (dividends + bonds) pending Keaton architectural synthesis.
+## 2026-05-13 — PR #441 squad/441-income-streams
+
+Shipped P1 income-stream wiring: dividends + bonds + options as virtual, read-only rows in `/plan` and `/cash-flow`.
+
+- `simulation.ts`: added `dividendTotal` + `bondProjection` inputs (follow `optionsMap` pattern); dividend income is a constant annual total; bonds are per-year from `buildIncome()` income_series.
+- `plan/page.tsx` + `cash-flow/page.tsx`: extended `Promise.all` to fetch `getDividendSummary()` + `getLadderIncome()` in parallel alongside existing calls.
+- `PlanEditor.tsx`: new `virtualIncomeStreams` prop + `virtualSummaryIncomeItems` useMemo; 3 locked rows at top of Income tab with "Auto" badge (emerald) and tooltip.
+- Decision note: `.squad/decisions/inbox/fenster-virtual-income-implementation.md` — documents exact data shapes, year-bucket key, and edge cases.
 
 ---
 
