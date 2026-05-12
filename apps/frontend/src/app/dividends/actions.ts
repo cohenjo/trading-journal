@@ -1104,7 +1104,15 @@ export async function getDividendPositions(
     if (!hasTTM && !hasAccrual && !hasYield) continue;
 
     const qty = pos.quantity;
-    const price = pos.mark_price;
+
+    // ILA (Israeli agorot) is the broker currency code for TASE positions.
+    // mark_price is stored in agorot (1/100 of ILS). Normalise to ILS so that
+    // all dividend calculations use canonical per-share prices, avoiding the
+    // 100× inflation seen in PR #418 (LUMI) and now replicated here.
+    const posCurrency = pos.currency === 'ILA' ? 'ILS' : pos.currency;
+    const rawPrice = pos.mark_price;
+    const canonicalPrice =
+      pos.currency === 'ILA' && rawPrice !== null ? rawPrice / 100 : rawPrice;
 
     // Frequency detection from historical ex-dates
     const exDates = allExDatesByTicker.get(ticker) ?? [];
@@ -1116,20 +1124,21 @@ export async function getDividendPositions(
       hasTTM && qty > 0 ? roundCurrency(ttmTotal! / qty) : null;
     const ttmDividendTotal = hasTTM ? roundCurrency(ttmTotal!) : null;
     const ttmYieldPct =
-      ttmDivPerShare !== null && price !== null && price > 0
-        ? roundDecimal((ttmDivPerShare / price) * 100, 4)
+      ttmDivPerShare !== null && canonicalPrice !== null && canonicalPrice > 0
+        ? roundDecimal((ttmDivPerShare / canonicalPrice) * 100, 4)
         : null;
 
     // Forward yield: prefer accruals.gross_rate × frequency; else use TTM (already annualised);
     // fall back to stock_positions.dividend_yield (Yahoo/CSV) when no payment history at all.
+    // Always use canonicalPrice (ILS for ILA, not agorot) to avoid 100× inflation.
     let forwardDivPerShare: number | null = null;
     if (hasAccrual) {
       forwardDivPerShare = roundCurrency(accrual!.gross_rate * ppy);
     } else if (hasTTM && ttmDivPerShare !== null) {
       forwardDivPerShare = ttmDivPerShare;
-    } else if (hasYield && price !== null && price > 0) {
-      // Estimate: annualised dividend per share = price × yield fraction
-      forwardDivPerShare = roundCurrency(price * yieldFraction);
+    } else if (hasYield && canonicalPrice !== null && canonicalPrice > 0) {
+      // Estimate: annualised dividend per share = canonical_price × yield fraction
+      forwardDivPerShare = roundCurrency(canonicalPrice * yieldFraction);
     }
 
     const forwardDividendAnnual =
@@ -1137,22 +1146,29 @@ export async function getDividendPositions(
         ? roundCurrency(forwardDivPerShare * qty)
         : null;
     const forwardYieldPct =
-      forwardDivPerShare !== null && price !== null && price > 0
-        ? roundDecimal((forwardDivPerShare / price) * 100, 4)
+      forwardDivPerShare !== null && canonicalPrice !== null && canonicalPrice > 0
+        ? roundDecimal((forwardDivPerShare / canonicalPrice) * 100, 4)
         : null;
 
+    // Prefer stored canonical market_value (ILS for TASE, USD for US) over
+    // qty × raw mark_price (which is in agorot for ILA and would be 100× inflated).
     const marketValue =
-      qty > 0 && price !== null
-        ? roundCurrency(qty * price)
-        : (pos.market_value ?? null);
+      pos.market_value != null
+        ? pos.market_value
+        : pos.market_value_local != null
+          ? pos.market_value_local
+          : canonicalPrice !== null && qty > 0
+            ? roundCurrency(qty * canonicalPrice)
+            : null;
 
     result.push({
       ticker,
       name: pos.description,
       quantity: qty,
       avg_cost: pos.cost_basis,
-      current_price: price,
+      current_price: canonicalPrice,
       market_value: marketValue,
+      currency: posCurrency,
       ttm_div_per_share: ttmDivPerShare,
       ttm_dividend_total: ttmDividendTotal,
       ttm_yield_pct: ttmYieldPct,
@@ -1183,7 +1199,12 @@ export async function getDividendSummary(): Promise<DividendSummaryResult> {
   ]);
 
   const sum = (positions: DividendPosition[]) =>
-    positions.reduce((total, p) => total + (p.forward_dividend_annual ?? 0), 0);
+    positions.reduce((total, p) => {
+      const amt = p.forward_dividend_annual ?? 0;
+      // Convert each position's amount to USD for a consistent aggregate total.
+      // ILA positions are already stored in canonical ILS; convertCurrency handles ILS→USD.
+      return total + convertCurrency(amt, p.currency ?? 'USD', 'USD');
+    }, 0);
 
   const ibkrTotal = roundCurrency(sum(ibkr));
   const schwabTotal = roundCurrency(sum(schwab));

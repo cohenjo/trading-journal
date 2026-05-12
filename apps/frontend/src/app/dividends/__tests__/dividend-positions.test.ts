@@ -53,10 +53,30 @@ const IBKR_POS_JEPI = {
   cost_basis: 55.0,
   mark_price: 57.5,
   market_value: 5750,
+  market_value_local: null,
   unrealized_pnl: 250,
   currency: 'USD',
   as_of_date: '2026-05-01',
   source: 'flex' as const,
+};
+
+/** CLIS (Clal Insurance, 224014) — TASE position in LeumiIRA with ILA currency.
+ *  mark_price is in agorot (1/100 of ILS); market_value is canonical ILS. */
+const IRA_POS_CLIS = {
+  id: 'pos-clis',
+  account_id: 72,
+  ticker: '224014',
+  description: 'Clal Insurance',
+  sub_category: 'Stock',
+  quantity: 101,
+  cost_basis: null,
+  mark_price: 29290,         // agorot
+  market_value: 29582.90,    // canonical ILS
+  market_value_local: 29582.90,
+  unrealized_pnl: null,
+  currency: 'ILA',           // broker code for Israeli agorot
+  as_of_date: '2026-05-12',
+  source: 'manual' as const,
 };
 
 /** JEPI paid $10.65/month × 12 = ~$127.80/year (but we use exact TTM sum here). */
@@ -646,6 +666,51 @@ describe('getDividendPositions', () => {
     // forward yield from accruals: gross_rate × paymentsPerYear(null/annual) = 0.2705 × 1 = 0.2705
     // roundCurrency rounds to 2dp: 0.27
     expect(result[0].forward_div_per_share).toBe(0.27);
+  });
+
+  it('[regression] TASE/ILA position uses canonical ILS price (mark_price ÷ 100), not agorot', async () => {
+    // CLIS (224014): mark_price=29290 agorot, market_value=29582.90 ILS, qty=101, yield=0.0169.
+    // Bug (pre-fix): forwardDividendAnnual = 29290 × 0.0169 × 101 = 49,995 (100× too big, labelled USD).
+    // Fix: canonicalPrice = 29290 / 100 = 292.90 ILS → 292.90 × 0.0169 = 4.95/sh → 4.95 × 101 = 499.95 ILS.
+    mockAuth();
+
+    setupMocks({
+      household_members: () =>
+        Promise.resolve({ data: [{ household_id: MOCK_HOUSEHOLD_ID }], error: null }),
+      trading_account_config: () =>
+        Promise.resolve({ data: [{ id: 72, account_id: null }], error: null }),
+      dividend_payments: () => Promise.resolve({ data: [], error: null }),
+      dividend_accruals: () => Promise.resolve({ data: [], error: null }),
+      stock_positions: () =>
+        Promise.resolve({
+          data: [{ ticker: '224014', dividend_yield: '0.0169' }],
+          error: null,
+        }),
+    });
+
+    (getStockPositions as ReturnType<typeof vi.fn>).mockResolvedValue([IRA_POS_CLIS]);
+
+    const result = await getDividendPositions('ira');
+
+    expect(result).toHaveLength(1);
+    const row = result[0];
+    expect(row.ticker).toBe('224014');
+    expect(row.source).toBe('csv');
+
+    // canonical price must be ILS (agorot ÷ 100)
+    expect(row.current_price).toBeCloseTo(292.90, 2);
+
+    // market_value from stored pos.market_value (canonical ILS), not qty × mark_price
+    expect(row.market_value).toBe(29582.90);
+
+    // forward_div_per_share = 292.90 × 0.0169 ≈ 4.95 ILS/share
+    expect(row.forward_div_per_share).toBe(4.95);
+
+    // forward_dividend_annual = 4.95 × 101 = 499.95 ILS  (NOT $49,995)
+    expect(row.forward_dividend_annual).toBe(499.95);
+
+    // currency normalised from ILA → ILS
+    expect(row.currency).toBe('ILS');
   });
 });
 

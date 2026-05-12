@@ -22,8 +22,13 @@ export interface DividendPosition {
   name: string | null;
   quantity: number;
   avg_cost: number | null;
-  current_price: number | null; // mark_price from stock_positions
-  market_value: number | null; // quantity × current_price
+  /** Canonical price in the position's display currency (ILA agorot divided by 100 → ILS). */
+  current_price: number | null;
+  /** Canonical market value in the position's display currency (ILS for TASE, USD for US, etc.). */
+  market_value: number | null;
+  /** ISO 4217 display currency code for all monetary amounts on this position.
+   *  ILA broker code is normalised to ILS (₪). */
+  currency: string;
 
   // TTM (trailing 12 months from CURRENT_DATETIME = 2026-05-11)
   ttm_div_per_share: number | null;
