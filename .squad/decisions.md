@@ -1464,6 +1464,39 @@ Idempotent. Post-run: 0 rows >1, 281 rows in [0,1], max = 0.530452.
 
 **Result:** Account 72 TASE total: **1,181,114 ILS** (target 1.23M–1.34M; ~5% gap closes on next Yahoo refresh). Issue #407 closed.
 
+##### Round 5 — Non-US Yield + LSE Pence Normalisation (2026-05-12 09:50)
+
+**Trigger:** User reported "dividend yields wrong in Leumi IRA + LSE market values off". Coordinator scoped DB query revealed: ILA yields 100× too small (LUMI 0.0004 vs ~0.04), LSE yields same pattern, LSE market_value stored in pence labelled GBP.
+
+**Root cause:** Yahoo's `dividendYield` / `trailingAnnualDividendYield` fields have regional scaling quirks: GBp/ILA tickers return yield = `dividendRate_major / price_subunit` (100× too small). US format uses major currency only. Worker's `> 1: /100` guard only caught US percentage format.
+
+**PR #420 — Non-US yield canonical ratio + LSE pence contract (Hockney)**
+
+**SHA:** `d853426` → `main`
+
+**Fix:** Worker now computes yield deterministically via `dividendRate × 100 / previousClose` (unit-free ratio) for GBp/ILA tickers instead of trusting Yahoo's pre-computed yield fields. This handles regional scaling quirks automatically: rate and price both in native units (GBP/ILS + pence/agorot) → result is dimensionless fraction regardless of currency.
+
+**LSE pence normalisation contract (closes follow-up #415):**
+- `mark_price` stored in GBp (native pence) — matches broker import files
+- `market_value` stored in GBP (major currency) = `qty × mark_price / 100`
+- Detection: `yahoo_ticker LIKE '%.L'` AND `currency='GBP'`
+- Migration `20260512090000` divides 8 LSE `market_value` rows by 100; nulls 15 GBP+ILA yields < 0.001 and repopulates with deterministic ratio
+
+**Verification (account 72 post-fix):**
+- **ILA:** 18 positions, ₪1,181,114 total, ₪14,281 annual divs
+- **GBP:** 8 positions, £52,878 total, £2,020 annual divs
+- **USD:** 4 positions, $67,607 total, $5,594 annual divs
+- **Grand total:** ≈$465k USD ✓ (user expected ~$460k USD)
+- **Sample yields:** BARC 2.07%, LGEN 8.75%, MNG 6.94%, RIO 3.89%, LUMI 4.42%, POLI 3.73%, MTAV 1.77% — all plausible
+
+**Decision/principle:**
+> **Prefer deterministic rate/price ratio over upstream yield fields.** Yahoo's yield fields scale with regional currency conventions. When both `dividendRate` (major currency) and `previousClose` (native unit) are available in the same fetch, `rate × 100 / price` is unit-free and region-agnostic. Never trust a single yield field across multiple currency/unit regimes.
+> **Document currency/unit contracts at write-time.** LSE `mark_price` in pence, `market_value` in pounds. TASE `mark_price` in agorot, `market_value` in shekels. These contracts must be enforced at the worker output layer — the DB schema labels (`currency='GBP'` or `currency='ILA'`) alone are insufficient.
+
+**Constraint:** CHECK constraint `chk_dividend_yield_decimal` (yield ≤ 1) held throughout. Migration nulled outlier 1150283 (49% yield from bad Yahoo data).
+
+**Tests:** 45 tests pass (+8 new covering GBp/ILA yield + market_value cases). Issue #415 closed.
+
 ---
 
 ### Theme 4 — Income Summary + Estimations Alignment (Fenster)
