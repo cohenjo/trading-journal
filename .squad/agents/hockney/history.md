@@ -114,6 +114,25 @@ end $$;
 
 **Worker status:** Round 5 yield + Round 5 LSE/100 fixes now shipping correctly in production DB. UI surfaces (frontend display-layer fixes) are catching up (Round 7 dividend display).
 
+## 2026-05-13 — P0 regression: plan creation still broken post-#442
+
+**Issue:** Plan creation still failing with "Plan not saved. Failed to create plan. Please try again." despite PR #442 being merged and Vercel deploying `bdf568f`.
+
+**Root cause:** Migration `20260513000811_fix_plans_audit_column_defaults.sql` was merged into source tree but was **never applied to the prod Supabase project**. `list_migrations` confirmed latest prod migration was `20260512115546`. `created_at` and `updated_at` on `plans` still had `column_default: null` with `is_nullable: NO` — every `createPlan()` INSERT threw a NOT NULL violation.
+
+**Evidence:**
+- Migration absent from `supabase_migrations.schema_migrations`
+- `information_schema.columns`: `plans.created_at` → `column_default: null`, `plans.updated_at` → `column_default: null`
+- RLS policies: correct (`plans_insert` exists with `is_household_writer` check) — NOT the cause
+- Action code (`createPlan`): correct, `household_id` resolved from session — NOT the cause
+- Smoke-test INSERT after fix: succeeded (`id=10`, timestamps auto-populated), rolled back
+
+**Fix applied:** `supabase-apply_migration` (MCP) directly executed the migration SQL against prod. Verified columns now have `DEFAULT now()` and trigger is `BEFORE INSERT OR UPDATE`.
+
+**Lesson:** Merging a migration PR ≠ deploying the migration. Must run `list_migrations` after every migration PR merges to confirm it landed. Added post-merge checklist to `.squad/skills/migration-idempotency-gotchas/SKILL.md`.
+
+**No PR needed** — fix applied directly via MCP to prod Supabase.
+
 ## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
 
 Backend recon (sonnet-4.6): root-caused NOT NULL without defaults on plans.created_at / updated_at; confirmed migration 20260430130000 silent-skip of DEFAULT due to ADD COLUMN IF NOT EXISTS footgun. PR #442: `ALTER COLUMN SET DEFAULT now()` ×2 + trigger extended to BEFORE INSERT OR UPDATE. Decision: migration idempotency footgun pattern documented in `.squad/skills/migration-idempotency-gotchas/SKILL.md`. Verified Vercel green post-merge, no worker redeploy needed.
