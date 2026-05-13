@@ -169,7 +169,7 @@ export async function createPlan(
 
   if (error || !data) {
     console.error('[createPlan] insert error:', error?.message ?? 'No row returned');
-    return { ok: false, error: 'Failed to create plan. Please try again.' };
+    return { ok: false, error: error?.message ?? 'Failed to create plan. Please try again.' };
   }
 
   return { ok: true, plan: data as unknown as Plan };
