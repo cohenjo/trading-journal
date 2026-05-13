@@ -88,9 +88,53 @@ Fix: `20260513000811_fix_plans_audit_column_defaults.sql` — `ALTER COLUMN ... 
 
 ---
 
+## Critical: migration file in source ≠ migration applied in prod
+
+**Lesson (from GH #440 regression, 2026-05-13):**
+Merging a PR that includes a new `.sql` file under `supabase/migrations/` moves the file into the source tree but does **NOT** run it against the production Supabase project. Supabase migrations are deployed via a separate step: the Supabase CLI (`supabase db push`), a GitHub Action, the MCP `apply_migration` tool, or the dashboard — not by Vercel or the Netlify/Vercel build step.
+
+### How to verify
+
+Always check `supabase_migrations.schema_migrations` (or via the MCP `list_migrations` tool) against the deployed environment **after every migration PR merges**:
+
+```sql
+-- In prod Supabase: is my migration there?
+SELECT * FROM supabase_migrations.schema_migrations
+WHERE version = '20260513000811';
+-- Zero rows → migration file merged into main but NEVER executed in prod.
+```
+
+Via MCP:
+```
+supabase-list_migrations  →  confirm your version appears in the list
+```
+
+### Prevention
+
+Add a post-merge checklist item or CI step that compares `supabase/migrations/*.sql` filenames against `supabase_migrations.schema_migrations` and alerts on drift.
+
+---
+
+## Real incident: GH #440 regression, 2026-05-13
+
+PR #442 merged `20260513000811_fix_plans_audit_column_defaults.sql` into `main`. Vercel deployed `bdf568f`. But the Supabase migration was never applied — `list_migrations` showed latest as `20260512115546`. Prod DB still had `created_at`/`updated_at` with no DEFAULT. Every `createPlan()` INSERT continued to throw NOT NULL violation. `/plan` showed "Plan not saved. Failed to create plan. Please try again." unchanged.
+
+Fix: applied migration directly via MCP `supabase-apply_migration`. Smoke-test INSERT succeeded. Symptom resolved.
+
+**Time between merge and resolution: ~0 if we'd run `list_migrations` post-merge.**
+
+---
+
 ## Checklist before merging a migration
 
 - [ ] Any `ADD COLUMN IF NOT EXISTS` with `DEFAULT`? If the column might pre-exist, use `ALTER COLUMN ... SET DEFAULT` separately.
 - [ ] Run `pg_attrdef` check after applying locally to confirm defaults landed.
 - [ ] Use `DROP TRIGGER IF EXISTS` before `CREATE TRIGGER`.
 - [ ] Wrap `supabase_realtime` publication changes in a DO block.
+
+## Checklist after merging a migration PR
+
+- [ ] Run `supabase-list_migrations` (or `supabase db push` output) and confirm the new version appears.
+- [ ] If deploying via GitHub Action: verify the Action succeeded — check the workflow run, not just the PR merge.
+- [ ] If manual deploy needed: `supabase db push --linked` or apply via MCP immediately after merge.
+- [ ] Do a smoke-test INSERT/SELECT on the affected table before closing the issue.

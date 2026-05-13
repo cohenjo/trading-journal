@@ -1,3 +1,17 @@
+## 2026-05-13 — Regression diagnostic: "Plan not saved. Failed to create plan." (PR #443 follow-up)
+
+**Triggered by:** jocohe report — toast fires but save fails for any expense on `/plan`.
+
+**Trace summary:**
+
+- **Toast source:** `apps/frontend/src/app/plan/page.tsx:98` — `handleUpdatePlanData` falls into the `else` (create) branch because `plan.id` is `undefined` on a brand-new plan. `createPlan` returns `{ ok: false, error: '...' }`, triggering rollback + toast.
+- **createPlan:** `apps/frontend/src/app/plan/actions.ts:170-173` — the Supabase INSERT fails; the real error (`error.message`) was only logged **server-side** via `console.error`. The returned error was a sanitized generic string — **invisible to browser devtools**. This is the critical logging gap.
+- **household_id:** Resolved cleanly via `resolveHouseholdId()` → `household_members` lookup. A null here returns a distinct `'Not authenticated or no active household'` message; the user saw `'Failed to create plan'`, confirming `household_id` was resolving but the INSERT failed.
+- **data serialization:** `PlanData` passed as flat object (no `data` envelope). `normalizeCreatePayload` correctly takes the raw-PlanData path. No `undefined` values; valid jsonb shape.
+- **Root cause hypothesis (ranked):** 1) `plans` table missing / migration not applied on target DB; 2) RLS policy blocking INSERT for the user's `household_id`; 3) NOT NULL constraint on an unset column.
+- **Logging gap patched:** One-line fix in `createPlan` to propagate `error.message` to the returned error payload, so the existing `console.error` on `page.tsx:97` surfaces the real Supabase error in the browser console. Shipped as draft PR on branch `squad/440-followup-error-logging`.
+- **Open for Hockney:** Confirm whether `plans` table exists + migration status; check RLS policy on `plans` INSERT; check for NOT NULL columns without defaults.
+
 ## 2026-05-13 — PR #443 squad/440-error-surfacing
 
 Shipped P0 frontend fixes: error surfacing in `/plan` handleUpdatePlanData + empty-state CTA in `/cash-flow`.
