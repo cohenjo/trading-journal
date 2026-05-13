@@ -1,3 +1,7 @@
+## 2026-05-13 — PR #447 review + merge (squad/440-followup-error-logging)
+
+Reviewed Fenster's one-liner: propagates `error?.message` from Supabase through `{ok: false, error}` in `createPlan`. Note: raw error also surfaces in toast description (same `message` var feeds both console.error and toast on page.tsx:97-98) — Coordinator explicitly approved this tradeoff for single-tenant context. All required checks green; branch deleted at 1c0bc04.
+
 ## Archive (compressed)
 
 ### 2026-05-01–2026-05-02
