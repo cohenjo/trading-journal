@@ -164,3 +164,13 @@ Backend recon (sonnet-4.6): root-caused NOT NULL without defaults on plans.creat
 - **Correct pattern:** "RLS enabled + permissive SELECT for authenticated", NOT "RLS disabled".
 - **Reference data pattern:** Always enable RLS with `USING (true)` SELECT policy. Backend service_role writes bypass RLS automatically.
 - The Supabase advisor `rls_disabled_in_public` lint is non-negotiable for any table exposed via PostgREST.
+
+---
+
+## 2026-05-13 — 📌 RLS Migration Applied + Migration Drift Discovered
+
+**Team update:** Migration `20260513153400_enable_rls_on_reference_tables.sql` has been successfully applied to remote Supabase via direct psql. Both reference tables (`security_reference`, `tase_yahoo_map`) now have RLS enabled with correct SELECT policies for authenticated users. Supabase advisor P0 findings (rls_disabled_in_public) cleared.
+
+**Action:** No action needed — your migration is live and verified in production-adjacent state.
+
+**Caveat:** Migration drift discovered (10 pending local, 10 remote-only). Kujan is tracking this separately. Use direct psql for targeted migrations until drift is reconciled. Full decision written to `.squad/decisions.md`.

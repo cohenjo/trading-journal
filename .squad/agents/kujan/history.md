@@ -178,3 +178,44 @@ Infrastructure ready (migrations applied, worker rebuilt and healthy, new schema
 - **Pre-merge checks:** Each PR was open and mergeable via REST (`mergeable=true`, `mergeable_state=unstable`); failed Playwright logs matched `Error: Node.js 20 detected without native WebSocket support.`
 - **Rebase actions:** None needed for the PR branches.
 - **Worker rebuild:** Correctly skipped for #425 per Keaton's no-op/audit-trail guidance; `./scripts/rebuild-worker.sh` was not run.
+
+---
+
+## Learnings
+
+### Direct psql Migration Apply Pattern (2026-05-13)
+
+When migration drift exists and you need to apply a specific migration without disturbing the larger drift state:
+
+**Pattern:**
+```bash
+# 1. Source env
+set -a; source .env; set +a
+
+# 2. Apply via direct psql with error-stopping
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/<timestamp>_<name>.sql
+
+# 3. Verify with SQL queries
+```
+
+**Key Points:**
+- `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f <file>` is the safe targeted-apply incantation
+- `ON_ERROR_STOP=1` prevents half-applied state (exits on first error)
+- Direct psql bypasses Supabase migration tracking — tracking table remains unchanged
+- Use when `supabase db push --linked` would apply unwanted migrations
+- After apply, `supabase migration list --linked` will still show migration as "pending" (cosmetic)
+- Reconcile later with: `supabase migration repair --status applied <timestamp>`
+
+### Migration Drift Discovered (2026-05-13)
+
+**State on 2026-05-13:**
+- **Local pending:** 10 migrations (20260510004200 through 20260513153400) not tracked in remote
+- **Remote-only:** 10 migrations exist in remote `schema_migrations` that don't exist as local files
+- **Immediate need:** Apply RLS migration (20260513153400) via direct psql to resolve Advisor findings without disturbing drift
+
+**Implications:**
+- `supabase db push --linked` is dangerous until drift is reconciled
+- Running it would attempt to apply all 10 pending local migrations at once
+- Direct psql apply bypasses tracking but solves immediate RLS security concern
+
+**Recommendation:** Dedicated drift-reconciliation task before next `supabase db push`

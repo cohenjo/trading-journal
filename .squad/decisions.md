@@ -1916,3 +1916,70 @@ This pattern:
 - Keaton (infra) to add a post-merge check or CI step that diffs local migration files vs. `supabase_migrations.schema_migrations`.
 
 **Canonical skill reference:** `.squad/skills/migration-idempotency-gotchas/SKILL.md` — "Critical: migration file in source ≠ migration applied in prod" section.
+# Supabase Migration Drift Discovered
+
+**Date:** 2026-05-13
+**Discovered by:** Kujan
+**Context:** RLS migration apply task (#430 Step 2)
+
+## Problem
+
+The Supabase project has migration drift — local and remote migration states are out of sync:
+
+```
+Local status (supabase migration list):
+  - 10 pending migrations (20260510004200 through 20260513153400)
+  - These exist as files in supabase/migrations/ but not tracked in remote schema_migrations table
+
+Remote status (SELECT from schema_migrations):
+  - 10 migrations tracked that don't exist as local files
+  - These were applied directly or through a different source tree
+```
+
+## Immediate Risk
+
+Running `supabase db push --linked` is dangerous because:
+1. It would attempt to apply all 10 pending local migrations at once
+2. Unknown what the 10 remote-only migrations contain
+3. Potential for conflicts, duplicate DDL, or breaking changes
+4. No rollback mechanism once `db push` starts
+
+## Immediate Solution (Applied 2026-05-13)
+
+For the urgent RLS security fix (20260513153400):
+- Applied via **direct psql** to bypass Supabase tracking
+- This resolved the security advisor findings without disturbing drift state
+- Pattern: `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f <migration-file>`
+
+## Recommended Resolution
+
+1. **Audit phase:**
+   - List all 10 remote-only migrations: `SELECT version, name FROM supabase_migrations.schema_migrations WHERE version NOT IN (...local versions...)`
+   - Determine source: were these manual DDL? old migration files? different branch?
+   - Check if any local pending migrations conflict with remote-only migrations
+
+2. **Reconciliation strategy (one of):**
+   - **Option A (Safe):** Export remote schema, compare with local, manually reconcile differences
+   - **Option B (Risky):** Use `supabase migration repair` to force-sync tracking (doesn't validate schema)
+   - **Option C (Nuclear):** Reset remote to match local (requires approval + backup)
+
+3. **Going forward:**
+   - Until reconciled: apply targeted migrations via direct psql only
+   - After reconciled: `supabase db push --linked` can be used safely again
+   - Document which migrations were applied via direct psql and need tracking repair
+
+## Impact
+
+- **Severity:** Medium (blocks safe use of `supabase db push`)
+- **Workaround:** Direct psql for targeted migrations (requires manual tracking)
+- **Timeline:** Should be resolved before next scheduled migration wave
+
+## Action Items
+
+- [ ] Create dedicated drift-reconciliation task
+- [ ] Audit 10 remote-only migrations
+- [ ] Audit 10 pending local migrations
+- [ ] Choose reconciliation strategy
+- [ ] Execute reconciliation with backup
+- [ ] Verify `supabase migration list` shows clean state
+- [ ] Document learnings in runbook
