@@ -1,103 +1,10 @@
-## 2026-05-13 — PR #447 review + merge (squad/440-followup-error-logging)
+# Keaton — Active History
 
-Reviewed Fenster's one-liner: propagates `error?.message` from Supabase through `{ok: false, error}` in `createPlan`. Note: raw error also surfaces in toast description (same `message` var feeds both console.error and toast on page.tsx:97-98) — Coordinator explicitly approved this tradeoff for single-tenant context. All required checks green; branch deleted at 1c0bc04.
-
-## Archive (compressed)
-
-### 2026-05-01–2026-05-02
-- **2026-05-01 Supabase Branching:** Evaluated Supabase Branch feature (Pro-only, $9.68/month). Recommended keeping 2-project model (prod+dev) for Free tier. Branches clone schema but not data; merging uses automated DAG.
-- **2026-05-01 Phase 3 Plan:** Planned frontend↔Supabase direct compute architecture (TJ-019/TJ-020). Scoped schema, API routes, and auth flow.
-- **2026-05-02 E2E Testing Strategy:** Designed comprehensive E2E strategy with test-user provisioning, CI split (smoke+auth blocking, full flows nightly), tag-based suite selection. Produced 8 GitHub issues (#144–#151).
+> **Last summarized:** 2026-05-13 (removed 100 older entries to archive)
+> **Current size:** 13127 bytes
 
 ---
 
-### 2026-05-06 — Merge Review: IBKR Flex Backfill Resilience Branch
-
-**Requested by:** Jony Vesterman Cohen
-**Branch:** `squad/options-flex-backfill-resilience` (12 commits, HEAD 3ccca71)
-**Verdict:** 🔍 APPROVE WITH FOLLOW-UPS
-
-**Work:** Final pre-merge architectural gate review of the entire IBKR Flex backfill resilience initiative. Reviewed two-tier API retry (`flex_probe.py`), session-lifetime decoupling (critical bug fix), `--continue-on-error`/`--resume-from-chunk` flags, persistent failure log, and `--xml-dir` mode. Verified 49 tests pass, 9 decision inbox notes consistent, env vars documented.
-
-**Findings:**
-1. ✅ Architecture sound — three-mode dispatch clean, session decoupling correct, failure semantics preserve fail-loud for daily sync
-2. ⚠️ Committed test artifact `.flex_backfill_failures.json` (tracked in git despite gitignore) — cosmetic, needs `git rm --cached`
-3. ⚠️ Final metrics recompute runs unconditionally even with failed chunks — known limitation per McManus review, not a blocker
-4. ⚠️ `datetime.utcnow()` deprecation warning in `flex_probe.py:311` — pre-existing, low priority
-
-**Key Insight:** When decoupling session lifetimes from network I/O in pooler-managed DB environments, the cleanest pattern is: fetch → open session → write → close. Never hold a session across slow external calls.
-
-**Decision filed:** `.squad/decisions/inbox/keaton-merge-review.md`
-
----
-
-### 2026-05-11 — #363/#364 Architecture Directive Design Lead
-
-**Requested by:** Jony Vesterman Cohen
-**Work:** Architected the positions-as-source-of-truth pattern for dividends and bonds pages. Inventoried data model, chose yield computation strategy (Option A: TTM from dividend_payments), confirmed bonds page already has positions pattern but needs 3-tab filtering. Recommended summary chart wiring already covered by backend refactoring.
-
-**Design decisions:**
-- Hardcoded 3 tabs (ibkr, schwab, ira) reuse existing `TAB_ORDER`, `TAB_LABELS`, `ACCOUNT_TABS` constants
-- TTM yield = SUM(dividend_payments where ex_date >= 12mo ago) / mark_price (no external API dependency)
-- Forward yield = dividend_accruals.gross_rate × paymentFrequency
-- Account mapping: account_type (lowercase) → config.id (int) → stock_positions.account_id (int FK)
-- Bonds: new `getLadderOverviewByAccount(accountKey)` export; Schwab/IRA return empty by construction
-
-**Issues filed:** #363 (Dividends, high priority), #364 (Bonds, medium priority)
-
-**Open questions flagged for Jony:**
-- `dividend_payments.account_id` mapping (IBKR text string vs config FK)
-- Historical payments UX (collapsible vs separate tab)
-- `dividend_positions` table retirement timeline
-
-**Decision filed:** `.squad/decisions/inbox/keaton-positions-source-of-truth-design.md`
-
----
-
-**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
-**Work:** Conducted detailed code review of McManus baseline schema work (PR #90). Identified 3 findings: tradingaccounttype enum, missing columns, FK coverage. Submitted APPROVE verdict. All findings addressed in subsequent commit 5a8367e.
-
-**TJ-005 verdict:** Documented that Phase 1 schema work must use Supabase SQL migrations, not Alembic versions, per design §4.3. Blocking verdict recorded; dependency chain clarified (TJ-003→TJ-005→TJ-006→TJ-007).
-
-**Key Insight:** Architectural decisions must be recorded early to prevent split migration histories across tools; Supabase CLI is the single source of truth for hosted schema.
-
----
-
-### 2026-05-11 — Positions-as-Source-of-Truth: Dividends + Bonds Alignment Design
-
-**Requested by:** Jony Vesterman Cohen
-**Work:** Inventoried the full data model gap between the current dividends page (reads from `dividend_positions` — 0 rows, manually maintained) and the directive (read from `stock_positions` — 427 rows, synced from FlexQuery). Confirmed bonds page (`/ladder`) already uses `bond_holdings` with positions-pattern columns but lacks 3-tab account filtering. Chose Option A (compute TTM yield from `dividend_payments` — 5524 historical rows) over external API or FlexQuery field ingestion. Summary chart wiring is already covered — `getDividendDashboard()` feeds `projectedDividendAmount` and will automatically pick up the refactored data source.
-
-**Issues filed:**
-- #363 — Dividends page refactor to projected-income view (high priority)
-- #364 — Bonds page 3-tab alignment (medium priority)
-- No Issue C needed (summary chart covered by #363)
-
-**Key finding:** `dividend_payments.account_id` is the IBKR account STRING ("U2515365"), not the integer `trading_account_config.id`. The join for per-account TTM yield requires mapping through `trading_account_config.details` or a dedicated lookup. Flagged as open question for Jony.
-
-**Decision filed:** `.squad/decisions/inbox/keaton-positions-source-of-truth-design.md`
-
----
-
-## Learnings
-
-### 2026-05-11 — dividend_payments.account_id is IBKR string, not config FK
-
-**Context:** The `dividend_payments` table uses a TEXT `account_id` column containing the IBKR account string (e.g. "U2515365"), while `stock_positions` uses an INTEGER `account_id` that FK's to `trading_account_config.id`. Any cross-table join for dividend enrichment must bridge this mismatch.
-
-### 2026-05-11 — Dividend data lives in 4 separate tables
-
-**Context:** `dividend_positions` (manual ticker/shares), `dividend_ticker_data` (cached market data), `dividend_payments` (IBKR payment history), `dividend_accruals` (217 rows). The positions-as-source-of-truth directive consolidates the position source to `stock_positions`, making `dividend_positions` redundant for the main view.
-
-### 2026-05-01 — Supabase Branching vs 2-Project Model
-
-**Context:** User questioned whether `trading-journal-dev` should be replaced by Supabase's Branch feature, visible in the dashboard.
-
-**Key Findings:**
-- **Branching is a Pro-only paid feature.** Free plan explicitly shows "Not included" for Branching. Rate: `$0.01344/branch/hour` (~$9.68/month for 24/7 persistent branch).
-- **Branch types:** Ephemeral (tied to PR, auto-deleted on merge/close) vs Persistent (long-lived staging/dev). Both require Pro+.
-- **What branches clone:** Schema migrations, API credentials, Auth config, Storage buckets (empty). What they do NOT copy: production data, auth users, storage objects, vault secrets.
-- **Data-less design:** Branches intentionally start empty to protect production data. Seeding only via `seed.sql`.
 - **Merging:** GitHub integration triggers automated DAG (Clone → Pull → Health → Configure → Migrate → Seed → Deploy). Only migrations land in prod; no data flows back.
 - **Free-tier verdict:** The 2-project model (prod + dev) IS the free-tier equivalent of persistent branching. The `dev` project correctly serves as a persistent staging branch.
 - **Recommendation filed:** Keep 2-project model. Revisit when: Pro upgrade for other reasons, team grows, or PR-preview automation needed.
@@ -248,3 +155,5 @@ Triaged all 12 dependabot/chore PRs. E2E Smoke + Auth failures on all PRs confir
 ## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
 
 Synthesis call (opus-4.6): triaged root causes (frontend optimistic UI swallow, backend NOT NULL without defaults, migration idempotency footgun). Routed 4 parallel agents: Fenster (frontend recon), Hockney (backend recon + migration audit), McManus (22 test scenarios), self (architecture synthesis). Blocked on migration fix before testing; PR merge order: Hockney #442 → Fenster #443 → Fenster #445 → McManus #444. Final HEAD 215fb8b verified green on Vercel. Worker redeploy not needed (no code changes to worker, Dockerfile, pyproject.toml). 6 decisions synthesized to Round 9; inbox files merged to decisions.md.
+
+📌 **Team update (2026-05-13T15:34:00Z):** RLS pattern established for reference tables (security_reference, tase_yahoo_map). Canonical pattern: RLS enabled + permissive SELECT for authenticated. Never DISABLE RLS on PostgREST-exposed tables. — Hockney

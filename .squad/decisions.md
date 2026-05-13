@@ -1850,3 +1850,69 @@ Data shapes verified: `getDividendSummary()` returns constant annual total (USD,
 **Open follow-ups:**
 - FX on bond income (multi-currency aggregate sums native amounts without conversion)
 - Dividend constant vs growth (current implementation uses flat forward total; should it apply dividendGrowthRate?)
+
+---
+
+### 2026-05-13: Raw Supabase error.message disclosure in client responses
+
+**Author:** Keaton (Lead)
+
+Single-tenant trading-journal accepts raw Supabase `error.message` exposure in client responses for debuggability. Revisit when multi-tenant. Toast text remains sanitized — only network response carries raw error.
+
+**Rationale:** jocohe is both dev and user. Schema disclosure (table/column/constraint names) in DevTools network tab affects only the user themselves. RLS protects actual user data. Debuggability benefit (shorter regression loops — yesterday's sprint needed Supabase MCP to surface the real error) outweighs the disclosure cost in single-tenant context.
+
+**In practice:** `createPlan` (and similar server actions) may return `error.message` directly. The toast description will carry the raw error; this is acceptable. If the app ever becomes multi-tenant, this policy must be revisited and a sanitization layer added before client responses.
+
+---
+
+### 2026-05-13: RLS Pattern for Reference Tables
+
+**Author:** Hockney (Backend Dev)
+
+Supabase advisor raised ERROR-level security findings on two reference tables:
+1. **`public.security_reference`** — RLS was explicitly DISABLED
+2. **`public.tase_yahoo_map`** — RLS was never enabled
+
+**Decision:** ALL tables in the `public` schema MUST have RLS enabled, even for global reference data. The correct pattern for reference tables is:
+
+1. **Enable RLS** (never disable)
+2. **Add permissive SELECT policy** for `authenticated` role (`USING (true)`)
+3. **Revoke all from anon** (explicit deny to anonymous users)
+4. **Grant select to authenticated, all to service_role** (explicit grants)
+5. **No INSERT/UPDATE/DELETE policies** (backend writes via service_role bypass RLS)
+
+This pattern:
+- Satisfies Supabase advisor `rls_disabled_in_public` lint
+- Prevents anonymous API access to reference data
+- Maintains backend write path (service_role bypasses RLS)
+- Maintains frontend read path (authenticated users have SELECT)
+- Makes permissions explicit and auditable
+
+**Reversal of prior decision:** Migration `20260511102251_add_rls_policies_dividend_disable_security_reference.sql` intentionally DISABLED RLS. This is hereby reversed. While the intent was correct, the implementation was wrong.
+
+**Implementation:** Migration `20260513153400_enable_rls_on_reference_tables.sql` implements the correct pattern for both tables. Idempotent and safe to re-run.
+
+**Team impact:** All agents — never use `DISABLE ROW LEVEL SECURITY` on public-schema tables exposed via PostgREST.
+
+---
+
+### 2026-05-13: Mandate post-merge migration verification
+
+**Author:** Hockney
+
+**Triggered by:** P0 regression — plan creation broken post-PR-#442
+
+**Context:** PR #442 merged a migration into `main`. Vercel deployed the frontend. But the Supabase migration was never applied — the file sat in the source tree while prod still ran on the broken schema. `/plan` continued to fail. The sprint was declared done while the user-facing symptom persisted.
+
+**Decision:** Every migration PR must include a post-deploy verification step confirming the migration actually ran against the target Supabase project before the issue is closed.
+
+**Acceptable verification methods** (any one suffices):
+1. Run `supabase-list_migrations` via MCP and confirm the new version is present.
+2. Check the Supabase GitHub Action workflow run completed successfully.
+3. Run `supabase db push --linked` in the deploy environment and confirm "1 migration applied".
+
+**Enforcement:**
+- Add to the PR template under `## Checklist`: "[ ] Migration verified in prod (`list_migrations` or Action run)"
+- Keaton (infra) to add a post-merge check or CI step that diffs local migration files vs. `supabase_migrations.schema_migrations`.
+
+**Canonical skill reference:** `.squad/skills/migration-idempotency-gotchas/SKILL.md` — "Critical: migration file in source ≠ migration applied in prod" section.

@@ -136,3 +136,31 @@ end $$;
 ## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
 
 Backend recon (sonnet-4.6): root-caused NOT NULL without defaults on plans.created_at / updated_at; confirmed migration 20260430130000 silent-skip of DEFAULT due to ADD COLUMN IF NOT EXISTS footgun. PR #442: `ALTER COLUMN SET DEFAULT now()` ×2 + trigger extended to BEFORE INSERT OR UPDATE. Decision: migration idempotency footgun pattern documented in `.squad/skills/migration-idempotency-gotchas/SKILL.md`. Verified Vercel green post-merge, no worker redeploy needed.
+
+## 2026-05-13 — RLS reference tables fix (Supabase advisor findings)
+
+**Issue:** Supabase advisor raised ERROR-level findings on 2 tables not covered by RLS:
+- `public.security_reference` — RLS explicitly DISABLED in migration 20260511102251
+- `public.tase_yahoo_map` — RLS never enabled (created via Alembic, not Supabase)
+
+**Root cause:** Previous decision to DISABLE RLS on `security_reference` was incorrect. I reasoned that global reference data didn't need RLS, but Supabase advisor requires: **any table in the `public` schema exposed to PostgREST MUST have RLS enabled**, even for reference data.
+
+**Correct pattern for reference tables:**
+- RLS **enabled** (not disabled)
+- Permissive SELECT policy for `authenticated` users (`USING (true)`)
+- No INSERT/UPDATE/DELETE policies (backend writes via service_role, which bypasses RLS)
+- Explicit grants: `REVOKE ALL FROM anon`, `GRANT SELECT TO authenticated`, `GRANT ALL TO service_role`
+
+**Fix:** Migration `20260513153400_enable_rls_on_reference_tables.sql`
+- Re-enabled RLS on `security_reference` (reverses prior DISABLE)
+- Enabled RLS on `tase_yahoo_map` (first time)
+- Added SELECT policies for both tables (`USING (true)` for authenticated)
+- Normalized grants per established pattern (matches `dividend_payments` / `dividend_accruals` from 20260511102251)
+
+**Backend verification:** Confirmed `yahoo_refresh.py` uses direct SQLAlchemy connection with service_role credentials (bypasses RLS). Worker writes via `direct_engine` (line 349), not PostgREST. No application code changes needed.
+
+**Learnings:**
+- **Never DISABLE RLS on public-schema tables.** Supabase advisor flags this as ERROR even for global reference data.
+- **Correct pattern:** "RLS enabled + permissive SELECT for authenticated", NOT "RLS disabled".
+- **Reference data pattern:** Always enable RLS with `USING (true)` SELECT policy. Backend service_role writes bypass RLS automatically.
+- The Supabase advisor `rls_disabled_in_public` lint is non-negotiable for any table exposed via PostgREST.

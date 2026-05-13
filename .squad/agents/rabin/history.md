@@ -105,3 +105,24 @@
 - **PR:** `squad/secret-scan-hardening` → `security: incident report + remediation tracker (Supabase service-role rotation)`
 
 📌 **Team update (2026-05-05T18:32:37Z):** Secret handling policy decision merged into shared decisions. Reskill pass extracted secret-handling-policy skill (high confidence) with defense-in-depth patterns, pre-commit scanning, push protection, and rotation response. — Scribe (wind-down)
+
+### 2026-05-13: RLS Reference Tables Security Review
+
+- **Context:** Reviewed migration `20260513153400_enable_rls_on_reference_tables.sql` reversing Hockney's prior decision to DISABLE RLS on `security_reference`, plus enabling RLS on `tase_yahoo_map` (created via Alembic without RLS).
+- **Verdict:** ✅ APPROVED — migration is secure and follows correct Supabase advisor pattern.
+- **Key findings:**
+  - Both tables are pure reference data (ticker → metadata mappings) with no household_id, owner_user_id, or PII
+  - `USING (true)` policies are appropriate for global reference data accessible to all authenticated users
+  - Backend writes via service_role/direct_engine properly bypass RLS (no INSERT/UPDATE/DELETE policies needed)
+  - Explicit `REVOKE ALL FROM anon` + `GRANT SELECT TO authenticated` pattern prevents anonymous access
+  - Migration is fully idempotent (DROP POLICY IF EXISTS, ALTER TABLE ENABLE RLS safe to re-run)
+  - Policy naming convention matches repo standard: `{table_name}_select`
+  - Addresses both Supabase advisor ERROR-level findings: `rls_disabled_in_public_public_security_reference` and `rls_disabled_in_public_public_tase_yahoo_map`
+- **Pattern codified:** For reference tables in public schema: (1) ENABLE RLS always, (2) permissive SELECT for authenticated via `USING (true)`, (3) explicit REVOKE from anon, (4) no write policies (service_role bypasses), (5) never DISABLE RLS.
+- **Learnings:**
+  - Supabase advisor `rls_disabled_in_public` (ERROR-level) flags ANY table in public schema without RLS, even pure reference data
+  - The correct pattern for global reference data is NOT "RLS disabled" but "RLS enabled + permissive policy"
+  - Service role writes automatically bypass RLS — no need for INSERT/UPDATE/DELETE policies on backend-only-write tables
+  - RLS review skill already documented this anti-pattern (updated by Hockney earlier today per skill changelog line 190)
+  - Explicit grant normalization (REVOKE ALL from anon, GRANT SELECT to authenticated, GRANT ALL to service_role) makes permissions auditable
+- **Deliverable:** Security review verdict with 8-dimension analysis per RLS review skill checklist.
