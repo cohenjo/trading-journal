@@ -138,3 +138,26 @@
 **Action:** You may close any Supabase advisor security findings related to `rls_disabled_in_public` on these tables. Re-run advisor at dashboard to confirm clearance.
 
 **Related:** Migration drift documented in `.squad/decisions.md` (10 pending local / 10 remote-only). No impact to this security fix — applied via direct psql bypass.
+
+### 2026-05-14: Supabase Platform Changes — Security Review (Fan-out Specialist)
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Security review of three Supabase platform announcements (default grants removal, API securing guide, @supabase/server package).
+
+**Key findings:**
+- **HIGH IMPACT:** 30 Data-API-exposed tables with legacy `anon` grants; Oct 30 enforcement deadline
+- **CRITICAL:** `household_audit_log` has anon SELECT — unacceptable for financial app, even with RLS
+- **MEDIUM:** Legacy symmetric JWT keys (HS256) in use — recommend asymmetric migration by June 1
+- **LOW IMPACT:** No Edge Functions → `@supabase/server` not applicable; no `pgrst.db_pre_request` hook needed
+- **COMPLIANT:** Reference-table migration (`20260513153400`) follows correct REVOKE+GRANT pattern
+
+**Verdict:** Three conventions drafted (explicit grants, no anon without justification, reference-table SELECT-only). Opt-in for future tables (safe). Backfill explicit grants on 30 legacy tables (by May 20). JWT migration independent but should land before Oct 30.
+
+**Decision merged into:** `.squad/decisions.md` § "Supabase platform changes review" (Keaton's synthesis consolidated both reviews)
+
+**Recommendations in roadmap:**
+- Phase 0.2: Revoke anon from `household_audit_log` (P0)
+- Phase 1.4: Re-run Security Advisor after backfill to validate (Rabin to own)
+- Phase 2.1: JWT asymmetric migration (Fenster frontend + Rabin review)
+
+📌 **Team update (2026-05-14T19:40:00Z):** Supabase security review complete — 30 anon-exposed tables + household_audit_log P0 fix + JWT migration to June. Recommendations merged into shared roadmap. — Rabin

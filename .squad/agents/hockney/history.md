@@ -174,3 +174,31 @@ Backend recon (sonnet-4.6): root-caused NOT NULL without defaults on plans.creat
 **Action:** No action needed — your migration is live and verified in production-adjacent state.
 
 **Caveat:** Migration drift discovered (10 pending local, 10 remote-only). Kujan is tracking this separately. Use direct psql for targeted migrations until drift is reconciled. Full decision written to `.squad/decisions.md`.
+
+### 2026-05-14: Supabase Platform Changes — Backend Review (Fan-out Specialist)
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Backend impact review of Supabase platform changes (default grants, API security patterns, @supabase/server).
+
+**Key findings:**
+- **39 tables** exposed via Data API to frontend (supabase-js)
+- **"90% compliant"** — recent migrations (`20260513153400`, `20260504134817`) already use REVOKE+GRANT pattern
+- **Backend unaffected** — writes via SQLAlchemy (direct Postgres, bypasses PostgREST)
+- **No Edge Functions** → `@supabase/server` not applicable
+- **Note on count discrepancy:** Verdict text mentioned "19 tables with anon full access" but detailed audit table (lines 263–319) correctly lists 30. This count error in summary is a learning for future reviews — reconciled by Keaton via live DB query.
+
+**Deliverables:** Data API surface map (39 tables), grant inventory breakdown, migration template pattern, RPC function count (16 with implicit grants).
+
+**Decision merged into:** `.squad/decisions.md` § "Supabase platform changes review" (Keaton's synthesis consolidated)
+
+**Responsibilities in Phase 0/1/2:**
+- Phase 0.1: Write opt-in SQL migration `20260514000000_opt_in_explicit_grants.sql`
+- Phase 1.1: Write backfill migration for 30 anon-exposed tables
+- Phase 1.2: Classify reference tables as SELECT-only
+- Phase 1.3: Update migration template (README pattern)
+- Phase 2.2: Add pre-commit hook / migration linter
+- Phase 2.3: Inventory 16 RPC functions + add explicit GRANT EXECUTE
+
+**Learning:** Text-level errors (stale summary counts) can be caught by Keaton's synthesis via live DB queries. Include audit data in future reviews to avoid drift from text summary.
+
+📌 **Team update (2026-05-14T19:38:00Z):** Backend review complete — 39 Data API tables, 30 with legacy anon grants, opt-in + backfill pattern ready. 16 RPC functions also need explicit grants (Phase 2.3). — Hockney

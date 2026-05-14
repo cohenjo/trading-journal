@@ -1983,3 +1983,139 @@ For the urgent RLS security fix (20260513153400):
 - [ ] Execute reconciliation with backup
 - [ ] Verify `supabase migration list` shows clean state
 - [ ] Document learnings in runbook
+
+---
+
+## Supabase platform changes review: Default grants enforcement & API security (2026-05-14)
+
+**By:** Keaton (Lead, synthesis), Rabin (Security), Hockney (Backend)
+**Date:** 2026-05-14
+**Enforcement deadline:** 2026-10-30
+**Owner:** Jony Vesterman Cohen
+
+### Executive Summary (1 paragraph)
+
+You have **30 public tables with legacy `anon` role grants** inherited from Supabase's pre-2025 auto-grant model. RLS protects the rows, but the grants themselves violate least-privilege and create unnecessary attack surface on a financial application. Supabase will enforce explicit-only grants on **October 30, 2026** — after that date, any new table created without explicit grants will be silently unreachable via PostgREST Data API. Our recommendation: **opt in to revoked defaults NOW (safe, non-breaking, affects future tables only)**, then backfill explicit grants on legacy tables by May 20. The `@supabase/server` package is not applicable (no Edge Functions). JWT key migration is lower-priority but should land before October. **Act this week on grants grants. Schedule JWT keys for June.**
+
+---
+
+### Six Key Decisions (Keaton's recommendations)
+
+1. **Opt in to revoked default privileges for future tables?** → **YES, this week**
+   Zero risk to existing tables. Prevents accidental exposure of any table created from now on. Reversible: `ALTER DEFAULT PRIVILEGES ... GRANT`.
+
+2. **Backfill explicit grants on 30 legacy anon-exposed tables?** → **YES, by May 20**
+   Makes implicit grants explicit and reviewable. Removes anon CRUD from financial data tables. Uses pattern already proven in today's reference-table migration (`20260513153400`).
+
+3. **Migrate from symmetric (HS256) to asymmetric JWT signing keys?** → **YES, target June 1**
+   Reduces key-compromise blast radius. Unblocks future Supabase features. Independent of grants deadline — don't let it delay Phase 0/1.
+
+4. **Adopt `@supabase/server` package?** → **NO — not applicable**
+   We have no Edge Functions, no JS server runtime. Backend is Python/SQLAlchemy (bypasses PostgREST). Frontend uses `@supabase/ssr`. Revisit only if we add Edge Functions.
+
+5. **Implement `pgrst.db_pre_request` hook?** → **DEFER**
+   Our threat model (backend bypasses PostgREST entirely, frontend uses JWT+RLS, no per-user quotas) doesn't justify operational complexity. Revisit if we expose a public API.
+
+6. **Should `household_audit_log` be readable by `anon`?** → **NO — revoke immediately (P0)**
+   Audit logs with anon SELECT is unacceptable for a financial app, even with RLS blocking rows. Immediate security fix.
+
+---
+
+### Critical Finding: 30 tables with legacy anon grants (Rabin's count confirmed)
+
+**Tables (29 full CRUD + 1 SELECT-only):**
+Full CRUD (29): `backtestrun`, `backtesttrade`, `bond_holdings`, `dailybar`, `dailysummary`, `dividend_accounts`, `dividend_estimations`, `dividend_positions`, `dividend_ticker_data`, `execution`, `finance_snapshots`, `historicaloptionbar`, `household_members`, `households`, `insurance_policies`, `ladder_bonds`, `ladder_rungs`, `manualtrade`, `matchedtrade`, `ndx1m`, `note`, `optioncontract`, `options_income`, `plans`, `trade`, `trading_account_config`, `trading_account_summary`, `trading_positions`, `user_profile`
+
+SELECT-only (1): `household_audit_log`
+
+**Note on count discrepancy:** Hockney's text mentioned "19" but his detailed audit table correctly lists 30. Rabin's count of 30 is canonical. Both reviews agree on the same set of tables — recommendations are fully compatible.
+
+---
+
+### Roadmap: Phases 0 → 1 → 2 (Oct 30 deadline)
+
+| Phase | Action | Owner | Timeline | Why | Reversible? |
+|-------|--------|-------|----------|-----|-------------|
+| **0.1** | Revoke default privileges (opt-in SQL) — migration `20260514000000_opt_in_explicit_grants.sql` | Hockney | This week | Prevents future tables from auto-exposing | Yes |
+| **0.2** | Revoke anon from `household_audit_log` (P0) | Hockney (Rabin review) | This week | Audit logs must never be anon-readable | Yes |
+| **0.3** | Revoke anon from `households`, `household_members` | Hockney (Rabin review) | This week | Household membership data is high-risk | Yes |
+| **1.1** | Backfill explicit grants on 27 remaining tables — idempotent migration using `DO $$ ... $$` block | Hockney (Rabin review) | By May 20 | Make all grants explicit, reviewable, greppable | Additive |
+| **1.2** | Classify reference tables as authenticated SELECT-only (`dividend_ticker_data`, `historicaloptionbar`, `ndx1m`) | Hockney | By May 20 | Market data should not be writable via Data API | Yes |
+| **1.3** | Update migration template — add REVOKE+GRANT+RLS pattern to `supabase/` README | Hockney | By May 20 | Prevents regression on future migrations | Guidance |
+| **1.4** | Re-run Supabase Security Advisor — confirm zero grant warnings | Rabin | By May 20 | Validation checkpoint after backfill | N/A |
+| **2.1** | Migrate to asymmetric JWT signing keys (new JWKS endpoint) | Fenster (frontend) + Rabin (review) | Target June 1 | Reduces key-compromise risk; enables future Supabase features | Yes |
+| **2.2** | Add migration linter / pre-commit hook — detect migrations without GRANT statements | Hockney | Before Oct 30 | Automated guardrail against regression | N/A |
+| **2.3** | Audit 16 existing RPC functions — ensure explicit `GRANT EXECUTE` | Hockney | Before Oct 30 | Oct 30 enforcement also affects function grants | Additive |
+
+**Depends on:** Phase 0.1 must land before Phase 1.1. Phase 1 can proceed independently of migration-drift reconciliation (Kujan's task), but coordinate timing for clean migration numbering.
+
+---
+
+### Three New Conventions for .squad/decisions.md
+
+#### Convention: Explicit grants on all public tables (2026-05-14)
+
+**Context:** Supabase is removing default auto-grants for `anon`/`authenticated`/`service_role` on public schema tables (enforcement: 2026-10-30). We opted in via migration `20260514000000_opt_in_explicit_grants.sql`.
+
+**Rule:** Every migration that creates a table or function in `public` schema MUST include:
+
+1. `REVOKE ALL ON public.{table} FROM anon;` (always — anon should never have access unless explicitly justified)
+2. `GRANT {privileges} ON public.{table} TO authenticated;` (SELECT for reference data; SELECT,INSERT,UPDATE,DELETE for user-scoped data)
+3. `GRANT ALL ON public.{table} TO service_role;` (backend writes)
+4. `ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY;` (if not already)
+5. At least one RLS policy per operation (SELECT, INSERT, UPDATE, DELETE)
+
+**For RPC functions:**
+1. `REVOKE ALL ON FUNCTION public.{func}() FROM PUBLIC;`
+2. `GRANT EXECUTE ON FUNCTION public.{func}() TO authenticated;` (or role-specific)
+3. `GRANT EXECUTE ON FUNCTION public.{func}() TO service_role;`
+
+**Rationale:** Defense-in-depth for financial data. Grants control WHETHER a role can touch the object; RLS controls WHICH rows. Both are necessary.
+
+#### Convention: No anon grants without explicit justification (2026-05-14)
+
+**Rule:** The `anon` role must NEVER be granted access to any table unless there is a documented, reviewed justification (e.g., a public landing page that reads a specific table). Any migration granting to `anon` must include a code comment explaining why. Default: REVOKE from `anon`.
+
+#### Convention: Reference tables are authenticated SELECT-only (2026-05-14)
+
+**Rule:** Tables containing market data, reference data, or lookup data (e.g., `security_reference`, `tase_yahoo_map`, `dividend_ticker_data`) must follow this pattern:
+- `REVOKE ALL FROM anon;`
+- `GRANT SELECT TO authenticated;` (read-only)
+- `GRANT ALL TO service_role;` (backend writes)
+- RLS policy: `USING (true)` for authenticated SELECT (all authenticated users can read reference data)
+
+**Rationale:** Frontend does not write to reference data. Service role writes via backend sync jobs. No reason for `authenticated` to have INSERT/UPDATE/DELETE.
+
+---
+
+### Architecture Decision Details
+
+**@supabase/server package:** Skip. Targets stateless JS runtimes (Edge Functions, Cloudflare Workers, Deno). Our backend is Python/FastAPI with direct Postgres; frontend uses `@supabase/ssr`. Revisit if we add Edge Functions.
+
+**Securing-your-api guide:** Adopt the two-layer model (grants + RLS) as canonical. We already have RLS on all 53 public tables. We're adding the grants layer now. Pattern matches today's reference-table fix.
+
+**Default grants removal (discussion #45329):** Opt in immediately (safe, reversible). Backfill this sprint (auditable, non-functional). Be fully compliant months before Oct 30 enforcement — it becomes a non-event.
+
+---
+
+### Open Blockers & Cross-Coordination
+
+| Item | Impact | Mitigation |
+|------|--------|-----------|
+| Migration-drift reconciliation (Kujan's task: 10+10 pending/remote migrations) | Phase 1.1 backfill should land after drift resolve for clean ordering | Coordinate timing; backfill can proceed independently but confirm numbering won't collide |
+| JWT key migration (Fenster + Rabin) | Requires coordinated frontend deploy; don't delay grants work | Schedule for June; separate workstream |
+| `security_reference` / `tase_yahoo_map` authenticated CRUD | Today's migration revoked anon but left authenticated with full CRUD; should be SELECT-only | Include in Phase 1.1 backfill |
+| 16 RPC functions with implicit grants | Oct 30 enforcement also affects function grants; not inventoried yet | Hockney to enumerate in Phase 2.3 |
+
+---
+
+### Source Documents
+
+- **Rabin's security review:** `.squad/decisions/inbox/rabin-supabase-platform-changes-security-review.md`
+- **Hockney's backend review:** `.squad/decisions/inbox/hockney-supabase-platform-changes-backend-review.md`
+- **Keaton's synthesis (this document):** `.squad/decisions/inbox/keaton-supabase-platform-changes-synthesis.md`
+
+**Announced platforms:**
+- https://supabase.com/blog/introducing-supabase-server (Edge Functions package)
+- https://supabase.com/docs/guides/api/securing-your-api (two-layer grants+RLS model)
+- https://github.com/orgs/supabase/discussions/45329 (default grants removal, Oct 30 enforcement)

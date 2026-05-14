@@ -157,3 +157,23 @@ Triaged all 12 dependabot/chore PRs. E2E Smoke + Auth failures on all PRs confir
 Synthesis call (opus-4.6): triaged root causes (frontend optimistic UI swallow, backend NOT NULL without defaults, migration idempotency footgun). Routed 4 parallel agents: Fenster (frontend recon), Hockney (backend recon + migration audit), McManus (22 test scenarios), self (architecture synthesis). Blocked on migration fix before testing; PR merge order: Hockney #442 → Fenster #443 → Fenster #445 → McManus #444. Final HEAD 215fb8b verified green on Vercel. Worker redeploy not needed (no code changes to worker, Dockerfile, pyproject.toml). 6 decisions synthesized to Round 9; inbox files merged to decisions.md.
 
 📌 **Team update (2026-05-13T15:34:00Z):** RLS pattern established for reference tables (security_reference, tase_yahoo_map). Canonical pattern: RLS enabled + permissive SELECT for authenticated. Never DISABLE RLS on PostgREST-exposed tables. — Hockney
+
+### 2026-05-14: Supabase Platform Changes Review — Multi-agent Synthesis
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Synthesized Rabin (Security) + Hockney (Backend) specialist reviews of three Supabase announcements into a unified roadmap and architecture stance.
+
+**Key findings:**
+- **30 tables** with legacy anon grants (Rabin count: correct; Hockney text: stale "19" in summary, but correct table audit = 30)
+- **Live query reconciliation:** Ran `information_schema.table_privileges WHERE grantee='anon'` and confirmed 29 full-CRUD + 1 SELECT-only (audit log)
+- **Reference-table pattern confirmed:** Migration `20260513153400` set the correct template (REVOKE + GRANT + RLS)
+- **Oct 30, 2026 deadline** for enforcement — we have 5 months
+- **No Edge Functions** → `@supabase/server` not applicable; Python backend + supabase-ssr frontend
+- **16 RPC functions** with implicit grants — also need explicit GRANT EXECUTE before Oct 30
+
+**Synthesis pattern:** Multi-turn specialist fan-out (Rabin + Hockney parallel), catch discrepancies via live DB query, reconcile findings into unified 6-decision framework with roadmap. Caught the reference-table authenticated CRUD bug (today's migration left `authenticated` with full CRUD — should be SELECT-only). Flagged 16 RPC functions as Phase 2.3 inventory task.
+
+**Decision file:** `.squad/decisions.md` § "Supabase platform changes review"
+**Tasks opened:** 7 follow-up tasks (Phase 0/1/2) in coordination with Hockney, Rabin, Fenster.
+
+📌 **Team update (2026-05-14T19:46:00Z):** Supabase platform-changes review complete — 30 tables with legacy anon grants, Oct 30 enforcement deadline, Phase 0/1/2 roadmap + 3 new conventions merged into shared decisions. Rabin + Hockney specialist reviews reconciled; migration template confirmed. Act this week on opt-in grants. Schedule JWT keys for June. — Keaton, Rabin, Hockney
