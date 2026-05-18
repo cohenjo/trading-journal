@@ -185,3 +185,21 @@ Created comprehensive frontend design document for two cash flow page enhancemen
 ## 2026-05-18 — Cash Flow UI Implementation, PR squad/cashflow-dividend-redesign (`09cd6c1`)
 
 Monthly/yearly toggle added to cash-flow header (pill button, local useState, resets on reload). `displayData` useMemo scales all monetary fields ÷12 in monthly mode; summary card labels get "/ mo" suffix. Sankey reinvestment nodes now use indigo `#7c7ef8` vs regular savings `#6366f1`. Plan page wires `dividendByAccount` to simulation and threads `dividendAutoAccounts` through PlanEditor→PlanModal→PlanAccountDetails; accounts with real positions (>$0) show blue "Auto from real positions" banner and hide editable yield/policy controls. Build: ✅ (`npm run build` exit 0, 6 files changed).
+
+## 2026-05-18 — Next.js 16 Round 2 Fixes, PR #393 (`3855e10`)
+
+Applied 4 targeted fixes to bring PR #393 from "builds + tests pass" to "ready to merge with zero deprecation warnings":
+
+1. `next.config.ts`: removed deprecated `eslint: { ignoreDuringBuilds: true }` block (Next 16 removed this config key).
+2. `package.json`: bumped `eslint-config-next` `^15.5.15` → `^16.2.6` (unblocks PR #459 eslint 10 upgrade).
+3. `package.json`: changed `"lint": "next lint"` → `"lint": "eslint ."` (next lint removed in Next 16).
+4. `package.json`: bumped `react-dom` `^19.2.5` → `^19.2.6` to match `react@19.2.6`.
+5. `middleware.ts`: added one-line TODO comment for Next 17 proxy migration (edge runtime preserved).
+
+**tsconfig.json** was reverted post-build (Next 16 auto-modifies it; Keaton's merge gate criterion #8 forbids tsconfig changes).
+
+**Result:** Tests improved from 534 passed (26 failed suites) → 714 passed (2 failed suites). React-dom version sync eliminated all 25 suite initialization failures. 3 pre-existing TTM dividend calc failures remain (matches Keaton's 714/717 baseline). Build shows zero eslint-key deprecation warnings. eslint@10 compat dry-run clean — PR #459 is unblocked.
+
+## Learnings
+
+**Always revert tsconfig.json after `next build`.** Next 16 silently rewrites `jsx: "preserve"` → `"react-jsx"` and injects `.next/dev/types` into the include array. This must be caught and reverted BEFORE commit. Add `git checkout -- apps/frontend/tsconfig.json` to the post-build verification sequence for every Next.js upgrade sprint. If left in, it will cause unwanted diffs and break Keaton's merge gate criterion #8 without any error message.

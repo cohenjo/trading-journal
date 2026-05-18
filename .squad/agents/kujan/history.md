@@ -249,3 +249,36 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/<timestamp>_<name
 - 6 of 8 PRs merged (5 Phase 1 + 1 Phase 2 safe)
 - 2 PRs held pending Jony decision (#393 + #459 pending framework migration coordination)
 - Decision file: `.squad/decisions/inbox/kujan-dep-batch-2026-05-18.md`
+## Learnings
+
+### 2026-05-18 — eslint-config-next@16 FlatCompat circular reference (PR #393)
+
+- **`eslint-config-next@16` exports native flat config.** Do not wrap with `FlatCompat.extends()`. The config object contains circular references that crash `JSON.stringify` in `@eslint/eslintrc@3.3.5` on the very first lint invocation.
+- **Correct migration pattern:** Replace `compat.extends("next/core-web-vitals", "next/typescript")` with `import nextConfig from "eslint-config-next/core-web-vitals"` — the `core-web-vitals` subpath exports a 4-item array that includes `next`, `next/typescript`, `next/core-web-vitals` rules, and a built-in `.next/**` ignores block.
+- **Add explicit ignores up front** in the flat config array for `.next/**`, `node_modules/**`, `dist/**` — `eslint .` does not auto-ignore these the way `next lint` does.
+- **eslint@10 + eslint-config-next@16.2.6 has a pre-existing compat gap:** `eslint-plugin-react` bundled inside uses `context.getFilename()`, removed in eslint@10. This surfaces only once the FlatCompat circular reference is fixed. Flag to #459 team — it is not fixable within the `eslint.config.mjs` file; requires plugin upgrade or override.
+
+---
+
+## 2026-05-18 — Next.js 16 migration + ESLint 10 investigation
+
+**Session Context:** Round 1 Dependabot batch review + Round 2–5 Next.js 16 migration cycle.
+
+**Key Actions:**
+- Merged 6 safe Dependabot PRs (Phase 1: patch/minor bumps) with sequential squash-merge; 1 conflict resolved via rebase
+- Validated Phase 2 majors locally (npm install, build, vitest) before merge attempt
+- Identified 4 actionable gaps in PR #393 (eslint config, eslint-config-next version, middleware deprecation, tsconfig auto-changes)
+- Fixed FlatCompat circular reference blocker in `eslint.config.mjs` — replaced with native flat config import from `eslint-config-next/core-web-vitals`
+- Removed `@eslint/eslintrc` package dependency
+- Discovered pre-existing upstream blocker for #459: `eslint-plugin-react` inside `eslint-config-next@16.2.6` uses removed eslint@10 API (`context.getFilename()`)
+
+**Key Learnings:**
+- Framework majors (Next.js) ship with dependency bumps (eslint-config-next version updates). Plan upgrade sequences to validate paired dependencies.
+- When `eslint-config-next` exports native flat config (v16+), do NOT wrap with `FlatCompat`. Import directly: `import nextConfig from "eslint-config-next/core-web-vitals"`.
+- Vendored plugins inherit upstream API incompatibilities. When bumping eslint majors, audit all transitive plugins for API removal (context.getFilename, context.getScope, etc.).
+- Strict lockout discipline works: when code review finds a blocker in complex config (ESLint), lock implementer and bring in specialist. Avoids rework loops.
+
+**References:**
+- Dependabot batch: `.squad/decisions/inbox/kujan-dep-batch-2026-05-18.md`
+- Recon: `.squad/decisions/inbox/kujan-next16-recon-2026-05-18.md`
+- Fix: `.squad/decisions/inbox/kujan-next16-eslint-fix-2026-05-18.md`

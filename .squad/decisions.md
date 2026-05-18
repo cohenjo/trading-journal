@@ -2223,3 +2223,126 @@ No backend worker needed; data pipeline complete. Frontend-only enhancement.
 - **Synthesis:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/keaton-consolidated-approval.md`
 - **Code Review:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/keaton-review-cashflow-impl.md`
 - **Impl Notes:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/fenster-impl-notes.md`
+
+---
+
+## 2026-05-18 — Next.js 16 migration + eslint 10 unblock attempt (PRs #393, #459)
+
+**By:** Kujan (Round 1 recon), Fenster (Implementation), Keaton (Reviews), Kujan (Fix)
+**Context:** Dependabot batch review identified #393 and #459 as major version bumps requiring coordinated migration. Attempt to complete Next.js 16 and eslint 10 upgrades.
+
+### Outcome
+
+- **PR #393 (Next.js 16):** ✅ **MERGED** to main (commit `2aa8848` via coordinator merge)
+- **PR #459 (eslint 10):** 🔴 **PARKED** with upstream-block comment
+- **4 critical fixes applied:** next.config.ts, eslint-config-next bump, react-dom sync, lint script swap
+- **1 reject/fix cycle:** FlatCompat circular ref (Fenster `3855e10`) → native flat config (Kujan `f7b59f4`)
+- **Strict lockout invoked:** Fenster locked from eslint.config.mjs after Round 3 rejection; Kujan fixed in Round 4
+- **Test improvement:** 534→714 passing (react-dom 19.2.5→19.2.6 fixed 25 suite init failures)
+
+### Key Decisions
+
+#### 1. Dependabot Batch Orchestration (Kujan, Round 1)
+Merged 6 Phase 1 safe PRs (#454–#458 patches/minor) sequentially with squash-merge. Held #393 and #459 for detailed review. Phase 1 merge resolved 1 conflict in pyproject.toml via rebase + manual version alignment.
+
+**Lesson:** Framework majors (Next.js) are paired with dependency version requirements (eslint-config-next). Validate dependency compat before attempting upstream upgrade in isolation.
+
+#### 2. Hidden-Gap Reconnaissance (Kujan, Round 2)
+Identified 4 actionable gaps in #393:
+1. Deprecated `eslint: { ignoreDuringBuilds: true }` block in next.config.ts — remove entirely
+2. `eslint-config-next` version mismatch (15.5.15 vs Next 16 requires 16.x)
+3. Middleware convention deprecated (warning only, behavior unchanged)
+4. TypeScript auto-modified tsconfig.json (reviewed + reverted)
+
+ESLint 10 compat test confirmed pre-existing blocker: `eslint-config-next@15.5.15` only supports eslint ^7–^9, not ^10.
+
+#### 3. Codebase Survey (Fenster, Round 1)
+Read-only pattern audit identified existing compliance with Next 16 breaking changes:
+- Async request APIs (`cookies()`, `headers()`) already awaited ✅
+- Dynamic params/searchParams as Promise<T> not applicable (client hooks used) ✅
+- `next/image` legacy props not used ✅
+- fetch() caching defaults not applicable (Supabase client used) ✅
+
+**Conclusion:** No breaking change regressions expected.
+
+#### 4. Migration Plan (Keaton, Round 1)
+Established merge-gate checklist with 12 criteria spanning: dependency versions, config keys, TypeScript stability, test count, smoke tests, Turbopack, `next/image` rendering. Estimated 30–45 minutes effort.
+
+#### 5. Implementation (Fenster, Round 2)
+Applied 4 fixes to PR #393, commit `3855e10`:
+- Removed deprecated `eslint` config block from next.config.ts
+- Bumped `eslint-config-next` to 16.2.6 and updated lint script to `eslint .`
+- Synced `react-dom` 19.2.5→19.2.6 (bonus fix; eliminated 25 suite init failures)
+- Reverted auto-modified tsconfig.json to clean baseline
+
+Tests improved: 534 passed→714 passed. React version mismatch error gone. eslint@10 dry-run showed clean install (no config conflicts at that point).
+
+#### 6. Code Review (Keaton, Round 3)
+**REJECT** on Blocker 1: `eslint.config.mjs` uses `FlatCompat` wrapper with `eslint-config-next@16.2.6`, which exports native flat config. Circular reference in `@eslint/eslintrc@3.3.5` crashes `npm run lint` with `TypeError: property 'react' closes the circle`. All other criteria passed.
+
+**Strict lockout rule invoked:** Fenster reassigned elsewhere; Kujan picked up fix.
+
+#### 7. ESLint Flat Config Rewrite (Kujan, Round 4)
+Rewrote `eslint.config.mjs` to use native flat config import:
+```js
+import nextConfig from "eslint-config-next/core-web-vitals";
+export default [
+  { ignores: [".next/**", "node_modules/**", "dist/**", "build/**", "coverage/**"] },
+  ...nextConfig,
+];
+```
+Removed `@eslint/eslintrc` from devDependencies. `npm run lint` exits cleanly (47 pre-existing lint problems, no crash). Verified eslint@10 dry-run produced no FlatCompat circular refs.
+
+**New finding:** `eslint-plugin-react` vendored inside `eslint-config-next@16.2.6` uses `context.getFilename()` API, removed in eslint@10. Crash on any React-rule-enabled file.
+
+#### 8. Re-Review (Keaton, Round 5)
+**APPROVE** on commit `f7b59f4`. All merge-gate criteria satisfied:
+- ESLint config crash resolved ✅
+- `.next/**` in ignores ✅
+- `@eslint/eslintrc` removed ✅
+- `npm run lint` clean ✅
+- Tests 714/3 baseline ✅
+- Build zero new warnings ✅
+- tsconfig.json clean ✅
+
+**#459 (eslint 10) readiness:** Now blocked by upstream `eslint-config-next` vendoring outdated `eslint-plugin-react` with legacy API (`context.getFilename()`). Cannot merge #459 until Vercel/Next.js ships compatible `eslint-config-next`. Recommendation: flag #459 with `blocked:upstream` label, add blocker documentation.
+
+### Critical Changes Applied to #393
+
+1. **next.config.ts** — Removed `eslint: { ignoreDuringBuilds: true }` (deprecated in Next 16)
+2. **package.json** — Bumped `eslint-config-next: 15.5.15→16.2.6`, changed lint script from `next lint` to `eslint .`
+3. **react-dom** — Synced 19.2.5→19.2.6 (bonus; fixed 25 test suite init failures)
+4. **eslint.config.mjs** — Replaced FlatCompat wrapper with native flat config import, added explicit `.next/` ignores, removed `@eslint/eslintrc`
+
+### Pattern Learnings
+
+**Framework majors hide secondary incompatibilities.** Upgrading Next.js to v16 exposed a hidden dependency on `eslint-config-next` version. The config format changed (flat vs. legacy), and the test suite had a pre-existing version mismatch (react 19.2.6 vs react-dom 19.2.5) that was not caught until react-dom was synced. Always bump paired dependencies (eslint-config-next, react/react-dom parity) when framework upgrades.
+
+**Strict lockout works.** When a code review finds a blocker, immediately lock the implementer out of that file/system and bring in a specialist. Fenster's FlatCompat circular ref required deep ESLint config knowledge; Kujan's fix was surgical and didn't loop. Avoid rework by swapping early.
+
+**Downstream API incompatibilities are not always visible until tested.** The `eslint-plugin-react` issue only surfaced when attempting to run eslint@10. The plugin API removal (`context.getFilename()`) is not documented in breaking changes checklists — it's buried in transitive dependencies (vendored inside `eslint-config-next`). Plan for this by flagging upstream blockers with clear evidence (stack trace, version).
+
+**Test count is a proxy for health.** Going from 534→714 passing tests on a simple react-dom sync revealed a silent failure mode (test suite init failures) that didn't surface in CI checks. Always run full test suite locally during framework migrations.
+
+### History Updates
+
+Appended to `.squad/agents/{kujan,fenster,keaton}/history.md`:
+
+**2026-05-18 — Next.js 16 Migration (PRs #393, #459)**
+- Pattern: Framework majors + dependency bumps can hide secondary incompatibilities (eslint-plugin-react upstream issue)
+- Discipline win: Strict lockout invocation worked — Fenster's rejection led to clean Kujan fix without rework loops
+- Finding: react-dom sync side effect — when bumping react patch in isolation, react-dom must follow (fixes 25 suite init failures)
+- Blocker: #459 parked due to upstream `eslint-plugin-react` using removed eslint@10 API (`context.getFilename()`)
+
+### References
+
+- Dependabot review: `.squad/decisions/inbox/kujan-dep-batch-2026-05-18.md` (Phase 1 merge + Phase 2 findings)
+- Recon: `.squad/decisions/inbox/kujan-next16-recon-2026-05-18.md` (4 actionable gaps identified)
+- Survey: `.squad/decisions/inbox/fenster-next16-codebase-survey-2026-05-18.md` (breaking change patterns audit)
+- Plan: `.squad/decisions/inbox/keaton-next16-migration-plan-2026-05-18.md` (merge gate checklist)
+- Impl: `.squad/decisions/inbox/fenster-next16-impl-2026-05-18.md` (4 fixes applied, tests 714/3)
+- Review 1: `.squad/decisions/inbox/keaton-next16-review-2026-05-18.md` (REJECT on FlatCompat blocker)
+- Fix: `.squad/decisions/inbox/kujan-next16-eslint-fix-2026-05-18.md` (native flat config rewrite, eslint@10 finding)
+- Review 2: `.squad/decisions/inbox/keaton-next16-rereview-2026-05-18.md` (APPROVE, #459 upstream block documented)
+
+---

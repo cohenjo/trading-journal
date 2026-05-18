@@ -239,3 +239,13 @@ Synthesis call (opus-4.6): triaged root causes (frontend optimistic UI swallow, 
 - Verdict: REJECT
 - Findings: 2 critical / 5 important / 2 nits
 - See: `.squad/decisions/inbox/keaton-review-cashflow-impl.md`
+
+### 2026-05-18 — PR #393 Next 16 Migration Review (Round 3 Gate)
+
+- Verdict: REJECT — `eslint.config.mjs` FlatCompat wrapper crashes with `eslint-config-next@16` native flat config (circular reference in @eslint/eslintrc). `npm run lint` broken; CI lint job will fail. Fixer: Kujan.
+
+### 2026-05-18 — PR #393 Next 16 Re-Review (Round 5 Gate)
+
+- Verdict: APPROVE — Kujan's `f7b59f4` resolves FlatCompat blocker. Native flat config import, `.next/` ignores, `@eslint/eslintrc` removed. Lint/test/build all match baseline. eslint@10 blocked upstream (`eslint-plugin-react` uses removed `context.getFilename()`); documented for #459.
+
+2026-05-18: When a vendored plugin uses a deprecated API, the upgrade is blocked on the vendoring package (eslint-config-next) — always verify transitive plugin compat before approving major eslint bumps.
