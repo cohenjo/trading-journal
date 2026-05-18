@@ -1,3 +1,4 @@
+// TODO(next-17): migrate to proxy convention when Next 17 plans removal — preserve edge runtime
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 

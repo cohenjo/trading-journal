@@ -2,10 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  eslint: {
-    // Pre-existing lint errors — lint is checked separately in CI
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     // Pre-existing TS errors — type-check is run separately in CI
     ignoreBuildErrors: true,
