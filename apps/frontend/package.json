@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack -H 0.0.0.0",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "lint": "next lint",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -36,7 +36,7 @@
     "next": "^16.2.6",
     "react": "^19.2.6",
     "react-calendar": "^6.0.1",
-    "react-dom": "^19.2.5",
+    "react-dom": "^19.2.6",
     "sonner": "^2.0.7"
   },
   "devDependencies": {
@@ -52,7 +52,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.6",
     "eslint": "^9",
-    "eslint-config-next": "^15.5.15",
+    "eslint-config-next": "^16.2.6",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
     "tsx": "^4.19.2",
