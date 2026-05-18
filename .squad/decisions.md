@@ -2215,11 +2215,11 @@ No backend worker needed; data pipeline complete. Frontend-only enhancement.
 
 #### References
 
-- **Architecture:** `.squad/decisions/inbox/keaton-cashflow-dividend-redesign.md`
-- **UI Design:** `.squad/decisions/inbox/fenster-cashflow-ui-design.md`
-- **Simulation:** `.squad/decisions/inbox/mcmanus-dividend-reinvest-simulation.md`
-- **Backend Audit:** `.squad/decisions/inbox/hockney-dividend-worker-design.md` (confirmed no worker needed)
-- **Test Plan:** `.squad/decisions/inbox/redfoot-cashflow-dividend-test-plan.md`
-- **Synthesis:** `.squad/decisions/inbox/keaton-consolidated-approval.md`
-- **Code Review:** `.squad/decisions/inbox/keaton-review-cashflow-impl.md`
-- **Impl Notes:** `.squad/decisions/inbox/fenster-impl-notes.md`
+- **Architecture:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/keaton-cashflow-dividend-redesign.md`
+- **UI Design:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/fenster-cashflow-ui-design.md`
+- **Simulation:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/mcmanus-dividend-reinvest-simulation.md`
+- **Backend Audit:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/hockney-dividend-worker-design.md` (confirmed no worker needed)
+- **Test Plan:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/redfoot-cashflow-dividend-test-plan.md`
+- **Synthesis:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/keaton-consolidated-approval.md`
+- **Code Review:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/keaton-review-cashflow-impl.md`
+- **Impl Notes:** `.squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/fenster-impl-notes.md`
