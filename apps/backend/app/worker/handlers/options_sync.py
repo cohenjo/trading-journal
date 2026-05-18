@@ -213,6 +213,8 @@ def run_flex_options_sync(
             bond_count = _sync_bond_positions(
                 session, account.household_id, account.config_id, parsed_account_id, scoped
             )
+            # Write last_synced only after the full per-account pipeline succeeds.
+            _update_config_last_synced(session, account.config_id)
             total_trades += counts["trade_count"]
             total_cash += counts["cash_event_count"]
             total_positions += counts["position_count"]
@@ -773,31 +775,54 @@ def _seed_security_reference_from_positions(
 
 
 def _load_accounts(session: Session, *, account_id: str | None) -> list[OptionsAccount]:
+    """Load trading account configs that are eligible for Flex options sync.
+
+    Configs whose household_id is not present in the households table (or whose
+    household has been soft-deleted) are excluded.  Each excluded row is logged
+    at WARNING level so future orphans are visible without crashing the sync.
+    """
     params: dict[str, Any] = {}
-    filters = ["coalesce(compute_options_income, true) = true", "deleted_at is null"]
+    filters = ["coalesce(c.compute_options_income, true) = true", "c.deleted_at is null"]
     if account_id:
-        filters.append("account_id = :account_id")
+        filters.append("c.account_id = :account_id")
         params["account_id"] = account_id
     rows = session.execute(
         text(
             f"""
-            select id, household_id::text as household_id, account_id
-              from public.trading_account_config
+            select c.id,
+                   c.household_id::text as household_id,
+                   c.account_id,
+                   (h.id is not null) as household_exists
+              from public.trading_account_config c
+              left join public.households h
+                     on h.id = c.household_id
+                    and h.deleted_at is null
              where {" and ".join(filters)}
-             order by id
+             order by c.id
             """
         ),
         params,
     ).mappings()
-    return [
-        OptionsAccount(
-            household_id=str(row["household_id"]),
-            account_id=str(row["account_id"]) if row["account_id"] else None,
-            config_id=int(row["id"]),
+    accounts: list[OptionsAccount] = []
+    for row in rows:
+        if not row["household_id"]:
+            continue
+        if not row["household_exists"]:
+            logger.warning(
+                "_load_accounts: skipping orphaned config — account_id=%r household_id=%r "
+                "(household missing or soft-deleted); soft-delete this config to silence",
+                row["account_id"],
+                row["household_id"],
+            )
+            continue
+        accounts.append(
+            OptionsAccount(
+                household_id=str(row["household_id"]),
+                account_id=str(row["account_id"]) if row["account_id"] else None,
+                config_id=int(row["id"]),
+            )
         )
-        for row in rows
-        if row["household_id"]
-    ]
+    return accounts
 
 
 def _select_flex_source(
@@ -1292,6 +1317,28 @@ def _upsert_sync_state(
             "row_counts": _json(counts),
             "metadata": _json({"accountInformation": [row.raw_payload for row in parsed.account_information]}),
         },
+    )
+
+
+def _update_config_last_synced(session: Session, config_id: int | None) -> None:
+    """Stamp trading_account_config.last_synced / last_synced_at to UTC now.
+
+    Called only after a successful per-account Flex ingest so the Accounts page
+    reflects the real last-sync time.  No-ops when config_id is None (account
+    matched without a config row, e.g. wildcard mode).
+    """
+    if config_id is None:
+        return
+    session.execute(
+        text(
+            """
+            update public.trading_account_config
+               set last_synced    = now(),
+                   last_synced_at = now()
+             where id = :config_id
+            """
+        ),
+        {"config_id": config_id},
     )
 
 

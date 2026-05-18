@@ -88,6 +88,7 @@ class InMemoryOptionsSession:
                         "id": 1,
                         "household_id": HOUSEHOLD_ID,
                         "account_id": ACCOUNT_ID,
+                        "household_exists": True,
                     }
                 ]
             )

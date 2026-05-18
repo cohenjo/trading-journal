@@ -56,6 +56,7 @@ class FakeSession:
                         "id": 1,
                         "household_id": "10000000-0000-0000-0000-000000000001",
                         "account_id": "U123",
+                        "household_exists": True,
                     }
                 ]
             )

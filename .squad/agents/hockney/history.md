@@ -1,3 +1,50 @@
+## 2026-05-19 — Flex Query Worker Diagnostic
+
+**Task:** Read-only diagnostic of IBKR Flex Query worker for Jony's 5 questions.
+
+**Learnings:**
+
+- **Two completely separate sync paths, two separate "last synced" fields.** The Accounts page reads `trading_account_config.last_synced` (written only by live IB Gateway path). The Options page reads `options_flex_sync_state.last_sync_at` (written by Flex XML path). These are decoupled — one can be stale while the other is fresh. The Accounts page will ALWAYS show "Never" while IB Gateway is offline, regardless of Flex health.
+
+- **Orphaned E2E test rows in production are silent P0s.** An E2E test account config (`E2E_TRADING_*`) was left in `trading_account_config` with a `household_id` that no longer exists in `households`. `_load_accounts()` has no join guard against orphaned households. This caused 7 consecutive silent nightly failures (May 13–19) before being discovered. Always clean up E2E test data in teardown, and add a join guard in `_load_accounts()`.
+
+- **APScheduler logs errors but raises no alerts.** 7 nights of P0 failures, zero team notification. The nightly-backup workflow has a GitHub-issue alert pattern we should copy for the Flex sync. Log monitoring ≠ alerting.
+
+- **Flex API fetch succeeds even when DB write fails.** IBKR Flex token and query IDs are valid and the live API responds correctly each night. The failure is entirely in the local DB write step. So the Flex integration with IBKR itself is healthy — only our DB has the orphaned row problem.
+
+- **`IBKR_FLEX_TOKEN` absent from `docker-compose.backend.yml` env block.** It's passed via `.env` auto-read. New developers missing this will get synthetic data silently. Should be documented in `.env.example` and optionally validated at worker startup.
+
+- **Container started May 13 per `docker ps` output.** The `docker ps` "X days ago" field is a reliable way to date the current container's birth. Cross-reference with `git log` to identify what code the container is running.
+
+**Report:** `.squad/decisions/inbox/hockney-flex-query-diagnosis-2026-05-19.md`
+**Bugs found:** 2 bugs (P0 FK violation, P1 misleading "Never"), 2 smells (no alerting, missing env doc)
+
+---
+
+## 2026-05-19 — Round 1 Implementation: Flex sync fixes (PR squad/flex-sync-fixes)
+
+**Task:** Implement Bug #1 + Bug #2 from the Flex Query diagnostic.
+
+**Bug #1 (P0) — Orphan E2E account crashes nightly Flex sync:**
+- **Migration** `supabase/migrations/20260518211744_cleanup_orphaned_e2e_trading_account_config.sql`: idempotent soft-delete of any `trading_account_config` row whose `household_id` is absent from `households`. Predicate: `WHERE household_id NOT IN (SELECT id FROM households) AND deleted_at IS NULL`.
+- **Guard in `_load_accounts()`**: rewrote the query to LEFT JOIN `households` and include `(h.id is not null) as household_exists`. Rows with `household_exists=False` are excluded and logged at WARNING level with account_id + household_id for visibility.
+
+**Bug #2 (P1) — Accounts page shows "Never" even when Flex is healthy:**
+- Added `_update_config_last_synced(session, config_id)` helper that stamps `trading_account_config.last_synced` and `last_synced_at` to `now()`.
+- Called in `run_flex_options_sync()` after each per-account ingest pipeline completes successfully. Skipped on failure paths (exception propagates naturally before the call).
+
+**Tests added (4 new in `tests/worker/test_options_sync.py`):**
+- `test_load_accounts_filters_orphaned_household` — orphan row excluded + WARNING logged
+- `test_load_accounts_returns_valid_config` — valid config returned with correct fields
+- `test_successful_flex_sync_updates_last_synced` — last_synced stamped after synthetic sync
+- `test_failed_flex_sync_does_not_update_last_synced_for_failing_account` — last_synced skipped for the failing account, written for the successful one
+
+**Also updated:** `household_exists: True` added to FakeSession account rows in `test_backfill_options.py`, `test_options_grouping.py`, `test_options_margin_sync.py` to match the updated query.
+
+**Results:** 632/632 backend tests pass. Lint clean.
+
+---
+
 ## 2026-05-12 — Round 8 Phase 2.5: Worker Redeploy Skill + Rebuild Script
 
 **Task:** Codify the Round 8 root cause as an enforced protocol to prevent recurrence.
