@@ -44,3 +44,10 @@
 - Team roadmap synchronized (Phase 0/1/2, Oct 30 deadline)
 - 7 follow-up tasks identified for Phase execution
 - No inbox files deleted pending Scribe protocol check on archival pattern
+
+**[2026-05-18 22:45] Session log: cash-flow dividend redesign**
+- Merged 8 inbox files into decisions.md (one consolidated entry)
+- Archived inbox → .squad/decisions/archive/2026-05-18-cashflow-dividend-redesign/
+- PR #460 opened; Keaton code review identified 2 blockers (year-0 double-count, IRA type mapping) + 5 important findings; addressed in commits 514f16d + 713e4fe
+- Test state: 714/717 (3 pre-existing failures on main unchanged)
+- Key decisions: per-account real dividends supersede yield config; IBKR/Schwab/IRA mapping with type fallback; 3 income + 3 reinvest Sankey nodes; monthly/yearly toggle local-state-only; mass conservation invariant; year-0 mapped accounts skip synthetic; Sankey topology deferred; tax: all dividends taxed equally at plan-level rate
