@@ -117,7 +117,7 @@ jobs:
           E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
 
       - name: Upload Playwright report (on failure)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report-pr-${{ github.event.pull_request.number }}
@@ -125,7 +125,7 @@ jobs:
           retention-days: 14
 
       - name: Upload test traces + screenshots (always)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-pr-${{ github.event.pull_request.number }}
@@ -197,7 +197,7 @@ jobs:
           E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
 
       - name: Upload Playwright report (on failure)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report-nightly-${{ github.run_id }}
@@ -205,7 +205,7 @@ jobs:
           retention-days: 14
 
       - name: Upload test traces + screenshots (always)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-nightly-${{ github.run_id }}
@@ -321,7 +321,7 @@ jobs:
           E2E_TEST_USER_PASSWORD: ${{ secrets.E2E_TEST_USER_PASSWORD }}
 
       - name: Upload Playwright report (on failure)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report-dispatch-${{ github.run_id }}
@@ -329,7 +329,7 @@ jobs:
           retention-days: 14
 
       - name: Upload test traces + screenshots (always)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-dispatch-${{ github.run_id }}
