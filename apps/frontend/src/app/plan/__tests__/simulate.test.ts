@@ -772,4 +772,153 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
 
     expect(divLineTotal).toBeCloseTo(expectedTotal, 0);
   });
+
+  // ── test 11: year-0 mapped account does NOT double-count with yield-based dividend ─
+
+  it('year 0 (currentYear): mapped IBKR account skips yield-based synthetic dividend (no double-count)', async () => {
+    // IBKR has dividend_yield=5% and value=$100K → would emit $5K synthetic dividend in year 0.
+    // dividendByAccount.ibkr=$12K should REPLACE that, not add to it.
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'ibkr-acc',
+          name: 'IBKR',
+          category: 'Account',
+          currency: 'USD',
+          value: 100_000,
+          growth_rate: 0,
+          account_settings: accountSettings({
+            type: 'Broker',
+            fees: 0,
+            dividend_yield: 5,
+            withdrawal_priority: 1,
+          }),
+          inflow_priority: 1,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 12_000, schwab: 0, ira: 0 },
+    });
+
+    const yr0 = result[0];
+    const dividendLines = yr0.income_details.filter(d => d.type === 'dividends' || d.type === 'Dividend Income');
+    // Only the per-account 'Dividend - IBKR' line should appear; the synthetic 'Dividend: IBKR' must not.
+    expect(dividendLines.some(d => d.name === 'Dividend: IBKR')).toBe(false);
+    expect(dividendLines.some(d => d.name === 'Dividend - IBKR')).toBe(true);
+    expect(yr0.total_dividend_income).toBeCloseTo(12_000, -1);
+  });
+
+  // ── test 12: IRA mapping via account type (no 'ira' in name) ──────────────
+
+  it('maps IRA by account type, not just name: { name: "Retirement", type: "IRA" } gets reinvested', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'retire',
+          name: 'Retirement',  // no 'ira' substring
+          category: 'Account',
+          currency: 'USD',
+          value: 100_000,
+          growth_rate: 0,
+          account_settings: accountSettings({
+            type: 'IRA',
+            fees: 0,
+            dividend_yield: 0,
+            withdrawal_priority: 1,
+          }),
+          inflow_priority: 1,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 0, schwab: 0, ira: 5_000 },
+    });
+
+    const yr0 = result[0];
+    const yr1 = result[1];
+
+    // Income + reinvest lines emitted
+    expect(yr0.income_details).toContainEqual(
+      expect.objectContaining({ name: 'Dividend - IRA', value: 5_000 }),
+    );
+    expect(yr0.savings_details).toContainEqual(
+      expect.objectContaining({ name: 'Dividend Reinvest - IRA', value: 5_000 }),
+    );
+
+    // Account balance grew by the reinvest amount (mapping worked end-to-end)
+    const retireAcc0 = yr0.accounts.find(a => a.name === 'Retirement');
+    const retireAcc1 = yr1.accounts.find(a => a.name === 'Retirement');
+    expect(retireAcc0?.value).toBeCloseTo(105_000, -2);
+    expect(retireAcc1?.value).toBeCloseTo(110_000, -2);
+  });
+
+  // ── test 13: all-zero dividendByAccount falls through to legacy aggregate ──
+
+  it('dividendByAccount = { 0, 0, 0 }: emits no per-account lines, falls back to legacy aggregate path', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'sal',
+          name: 'Salary',
+          category: 'Income',
+          currency: 'USD',
+          value: 100_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 0, schwab: 0, ira: 0 },
+      // @ts-expect-error legacy dividendTotal still accepted alongside dividendByAccount
+      dividendTotal: { annualTotal: 4_000 },
+    });
+
+    const yr0 = result[0];
+    const perAccountLines = yr0.income_details.filter(d => d.type === 'dividends' && d.name?.startsWith('Dividend - '));
+    expect(perAccountLines).toHaveLength(0);
+
+    // Legacy single 'Dividend Income' line appears
+    expect(yr0.income_details).toContainEqual(
+      expect.objectContaining({ name: 'Dividend Income', type: 'dividends', value: 4_000 }),
+    );
+
+    // No reinvestment outflows from legacy aggregate path
+    const reinvest = yr0.savings_details.filter(d => d.type === 'reinvestment');
+    expect(reinvest).toHaveLength(0);
+  });
+
+  // ── test 14: legacy aggregate also updates total_dividend_income ──────────
+
+  it('legacy dividendTotal.annualTotal (no dividendByAccount) is reflected in total_dividend_income', async () => {
+    const plan: PlanData = { items: [], milestones: [], settings: {} };
+
+    const result = await runPlanSimulation({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendTotal: { annualTotal: 5_000 },
+    });
+
+    expect(result[0].total_dividend_income).toBeCloseTo(5_000, -1);
+  });
 });

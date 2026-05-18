@@ -31,11 +31,13 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
     const settings = { ...defaults, ...(item.account_settings || {}) } as NonNullable<PlanItem['account_settings']>;
 
     // Detect if this account has real dividend data from getDividendSummary().by_account
+    // Maps by both name substring (IBKR/Schwab/IRA/Leumi) and account type ('IRA') so a
+    // user with `{ name: 'Retirement', type: 'IRA' }` still gets the auto-banner.
     const accountKey = ((): 'ibkr' | 'schwab' | 'ira' | null => {
         const n = (item.name || '').toLowerCase();
         if (n.includes('ibkr') || n.includes('interactive')) return 'ibkr';
         if (n.includes('schwab')) return 'schwab';
-        if (n.includes('ira') || n.includes('leumi')) return 'ira';
+        if (settings.type === 'IRA' || n.includes('ira') || n.includes('leumi')) return 'ira';
         return null;
     })();
     const autoRealAmount = accountKey && dividendAutoAccounts ? dividendAutoAccounts[accountKey] : 0;

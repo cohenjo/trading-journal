@@ -113,7 +113,6 @@ export default function PlanPage() {
                 settings: settings as unknown as Record<string, unknown>,
                 optionsProjection,
                 dividendTotal,
-                // @ts-expect-error pending PR squad/cashflow-dividend-redesign — McManus is adding dividendByAccount
                 dividendByAccount,
                 bondProjection,
             })

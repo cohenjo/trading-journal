@@ -541,8 +541,9 @@ class Accounts {
 
   constructor(readonly accounts: Account[], private readonly settings: Record<string, unknown>, private readonly birthYear: number) {}
 
-  currentDividendPayouts(): DividendPayout[] {
+  currentDividendPayouts(skipAccountIds?: Set<string>): DividendPayout[] {
     return this.accounts.flatMap(account => {
+      if (skipAccountIds && account.id && skipAccountIds.has(account.id)) return [];
       const gross = account.dividend_mode === 'Fixed' && account.dividend_fixed_amount
         ? account.dividend_fixed_amount
         : account.value.mul(account.yield.div(100));
@@ -824,9 +825,9 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     if (schwabAcc?.id) mappedAccountIds.add(schwabAcc.id);
     dividendAccountMap.set('schwab', schwabAcc);
 
-    // IRA: prefer type=Pension with 'ira' in name, fallback to any account with 'ira' in name
+    // IRA: prefer real account type 'IRA', then any account with 'ira' in name
     const iraAcc =
-      accounts.find(a => a.type === 'Pension' && a.name.toLowerCase().includes('ira')) ??
+      accounts.find(a => a.type === 'IRA') ??
       accounts.find(a => a.name.toLowerCase().includes('ira')) ??
       null;
     if (iraAcc?.id) mappedAccountIds.add(iraAcc.id);
@@ -865,7 +866,7 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       dividends = growth.dividends;
       realAssetManager.processGrowth();
     } else {
-      dividends = accountManager.currentDividendPayouts();
+      dividends = accountManager.currentDividendPayouts(mappedAccountIds);
     }
 
     let grossIncome = new Decimal(0);
@@ -964,6 +965,10 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
         incomeDetails.push({ name: 'Dividend Income', type: 'dividends', value: roundMoney(dividendIncome) });
       }
     }
+    // Legacy aggregate dividend also contributes to total_dividend_income tracker (mirrors per-account behavior).
+    const legacyDividendForTracker = (planInput.dividendByAccount === undefined)
+      ? new Decimal(dividendAnnualTotal)
+      : new Decimal(0);
 
     // Virtual bond ladder income — per-year coupon + principal amounts (#441)
     const bondIncome = new Decimal(bondMap.get(year) ?? 0);
@@ -1042,6 +1047,8 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     let totalDividendIncome = dividends.reduce((sum, dividend) => sum.plus(dividend.gross), new Decimal(0));
     if (planInput.dividendByAccount !== undefined) {
       totalDividendIncome = totalDividendIncome.plus(totalRealDividendsAnnual);
+    } else {
+      totalDividendIncome = totalDividendIncome.plus(legacyDividendForTracker);
     }
 
     projection.push({

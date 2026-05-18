@@ -66,7 +66,6 @@ export default function CashFlowPage() {
                 finances,
                 settings: settings as unknown as Record<string, unknown>,
                 dividendTotal,
-                // @ts-expect-error pending PR squad/cashflow-dividend-redesign — McManus is adding dividendByAccount
                 dividendByAccount,
                 bondProjection,
             })
