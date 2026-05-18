@@ -1,84 +1,10 @@
-## 2026-05-13 — Regression diagnostic: "Plan not saved. Failed to create plan." (PR #443 follow-up)
+# Fenster — Active History
 
-**Triggered by:** jocohe report — toast fires but save fails for any expense on `/plan`.
-
-**Trace summary:**
-
-- **Toast source:** `apps/frontend/src/app/plan/page.tsx:98` — `handleUpdatePlanData` falls into the `else` (create) branch because `plan.id` is `undefined` on a brand-new plan. `createPlan` returns `{ ok: false, error: '...' }`, triggering rollback + toast.
-- **createPlan:** `apps/frontend/src/app/plan/actions.ts:170-173` — the Supabase INSERT fails; the real error (`error.message`) was only logged **server-side** via `console.error`. The returned error was a sanitized generic string — **invisible to browser devtools**. This is the critical logging gap.
-- **household_id:** Resolved cleanly via `resolveHouseholdId()` → `household_members` lookup. A null here returns a distinct `'Not authenticated or no active household'` message; the user saw `'Failed to create plan'`, confirming `household_id` was resolving but the INSERT failed.
-- **data serialization:** `PlanData` passed as flat object (no `data` envelope). `normalizeCreatePayload` correctly takes the raw-PlanData path. No `undefined` values; valid jsonb shape.
-- **Root cause hypothesis (ranked):** 1) `plans` table missing / migration not applied on target DB; 2) RLS policy blocking INSERT for the user's `household_id`; 3) NOT NULL constraint on an unset column.
-- **Logging gap patched:** One-line fix in `createPlan` to propagate `error.message` to the returned error payload, so the existing `console.error` on `page.tsx:97` surfaces the real Supabase error in the browser console. Shipped as draft PR on branch `squad/440-followup-error-logging`.
-- **Open for Hockney:** Confirm whether `plans` table exists + migration status; check RLS policy on `plans` INSERT; check for NOT NULL columns without defaults.
-
-## 2026-05-13 — PR #443 squad/440-error-surfacing
-
-Shipped P0 frontend fixes: error surfacing in `/plan` handleUpdatePlanData + empty-state CTA in `/cash-flow`.
-
-- `/plan`: captures `previousPlan` before optimistic write; on `result.ok === false` rolls back state, fires `toast.error()` via sonner, and `console.error`s for devtools. Installed sonner + added `<Toaster>` to root layout.
-- `/cash-flow`: replaced silent `return;` with a proper empty-state component (heading + copy + CTA link to `/plan`) when no plan exists post-load.
-- `CashFlowSankey`: updated zero-nodes message to include a navigable link to `/plan`.
-
-P1 income-stream wiring (dividends + bonds) pending Keaton architectural synthesis.
-## 2026-05-13 — PR #441 squad/441-income-streams
-
-Shipped P1 income-stream wiring: dividends + bonds + options as virtual, read-only rows in `/plan` and `/cash-flow`.
-
-- `simulation.ts`: added `dividendTotal` + `bondProjection` inputs (follow `optionsMap` pattern); dividend income is a constant annual total; bonds are per-year from `buildIncome()` income_series.
-- `plan/page.tsx` + `cash-flow/page.tsx`: extended `Promise.all` to fetch `getDividendSummary()` + `getLadderIncome()` in parallel alongside existing calls.
-- `PlanEditor.tsx`: new `virtualIncomeStreams` prop + `virtualSummaryIncomeItems` useMemo; 3 locked rows at top of Income tab with "Auto" badge (emerald) and tooltip.
-- Decision note: `.squad/decisions/inbox/fenster-virtual-income-implementation.md` — documents exact data shapes, year-bucket key, and edge cases.
+> **Last summarized:** 2026-05-13 (removed 81 older entries to archive)
+> **Current size:** 11038 bytes
 
 ---
 
-## 2026-05-09 — #340 follow-up: account label rename
-
-Renamed tab display labels to match Jony's finalized directive:
-- `ibkr: "IBKR"` → `ibkr: "InteractiveBrokers"`
-- `ira: "IRA (Hishtalmut)"` → `ira: "LeumiIRA"`
-- `schwab: "Schwab"` (unchanged)
-
-Internal `account_type` codes stay as tech identifiers (ibkr, schwab, ira).
-
-**Files touched:**
-- `apps/frontend/src/app/trading/accounts/page.tsx` — central `TAB_LABELS` mapping (3-line change)
-- `apps/frontend/src/components/trading/accounts/__tests__/AggregatePortfolioFooter.test.tsx` — test fixture names
-
-**Test results:** 364/364 green (no regressions).
-
-**Commit:** 06c4984 (pushed to origin/main).
-
----
-
-## 2026-05-11 — #363/#364 Dividends + Bonds: frontend wiring + playwright e2e (PR #365)
-
-**Scope:** Wire backend data (`getDividendPositions`, `getDividendSummary`, `getLadderOverviewByAccount`) into UI components; 3-tab layout for dividends and bonds; comprehensive e2e specs.
-
-**Files created:**
-- `apps/frontend/src/components/Dividends/DividendPositionsTable.tsx` — sorted by `forward_dividend_annual` DESC; 9 columns (Ticker/Qty/Price/TTM Yield%/TTM Yield$/Fwd Yield%/Fwd Annual$/Frequency/Last Payment)
-- `apps/frontend/src/components/Dividends/DividendAccountTab.tsx` — per-tab component with `useEffect` fetch + collapsible history
-- `apps/frontend/e2e/dividends-positions-mirror.spec.ts` — 6 e2e specs for #363
-- `apps/frontend/e2e/bonds-account-tabs.spec.ts` — 5 e2e specs for #364
-
-**Files rewritten:**
-- `apps/frontend/src/app/dividends/page.tsx` — 3-tab layout with `DividendAccountTab`, summary header, testids
-- `apps/frontend/src/app/ladder/page.tsx` — added 3-tab pattern with `getLadderOverviewByAccount`
-
-**Testids:** `dividends-summary-total`, `dividends-account-empty`, `dividends-history-toggle`, `bonds-account-empty`, `bonds-tab-{ibkr,schwab,ira}`
-
-**Test results:** 471/471 unit tests pass; 13/13 playwright specs pass (8/8 #363, 5/5 #364).
-
-**Observation:** Fenster specs lack auth fixture in current e2e/ — all specs fail on protected routes. Workaround: use `auth-cookie` fixture for real runs. Noted for Redfoot validation.
-
-**TS hygiene:** Work around type conflict — import `DividendPosition` directly from `@/types/dividends`, NOT from `@/app/dividends/actions` (had conflicting local interface).
-
----
-
-
-### Pattern established
-
-This is the **template for all 32 MOVE endpoints**. See decision note at:
 `.squad/decisions/inbox/fenster-finances-server-action.md`
 
 ### Build/test results
@@ -201,3 +127,61 @@ Frontend recon (sonnet-4.6) + P0 error surfacing: identified optimistic UI with 
 ## 2026-05-13 — Plan persistence + cashflow sprint, PR #445 (Round 9, Issue #441)
 
 P1 income-stream wiring (sonnet-4.6): dividends + bonds + options as virtual read-only rows. PR #445: extended Promise.all to fetch getDividendSummary() + getLadderIncome(); added dividendTotal + bondProjection inputs to simulation.ts (follow optionsMap pattern); PlanEditor renders virtualIncomeStreams with "Auto" badge (emerald), isVirtual: true. Edge cases documented (zero values shown, missing streams undefined). FX limitation on multi-currency bonds noted as Round 10 follow-up. Verified Vercel green post-merge, PR #445 rebased ×1 post-Hockney.
+
+## 2026-05-18 — Cash Flow Page UI Enhancement Design (Design Doc)
+
+**Requested by:** Jony Vesterman Cohen
+
+Created comprehensive frontend design document for two cash flow page enhancements:
+
+### 1. Monthly/Yearly Toggle
+- **Location:** Header section, inline with year display and age indicators
+- **Component:** Pill-style toggle with emerald-600 active state (matches existing palette)
+- **State:** Local `useState<'yearly' | 'monthly'>` in CashFlowPage (not SettingsContext — view preference, not global setting)
+- **Default:** 'yearly' (no breaking change)
+- **Value transformation:** useMemo-derived `displayData` divides all monetary values by 12 at render time (income, expenses, savings_details, etc.)
+- **A11y:** `aria-pressed` on buttons, keyboard-accessible, focus ring utilities
+- **Summary cards:** Show "/ mo" badge when monthly mode active
+
+### 2. Per-Account Dividend Flows in Sankey
+- **Income sources:** 3 new nodes (Dividend: IBKR, Dividend: Schwab, Dividend: IRA) flowing into Investment Income type
+- **Reinvestment sinks:** 3 new destination nodes (Reinvest: IBKR/Schwab/IRA) as outflows from Net Savings
+- **Naming convention:** `income_src_Dividend: {account}` and `reinvest_dest_{account}` to avoid ID collision with existing `save_dest_{account}` nodes
+- **Color scheme:** Dividend sources = emerald `#34d399`, Reinvestment destinations = bright indigo `#7c7ef8` (20% brighter than standard savings `#6366f1`)
+- **Data contract:** Keaton to extend `runPlanSimulation()` output with per-account breakdown in `income_details` and `savings_details`
+- **Backend input:** `getDividendSummary()` already returns `by_account: { ibkr, schwab, ira }` — simulation consumes directly
+- **Zero-value filtering:** Omit accounts with $0 dividend from output (no orphaned nodes)
+
+### 3. Plan Page Implications
+**Recommendation:** Replace editable dividend controls with **"Auto from real positions" read-only banner** showing per-account totals. Rationale: dividend income is now auto-calculated via `getDividendSummary()` — user-entered policies would be overridden and confusing.
+
+### Edge Cases Documented
+- Empty dividend account (0-value filtering)
+- Lopsided Sankey when reinvestment rate = 0 (no reinvest entries emitted)
+- Currency mismatch (ILS mainCurrency with USD dividends — existing FX approximation limitation documented)
+- Reinvestment rate > 100% or < 0% (Keaton to clamp to [0, 1])
+
+### Test Surfaces (for Redfoot)
+- Toggle interaction + aria-pressed state
+- Monthly calculations (all values / 12)
+- Per-account dividend node rendering (3 sources + 3 sinks)
+- 0-value account omission (no orphaned nodes)
+- Color differentiation (dividend emerald vs reinvestment bright indigo vs regular savings indigo)
+- Integration: `getDividendSummary` → simulation → Sankey
+
+**Files produced:**
+- `.squad/decisions/inbox/fenster-cashflow-ui-design.md` (22KB, 8 sections)
+
+**Open questions for Jony:**
+1. Should monthly/yearly preference persist in localStorage?
+2. Reinvestment naming: "Reinvest: IBKR" vs "IBKR Dividend Reinvestment"?
+3. Plan page controls: confirm removal of editable dividend inputs acceptable?
+4. Should monthly toggle apply to options income too, or only dividends?
+
+## Learnings
+
+**Design-first sprint pattern works.** When UX changes involve multiple pages + backend contracts + test surfaces, producing a design doc BEFORE code prevents re-work. The monthly toggle decision (local state vs SettingsContext) and the plan page removal (vs grayed-out locked state) are architectural choices that would have caused refactor loops if discovered mid-implementation. Documenting the per-account data flow contract (Keaton's domain) ensures alignment before backend work starts.
+
+## 2026-05-18 — Cash Flow UI Implementation, PR squad/cashflow-dividend-redesign (`09cd6c1`)
+
+Monthly/yearly toggle added to cash-flow header (pill button, local useState, resets on reload). `displayData` useMemo scales all monetary fields ÷12 in monthly mode; summary card labels get "/ mo" suffix. Sankey reinvestment nodes now use indigo `#7c7ef8` vs regular savings `#6366f1`. Plan page wires `dividendByAccount` to simulation and threads `dividendAutoAccounts` through PlanEditor→PlanModal→PlanAccountDetails; accounts with real positions (>$0) show blue "Auto from real positions" banner and hide editable yield/policy controls. Build: ✅ (`npm run build` exit 0, 6 files changed).

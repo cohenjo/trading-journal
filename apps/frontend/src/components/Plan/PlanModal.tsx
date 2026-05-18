@@ -14,6 +14,8 @@ interface Props {
     milestones?: PlanMilestone[];
     initialData?: PlanItem;
     mode?: 'planning' | 'snapshot';
+    /** Per-account dividend totals — passed to PlanAccountDetails to show auto-banner */
+    dividendAutoAccounts?: { ibkr: number; schwab: number; ira: number };
 }
 
 const INCOME_TYPES = [
@@ -64,7 +66,7 @@ const ACCOUNT_TYPES = [
     { label: 'Custom Account', icon: '💲' },
 ];
 
-export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, milestones = [], initialData, mode = 'planning' }) => {
+export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, milestones = [], initialData, mode = 'planning', dividendAutoAccounts }) => {
     const [step, setStep] = useState<'type-select' | 'details'>(initialData ? 'details' : 'type-select');
     const [formData, setFormData] = useState<Partial<PlanItem>>({});
 
@@ -211,7 +213,7 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
                     {category === 'Asset' ? (
                         <PlanAssetDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} />
                     ) : category === 'Account' ? (
-                        <PlanAccountDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} milestones={milestones} />
+                        <PlanAccountDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} milestones={milestones} dividendAutoAccounts={dividendAutoAccounts} />
                     ) : (
                         // Standard Amount & Growth for Income/Expense
                         <div className="bg-slate-800 p-4 rounded-lg space-y-4 border border-slate-700">

@@ -1,264 +1,3 @@
-
-## 2026-05-13 — PR squad/440-441-tests (draft) — PR #444
-
-Implemented 22 scenarios as Playwright E2E + vitest integration code (issues #440 + #441).
-
-**E2E tests (18):** A1–A5, A7–A10 in `plan-persistence.spec.ts` + `plan-rls.spec.ts`; B1–B5, B7–B12 in `cash-flow.spec.ts`. A6/B6 marked `test.fixme` (pending Fenster P1 income-stream wiring, Keaton Decision 1).
-
-**Integration/unit tests (4 + 16):** `plan-rls-integration.test.ts` — A5 RLS unit proxy (4 tests) + A9 null-safety (3 tests). `currency.test.ts` — B7 ILA guard (4 new cases) + B8 GBp guard (4 new cases). All 57 unit tests pass now.
-
-**Fixtures:** `e2e/fixtures/plan-fixtures.ts` — `seedPlan()`, `cleanupPlanData()`, canonical seed constants.
-
-**test.fixme discipline:** A6/B6 have full seed code + TODO comments "Unfixme after PR-C lands". Updated `anticipatory-test-authoring` SKILL.md with Round 3 fixme best practices.
-
-Tests intentionally red on main until PR-A (Hockney) + PR-B (Fenster P0) land. Will unfixme A6/B6 after PR-C.
-
----
-
-**Requested by:** Jony Vesterman Cohen
-**Work:** Created `20260430115000_baseline_legacy_schema.sql` migration establishing all 21 legacy public schema tables for trading journal. This migration consolidates the baseline schema from 22 Alembic migrations (8250ff809a39 through 4d9a58ecd93b), creating tables in their final form after all schema evolutions.
-
-**Problem:** Supabase migrations 130000, 130100, 130200, 130300 were failing because they reference legacy tables (manualtrade, trade, execution, etc.) that don't exist on fresh Supabase instances. The Alembic migrations were designed for local development databases, not cloud deployments.
-
-**Solution:** Single idempotent baseline migration (timestamped 115000 to run before 120000 household bootstrap) that creates all 21 legacy tables using CREATE TABLE IF NOT EXISTS. Uses NUMERIC(18,6) for all monetary fields (per Decision #2). Creates stub `trading_account_secrets` table so 130300 can drop it cleanly. Does NOT add household_id, owner_user_id, audit columns, or RLS — those come from 130xxx migrations.
-
-**Tables created:** execution, manualtrade, trade, matchedtrade, dailysummary, optioncontract, historicaloptionbar, backtestrun, backtesttrade, ndx1m, dailybar, finance_snapshots, plans, insurance_policies, dividend_positions, dividend_accounts, dividend_ticker_data, trading_account_config, trading_account_summary, trading_positions, note, plus stub trading_account_secrets.
-
-**Key insight:** Migration 335418ec68e3 was incomplete — only created manualtrade, not trade. Reconstructed trade table creation + transformation from d869bcf363dc downgrade() logic. Fixed SQL keyword issue by quoting `right` column in optioncontract.
-
-**Applied:** Successfully applied to both DEV (zvbwgxdgxwgduhhzdwjj) and PROD (jaesiklybkbmzpgipvea). All 5 migrations (115000, 130000, 130100, 130200, 130300) now working. Both environments have 24 tables total (21 legacy + 3 household).
-
-PR #90 opened and ready for review.
-
-📌 Team update (2026-05-06): FLEX backfill chunking pattern (monthly chunks) + checkpoint resume now in backfill_options.py — useful precedent for #65 (Postgres backfill) and multi-chunk import work — decided by Hockney
-
-## 2026-05-06 — Data Integrity Review: `--continue-on-error` for Flex Backfill
-
-**Requested by:** Jony Vesterman Cohen (via Coordinator)
-**Context:** Reviewed Hockney's planned `--continue-on-error` flag for options backfill script. Flag allows multi-chunk backfills to skip failed chunks (e.g., IBKR 1001 throttle) and continue, leaving failed chunks UNMARKED for future retry.
-
-**Learnings — Data Integrity Patterns:**
-
-1. **Idempotency is critical for backfill resilience.** All DB writes in `options_sync.py` use `ON CONFLICT DO UPDATE` (trades, cash, legs) or scoped DELETE-then-INSERT (positions scoped to `as_of_date`, not window). This makes windowed re-runs SAFE — no duplicates, no cascading corruption. Pattern: `ON CONFLICT (natural_key) DO UPDATE SET col = excluded.col, updated_at = now()`.
-
-2. **Delete-and-insert requires careful scoping.** The `options_positions` write (lines 264-278) deletes by `as_of_date` (the snapshot date in the Flex XML), NOT by the window's `from_date`/`to_date`. This ensures a re-run of 2024-09 only touches 2024-09 snapshots — it won't nuke 2024-08 or 2024-10 positions. Anti-pattern: `DELETE WHERE date >= :from_date AND date <= :to_date` would be UNSAFE (re-run nukes boundary rows).
-
-3. **Cumulative metrics require full-range recomputation after gap-fill.** The metrics handler (`options_metrics.py:78-93`) deletes ALL rows in the requested window BEFORE reinserting. If a backfill skips 2024-09, then later fills it, you MUST re-run metrics for the ENTIRE range (2024-06 to 2024-12) to recompute cumulative columns (`cash_flow_cumulative`, `variance_gap_cumulative`). Partial re-runs fix the gap month but don't propagate corrections forward.
-
-4. **Audit trail for failed operations is essential.** Proposed `.flex_backfill_failures.json` log file (machine-readable, persistent) to track skipped chunks with timestamp and error message. This enables programmatic retry scripts and gap detection queries. Pattern: `{"account_id": [{"chunk": "start:end", "failed_at": "ISO8601", "error": "truncated message"}]}`.
-
-5. **Stateful vs. stateless operations have different gap-tolerance.** Strategy grouping (`options_grouping.py`) is stateful but deterministic — a missing month leaves a hole but doesn't corrupt adjacent groups. Metrics are stateful AND cumulative — missing data BREAKS downstream cumulatives. Margin sync is stateless (snapshot) — gaps are irrelevant. Pattern: Classify operations by state dependency when designing skip-on-failure behavior.
-
-6. **Daily sync must fail loud; backfill can skip-and-log.** The scheduled daily sync (`run_scheduled_flex_options_sync`) calls `run_flex_options_sync` directly without `--continue-on-error` — exceptions propagate up, rolling back the transaction. This is CORRECT: daily windows are tiny, and silent skips would lose today's trades. Backfill can tolerate skips because gaps are detectable and retriable. Pattern: Match error-handling strategy to window size and business impact.
-
-**Decision:** Hockney's `--continue-on-error` is SAFE to ship IF these mitigations are added:
-- Persistent failure log (`.flex_backfill_failures.json`).
-- End-of-run WARNING with explicit retry + full-metrics-recompute instructions.
-- Documented operational checklist (5 steps: detect, retry, recompute, validate, cleanup).
-
-**Citations:** `.squad/decisions/inbox/mcmanus-continue-on-error-data-integrity.md`
-
-📌 Team update (2026-05-06): Data-integrity review for --continue-on-error completed. Findings: ⚠️ Safe-with-mitigations. Gaps create visible holes in metrics but no cascading corruption. Full review documented in decisions.md.
-
-📌 Team update (2026-05-07): Lifecycle/roll canonical spec merged to `.squad/decisions.md` and is now the authoritative guide for Hockney's backend implementation. Spec identified two critical bugs in current code; fixes are gated on Hockney's availability.
-
-## Stacked Income Projection (2026-05-09)
-
-**Issue:** Jony requested yearly income stacking chart showing options/dividends/bonds with future projections. Existing implementation used current-year options P&L instead of cumulative cash flow.
-
-**Solution:** Paired with Fenster to design data model and aggregation logic for yearly income projection across three sources.
-
-### Data source analysis
-
-1. **Options:** `options_dashboard_monthly.cash_flow_cumulative` — monthly cumulative cash flow
-   - Aggregation: Take max cumulative per year (last month's value)
-   - Projection: Conservative — 0 for future (no assumption about future positions)
-   - Rationale: Cumulative cash flow = total premium collected, the metric Jony specified
-
-2. **Dividends:** `dividend_dashboard.annual_income` (run-rate from current holdings)
-   - Aggregation: Current annual income from holdings
-   - Projection: Compound growth = `amount * (1 + growth_rate + yield_rate * reinvest_rate)^years`
-   - Rationale: Models reinvestment + yield growth
-
-3. **Bonds:** `ladder_bonds` → scheduled coupon + maturity payments
-   - Aggregation: Sum by year from `getLadderIncome()`
-   - Projection: Deterministic — scheduled payments are known
-   - Rationale: Bond ladder has fixed payment schedule
-
-### Projection assumptions (transparent to user)
-
-- **Options:** 0 for future years (conservative — doesn't assume new positions)
-- **Dividends:** Uses settings.dividendGrowthRate + settings.dividendYieldRate + settings.dividendReinvestRate
-- **Bonds:** Scheduled payments only (no assumption about new purchases)
-- **Visual distinction:** Projected years shown with 40% opacity
-
-### Implementation: getOptionsYearlyCashFlow()
-
-Query: `options_dashboard_monthly.select('period_start, cash_flow_cumulative')` → group by year → max cumulative
-
-### Data quality considerations
-
-- **Decimal precision:** Cash flow stored as `numeric(18,6)` in DB, converted to number (safe for display)
-- **Missing data:** Returns empty array if no household, 0 if no data for a year
-- **Year boundaries:** Uses `period_start` year (not `period_end`) for grouping
-- **Aggregation:** Takes max cumulative per year = last available month's cumulative value
-
-### Files modified
-
-- `apps/frontend/src/app/options/actions.ts`: +getOptionsYearlyCashFlow()
-- `apps/frontend/src/app/summary/page.tsx`: Data aggregation logic for 3 sources + projection model
-
-### Test coverage
-
-- Frontend: 6 tests in `StackedIncomeBarChart.test.tsx` verify stacking math and projection styling
-- Backend: Action returns correct shape, no new tests needed (uses existing RLS)
-
-## Learnings
-
-**Per-year aggregation from monthly data:** When aggregating cumulative metrics by year, take the last (max) value for each year, not the sum. Cumulative = running total, so year-end value represents full-year total.
-
-**Projection transparency:** Always document assumptions in UI ("Options show actual cumulative cash flow for past years, 0 for future (conservative)"). Financial projections require user trust — be explicit about what's known vs. assumed.
-
-**Paired work with Fenster:** Data design first (McManus), then chart implementation (Fenster). Clear contracts (YearlyIncomeData type) enabled parallel work. Fenster handled all UI/visualization, I focused on correctness of aggregation and projection logic.
-
-**Conservative vs. optimistic:** For options income, 0 projection is better than extrapolating current year's pace. Options positions are time-bound — can't assume new positions will be opened. Dividends/bonds are more predictable (holdings + scheduled payments).
-
-📌 **Team update (2026-05-09):** Shipped stacked income chart on /summary with Fenster (#338) — ensured `options_dashboard_monthly` view correctly projects cumulative cash flow. Hockney completed migration drift audit (#335). Kujan removed git hook + trimmed docker-compose (#336, #337). Redfoot fixed E2E Playwright hook placement (#334).
-
-## Cumulative-vs-Per-Year Cash Flow Bug Fix (2026-05-09, Issue #341)
-
-**Issue:** 2025 options income showed ~$373k in stacked bar chart instead of actual ~$96k. Root cause: `getOptionsYearlyCashFlow()` took MAX of `cash_flow_cumulative` per year, but that column is cumulative from inception (never resets), so each year's bar showed cumulative-through-that-year instead of just that year's delta.
-
-**Solution (paired with Fenster):** Changed query to SUM `cash_flow_total` (monthly net cash flow) per year instead of MAX `cash_flow_cumulative`. This gives true per-year delta.
-
-**Files modified:**
-- `apps/frontend/src/app/options/actions.ts` — `getOptionsYearlyCashFlow()` function
-
-**Before/After:**
-- Before: `SELECT cash_flow_cumulative ... yearlyMap.set(year, MAX(cumulative))`
-- After: `SELECT cash_flow_total ... yearlyMap.set(year, existing + monthly)`
-
-**Verification:**
-- Tests: 6/6 pass in `StackedIncomeBarChart.test.tsx`
-- 2025 options value now renders correctly at ~$96k (was ~$373k)
-- Sanity check: sum of per-year values should equal latest cumulative (verified visually in dev)
-
-**Learning (The Cumulative Trap):** When a table has both cumulative and per-period columns (like `options_dashboard_monthly`), always confirm which you need:
-1. **Cumulative-to-date value**: Use the cumulative column directly (e.g., "total P&L from inception to now")
-2. **Per-period delta**: Either (a) SUM the per-period column (safer), or (b) difference consecutive cumulative values (brittle if data has gaps)
-
-This is a common trap with financial time-series data. Our bug happened because we mistakenly treated an inception-cumulative column as if it reset annually. The aggregation logic (MAX per year) was correct for year-end snapshot queries but wrong for per-year income. Once diagnosed, the fix was straightforward: use the right column (`cash_flow_total` for monthly net) and the right aggregation (`SUM` for annual total).
-
-**Financial data modeling principle:** Cumulative columns are for "total since start" queries; delta columns are for "per-period" queries. Keep these semantics distinct when designing aggregations. In retrospect, the function name `getOptionsYearlyCashFlow()` should have been a hint — "yearly" = per-year delta, not cumulative-as-of-EOY.
-
-Fenster and I paired on this. The clear separation between data layer (mine) and UI layer (his) made it easy to spot the bug at the boundary and fix it quickly. The chart worked perfectly — the data contract was just wrong.
-
-📌 **Team update (2026-05-09T18:26:00+03:00):** Fixed #341 stacked income chart cumulative bug. 2025 options now shows correct ~$96k (was ~$373k). Paired with Fenster on diagnosis + fix. (commit 1649369)
-
-## Phase 2 Positions Source Investigation (2026-05-09, Issue #340)
-
-**Mission:** Determine whether the existing IBKR Activity Flex query (`1496910`) already surfaces STK `<OpenPosition>` rows sufficient for an "Open Positions" view, or whether a new Flex query template is needed — gating Hockney's backend and Keaton's design.
-
-### Findings
-
-**Flex XML content (reports/activity/):**
-- All 4 annual files (2022–2025, query ID `1496910`) contain a rich `<OpenPositions>` section with BOTH OPT and STK rows.
-- STK row counts per file: 2022=63, 2023=45, 2024=51, 2025=54
-- Available attributes per STK row: `accountId`, `conid`, `symbol`, `description`, `currency`, `subCategory` (COMMON/ETF/REIT/PREFERENCE), `position` (quantity), `markPrice`, `positionValue`, `costBasisPrice`, `costBasisMoney`, `fifoPnlUnrealized`, `putCall` (always empty "" for STK), `multiplier` (always 1), `underlyingSymbol`, `openDateTime` (always empty for STK — no per-lot open date available)
-- BOND and CASH asset categories also appear in OpenPositions (32 BOND, 8 CASH in 2025 file)
-
-**Parser behavior (flex_parser.py, lines 198–200):**
-- `OpenPositions` section IS parsed, but **only** rows passing `_is_option_contract_row()` are kept.
-- STK/BOND/CASH positions are silently dropped. This is a 5-line change to add an STK branch.
-- `FlexOpenPosition` model captures: `account_id`, `leg`, `as_of_date`, `opened_at`, `quantity_open`, `average_open_price` (mapped from `costBasisPrice`), `open_cash_flow` (mapped from `costBasisMoney`), `ib_margin_requirement`, `last_broker_sync_at`, `raw_payload`.
-- Missing from current model for STK: `markPrice`, `positionValue`, `fifoPnlUnrealized`, `symbol`, `conid`, `sub_category`, `currency` (all in `raw_payload` but not projected fields).
-
-**Flex query configuration:**
-- Query ID `1496910` is used by the live daily sync.
-- `flex_probe.py` defines 5 query ENV keys: `trades`, `option_eae`, `cash`, `positions`, `account_info`. The `IBKR_FLEX_QUERY_ID_POSITIONS` key exists but is currently unused in the options pipeline (options_sync.py uses the activity XML which has all sections bundled).
-- The `OpenPositions` section in existing XMLs is confirmed present — **no new Flex query template needed**.
-
-**DB schema — current state:**
-- `options_positions`: OPT-specific. Has FK `leg_id → options_legs` (options-specific concept). Not reusable for STK.
-- `dividend_positions`: Manual roster `{id, account, ticker, shares}` with index on `account`. No market data, no `conid`, no `currency`. Used for dividend income enrichment via yfinance. NOT synced from Flex XML.
-- `trading_positions`: Live-API-sourced `{symbol, amount, sec_type, avg_cost, con_id, timestamp, account_config_id, household_id}`. Populated from trading_service.py (IBKR/Schwab live API), not from Flex XML. Lacks `markPrice`, `positionValue`, `unrealized_pnl`, `cost_basis_total`.
-- **No `stock_positions` table from Flex XML exists yet.** A new table is needed.
-
-**Dividend pipeline coupling:**
-- `dividend_positions` (manual roster) → `dividend_service.py` enriches via yfinance → computes `annual_income = shares × dividend_rate`. Summary page reads this projected annual income.
-- `dividend_estimations` (just shipped in migration 20260509151900): user-entered year-level income overrides `{household_id, year, amount}`. Summary page's `buildYearlyIncomeData()` uses estimations for past years where user has overridden the projection.
-- These two tables are **separate concerns**: `dividend_positions` drives the yfinance projection; `dividend_estimations` overrides the chart per year.
-- Neither table interacts with Flex XML — they're fully manual/user-entered.
-
-### Recommendation: Option A — Existing XML is sufficient
-
-The STK `<OpenPosition>` data is fully present in every annual Flex XML file. No new IBKR query template needed. Implementation path:
-1. **Parser** (5 lines): Add STK branch alongside OPT branch in `parse_flex_files()` at line 198. Capture a `FlexStockPosition` model with STK-relevant fields (symbol, conid, quantity, costBasisPrice, costBasisMoney, markPrice, positionValue, fifoPnlUnrealized, currency, subCategory, putCall guard).
-2. **DB migration**: New `stock_positions` table with `(id, household_id, account_id, as_of_date, symbol, conid, description, sub_category, currency, quantity, cost_basis_price, cost_basis_total, mark_price, market_value, unrealized_pnl, raw_payload, last_broker_sync_at, created_at, updated_at)`. Unique key: `(household_id, account_id, as_of_date, symbol, conid)`. Delete-then-insert scoped by `as_of_date` (same pattern as options_positions).
-3. **Handler** (Hockney): New `_sync_stock_positions()` function in options_sync.py or a dedicated handler.
-4. **No IBKR Account Management changes** needed.
-
-### Key insight
-
-`openDateTime` is always empty for STK positions in the XML — IBKR does not provide per-lot open dates in the Activity Flex OpenPositions section. The positions view will show aggregate quantity and average cost basis but not open-date-per-lot. This is acceptable for an "Open Positions" dashboard view but rules out per-lot holding period calculations from this data source alone.
-
-📌 **Team update (2026-05-09T20:53:00+03:00):** Phase 2 positions source investigation complete. Verdict: **Option A** — existing Activity Flex XML (query 1496910) already contains STK `<OpenPosition>` rows with all needed fields. Parser at flex_parser.py:198–200 silently drops STK rows — 5-line fix. Need new `stock_positions` table (no IBKR changes). Unblocks Hockney + Keaton.
-
-## 2026-05-09 — Flex query redesign for #340 follow-up
-
-Jony reported deployed `/trading/accounts` data had duplicate rows and wrong quantities when trades were used as source. I wrote `.squad/decisions/inbox/mcmanus-flex-query-spec.md` recommending one revised Activity Flex query with OpenPositions, FinancialInstrumentInformation, CashTransactions, ChangeInDividendAccruals, OpenDividendAccruals, and CorporateActions. Verified prod has `stock_positions`, `bond_holdings`, `dividend_ticker_data`, and `dividend_estimations`, but not `dividend_payments` or `dividend_accruals`. Key lesson: Option A was right on source direction but too narrow on field coverage and UI reconciliation.
-
----
-
-📌 **Team update (2026-05-09):** Flex spec submitted; awaiting Jony portal config. Phase 2 reflection (§9 of spec) contains lessons for future broker-data work. Recommend archiving Phase 2 section for reference when planning dividend accrual and bond analytics enrichment. — Scribe
-
-## 2026-05-09T23:53:57+03:00 — Flex Query Validation against OptionsIncomeDashboard_Master.xml
-
-**File:** `reports/activity/OptionsIncomeDashboard_Master.xml` — YTD 2026-01-01→2026-05-08, account U2515365.
-
-**Full report:** `.squad/decisions/inbox/mcmanus-flex-validation.md`
-
-### Section findings (contradicts / refines IBKR docs):
-
-1. **`FinancialInstrumentInformation` is ABSENT.** Not enabled by Jony in the portal. However — key discovery — IBKR already includes most FII fields **directly in `OpenPositions` rows**: `listingExchange`, `securityID`, `securityIDType`, `cusip`, `isin`, `figi`, `issuer` are all on every STK and BOND row. The spec assumed FII was the only source for identifiers; that was wrong. FII is still needed for structured `maturity` and `issueDate` on bonds.
-
-2. **`CashTransactions` is missing `assetCategory` and `fxRateToBase`.** Both are absent from all 770 rows. Parser must route by `type` field instead of `assetCategory` (workable — `type` is fully populated and semantically distinct). `fxRateToBase` absence means multi-currency income (e.g., EUR-denominated WHT) cannot be converted to base currency from the XML; external FX rates needed. NOTE: `ChangeInDividendAccruals` and `OpenDividendAccruals` DO carry both fields correctly — the gap is CT-specific.
-
-3. **BOND `expiry` is present but empty for all 18 bonds.** Maturity date only available via symbol-string parsing (e.g., "AAPL 4 1/4 02/09/47" → maturity=2047-02-09, coupon=4.25%). Fragile but workable for v1. FII section (when enabled) will provide structured `maturity`.
-
-4. **BOND `accruedInterest` is entirely absent** (attribute not emitted). Must be enabled in portal. This is the most impactful bond field gap.
-
-5. **`levelOfDetail` attribute is not emitted by IBKR at all** (not "SUMMARY", just absent). Confirmed Summary-level by empty `openDateTime` on all rows.
-
-6. **Bond mix confirmed: 7 Corp (AAPL, AMZN×2, BA, BCRED, META, NFLX) + 11 Govt (US Treasuries).** No munis.
-
-7. **`ChangeInDividendAccruals` is richer than spec expected:** carries `fxRateToBase`, `assetCategory`, full identifier set, `fromAcct`, `toAcct`, `underlyingConid`. All 211/211 key fields non-empty.
-
-8. **`CorporateActions` is present but empty** (0 events in YTD window). Section tag exists — not missing.
-
-9. **Trades section confirmed:** OPT=330, STK=45, BOND=6, CASH=2. Existing options pipeline unaffected.
-
-### Spec §8 open questions resolved:
-- **Q1 (trades sync):** Trades present — existing sync unaffected.
-- **Q2 (bond mix):** 7 Corp + 11 Govt Treasuries. No munis.
-- **Q3 (foreign WHT):** Answered NO by Jony's tax directive. WHT stored verbatim (585 rows in CT).
-- **Q4 (tax-lot dates):** Summary-level confirmed — first-buy dates unavailable.
-- **Q5 (PortfolioAnalyst for bonds):** Yes, needed for `creditRating`, `yieldToMaturity`. Symbol-string parsing covers coupon + maturity for v1.
-
-### Portal changes Jony must make:
-1. Enable `FinancialInstrumentInformation` section
-2. Enable `accruedInterest` on OpenPositions
-3. Enable `assetCategory` + `fxRateToBase` on CashTransactions
-4. Switch daily scope: YTD → Last Business Day after portal changes done
-
-### What's ready to ingest now (before portal fixes):
-- STK positions (all fields present) ✅
-- ChangeInDividendAccruals + OpenDividendAccruals (all fields present) ✅
-
-📌 **Team update (2026-05-09T23:53:57+03:00):** Validated OptionsIncomeDashboard_Master.xml against spec. Stocks + dividend accruals ready to ingest. 4 portal fixes needed (FII section, accruedInterest, assetCategory+fxRateToBase on CashTransactions, LBD scope). Key discovery: OpenPositions already carries FII identifier fields inline — FII section is needed only for structured bond maturity/issueDate.
-
----
-
 ## 2026-05-10 — ✅ IBKR OpenPositions Bonus Fields Discovery
 
 **Scope:** Analysis of YTD Flex XML validation findings.
@@ -439,3 +178,162 @@ Naming a Pydantic field same as imported stdlib type (e.g., `date: date | None`)
 ## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
 
 Anticipatory test authoring (sonnet-4.6): 22 test scenarios across Flow A (/plan persistence: 10 E2E) + Flow B (/cash-flow rendering: 12 E2E + 4 vitest). PR #444 (draft): A1–A5, A7–A10 in plan-persistence.spec.ts + plan-rls.spec.ts; B1–B5, B7–B12 in cash-flow.spec.ts. A6/B6 test.fixme'd pending PR-C (Fenster P1). Fixtures: plan-fixtures.ts (seedPlan, cleanupPlanData). Unit tests (4 RLS proxy + 3 null-safety) in plan-rls-integration.test.ts; currency guards (8 new test.cases) in currency.test.ts. Total: 57 unit tests pass. Skill `.squad/skills/anticipatory-test-authoring/SKILL.md` updated with Round 3 fixme discipline. PR #444 rebased ×1 post-Hockney; A6/B6 un-fixme'd after all 3 implementation PRs merged.
+
+---
+
+## 2026-06-09 — Dividend Reinvestment Simulation Design
+
+**Assigned by:** Jony (Product/Squad Lead)
+**Role:** McManus (Data/Finance Dev)
+**Scope:** Architecture design for replacing synthetic yield-driven dividends with real per-account dividend data in financial planning simulation.
+
+### Design Deliverable
+
+Created comprehensive technical design document: `.squad/decisions/inbox/mcmanus-dividend-reinvest-simulation.md`
+
+**Covers 10 technical aspects:**
+1. Input contract & account mapping strategy (dividendByAccount interface, 3-tier mapping: exact name → type fallback → fuzzy)
+2. Per-account income entries (3 "Dividend - {account}" entries, currency conversion USD→ILS)
+3. Reinvestment outflow semantics (surplus: full reinvest; deficit: proportional residual; account.value += reinvest)
+4. Mass conservation invariants (surplus: income == reinvest; deficit: income == reinvest + used_for_spending)
+5. Tax treatment (per-account `dividend_tax_rate`, reinvest from net dividends)
+6. Backward compatibility (legacy yield-based fallback when dividendByAccount undefined; deprecated fields documented)
+7. Account growth interaction (user must set growth to price-only when using real dividends; avoid double-counting)
+8. Currency handling (convert() helper for USD→ILS; getDividendSummary returns USD)
+9. First year handling (use real dividends for currentYear too, not yield-based)
+10. Test invariants (10 unit tests + 3 edge cases for Redfoot implementation)
+
+### Key Technical Decisions
+
+**Data source:**
+- `getDividendSummary()` from dividends/actions.ts provides `by_account: { ibkr, schwab, ira }` with USD-converted forward_dividend_annual
+- Replace `currentDividendPayouts()` (yield-based) in simulation.ts lines 533-598
+
+**Reinvestment algorithm:**
+```typescript
+const deficit = plannedExpenses - yearIncome.net;
+const reinvestableAmount = Math.max(0, totalNetDividends - Math.max(0, deficit));
+// Distribute proportionally: (account_net / total_net) * reinvestableAmount
+```
+
+**Sankey visualization impact:**
+- Current: 1 aggregate "Dividend Income" entry
+- New: 3 "Dividend - {account}" incomes + 3 "Dividend Reinvest - {account}" outflows
+
+**Deprecation:**
+- Ignored fields when dividendByAccount provided: `dividend_mode`, `dividend_yield`, `dividend_fixed_amount`
+- Still used: `dividend_tax_rate` (per-account tax)
+- Growth field semantics: user guidance needed (set to price growth only, exclude yield)
+
+### Open Questions Documented
+
+For user/squad review:
+1. Account mapping: explicit `dividendAccountId` field vs name/type heuristics?
+2. Unmapped sources: synthetic entry vs skip vs aggregate "Other"?
+3. Tax rate: per-account vs single plan-level?
+4. Feature flag: explicit boolean vs implicit field presence?
+5. Growth field: add `growth_includes_dividends` flag vs documentation only?
+6. Dividend growth: escalate amounts over projection years using `dividend_growth_rate`?
+
+### Handoff to Redfoot
+
+**Implementation checklist** (4 phases):
+- Phase 1: Core dividend replacement (input contract, account mapping, per-account income, tax, currency)
+- Phase 2: Reinvestment logic (surplus/deficit calc, proportional split, account.value update, savings_details)
+- Phase 3: Backward compatibility (legacy path preservation, feature detection)
+- Phase 4: Testing (10 unit + 1 integration + 3 edge cases)
+
+**Test requirements specified:**
+- Mass conservation: `sum(dividend income) === sum(reinvestment) + used_for_spending`
+- Proportional distribution formula validation
+- Currency conversion (USD→ILS when mainCurrency='ILS')
+- Account mapping (case-insensitive, type fallback for IRA)
+- Unmapped source handling (synthetic entry)
+- Tax application (gross → net, per-account rate)
+- Legacy fallback (single aggregate dividend when dividendByAccount undefined)
+
+### Learnings
+
+**Mass conservation patterns for cash-flow simulations:**
+- Surplus year: income source exactly matches reinvestment sink (dividends are internal transfers)
+- Deficit year: income partially consumed for spending, only residual reinvests
+- Dividends offset deficit **before** account withdrawals (preserves balances)
+
+**Account mapping heuristics for external data sources:**
+- Primary: exact name match (case-insensitive)
+- Secondary: type-based (retirement → ira)
+- Tertiary: fuzzy substring ("Interactive Brokers" contains "ibkr")
+- Fallback: synthetic entry for unmapped (visibility > silence)
+
+**Currency conversion in multi-currency simulations:**
+- External sources (getDividendSummary) return USD
+- Internal calculations use mainCurrency (ILS for Jony)
+- Single convert() point at income ingestion prevents drift
+- Reinvestment uses converted amounts (no double conversion)
+
+**Tax semantics for reinvestment:**
+- Reinvest from **net** dividends (post-tax), not gross
+- Per-account tax rates allow modeling of different account types (taxable vs IRA)
+- Proportional distribution uses net amounts (avoid reinvesting taxes)
+
+**Growth vs yield interaction:**
+- Total return = price growth + dividend yield
+- When modeling real dividends separately, growth field must represent price-only
+- Risk of double-counting if user doesn't adjust growth assumption
+- Need user guidance: tooltip/warning when dividendByAccount present AND dividend_yield > 0
+
+**First-year special handling:**
+- Current system uses `currentDividendPayouts()` for currentYear (yield-based)
+- When real dividends available, apply uniformly to all years including current
+- Simplifies logic, ensures consistency, matches getDividendSummary semantics
+
+**Pydantic field shadowing (reminder from 2026-05-11):**
+- Naming field same as imported stdlib type causes TypeError during class construction
+- Example: `date: date | None` fails; use `accrual_date: date | None`
+- Applies to all Pydantic models binding datetime/date/time types
+
+### Files Modified
+
+**Created:**
+- `.squad/decisions/inbox/mcmanus-dividend-reinvest-simulation.md` (22KB design doc)
+
+**Not modified (implementation pending):**
+- `apps/frontend/src/app/plan/simulation.ts` (target for Redfoot changes)
+- `apps/frontend/src/app/dividends/actions.ts` (getDividendSummary data source)
+- `apps/frontend/src/app/cash-flow/page.tsx` (caller passing dividendByAccount)
+
+### References
+
+**Related work:**
+- Dividend data inventory (2026-05-11, 2026-05-13): established getDividendSummary as canonical source
+- Flex pipeline validation (2026-05-10): dividend_accruals.gross_rate ingestion
+- Options income projection (2026-05-12): parallel alternative income stream with similar projection needs
+
+**Next sprint:**
+- Redfoot implements Phases 1-4 from checklist
+- McManus validates mass conservation in PR review
+- Keaton integrates into Sankey visualization (cash-flow page)
+
+---
+
+## 2026-05-18 — ✅ dividendByAccount Simulation Implementation (branch: squad/cashflow-dividend-redesign)
+
+**Commit:** `6f5fd5d` | **File:** `apps/frontend/src/app/plan/simulation.ts` (+137 LOC, -13 LOC)
+
+Implemented all 9 spec steps from `mcmanus-dividend-reinvest-simulation.md` + consolidated approval defaults.
+
+- Extended `PlanSimulationInput` with `dividendByAccount?: { ibkr, schwab, ira }` (USD forward annual, constant).
+- Built `dividendAccountMap` (3-tier: exact name → type/pension → fuzzy substring) + `mappedAccountIds` Set before main loop.
+- Added optional `skipAccountIds?: Set<string>` param to `Accounts.processGrowthAndIncome`; mapped accounts have yield-based dividend zeroed to prevent double-counting.
+- Pre-computed `perAccountDividends` array (USD→mainCurrency converted, once outside loop) + `totalRealDividendsAnnual`.
+- Inside main loop: conditional emit — 3 named `Dividend - {LABEL}` income lines when `dividendByAccount` provided, else legacy `Dividend Income` single entry.
+- Reinvestment block: computes `reinvestable` from three cases (full surplus / partial cover / full deficit), distributes proportionally, pushes `Dividend Reinvest - {LABEL}` savings entries, updates `account.value`, subtracts from `adjustedNetFlow` before processSavings/processDeficit.
+- Silent synthetic node (default #7): `d.account === null` path emits income without balance impact.
+
+**All 14 existing tests pass (backward compat confirmed).**
+
+### Learnings
+
+- `adjustedNetFlow = netFlow - totalReinvested` is the key to mass conservation: reinvest outflows are subtracted from the flow passed to `processSavings`/`processDeficit` so money isn't counted twice.
+- Pre-computing per-account USD→ILS conversion outside the projection loop is both correct (constant per spec) and efficient — avoids repeated Decimal allocation each year.
+- Three-case reinvestment logic (full surplus / partial cover / full deficit) maps cleanly to a single `reinvestable` scalar then proportional distribution per account.

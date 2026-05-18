@@ -135,3 +135,91 @@ if (!existing || row.as_of_date > existing.as_of_date) map.set(key, row);
 **Future work:** Option B (route page through `GET /api/accounts/positions`) would eliminate the dual-path entirely — recommended when API consolidation is on the roadmap.
 
 ---
+---
+
+## Archive Entry — Session 2026-05-13
+
+**Lines archived:** 81 of 203
+**Reason:** History file exceeded 15KB threshold (17026 bytes)
+
+## 2026-05-13 — Regression diagnostic: "Plan not saved. Failed to create plan." (PR #443 follow-up)
+
+**Triggered by:** jocohe report — toast fires but save fails for any expense on `/plan`.
+
+**Trace summary:**
+
+- **Toast source:** `apps/frontend/src/app/plan/page.tsx:98` — `handleUpdatePlanData` falls into the `else` (create) branch because `plan.id` is `undefined` on a brand-new plan. `createPlan` returns `{ ok: false, error: '...' }`, triggering rollback + toast.
+- **createPlan:** `apps/frontend/src/app/plan/actions.ts:170-173` — the Supabase INSERT fails; the real error (`error.message`) was only logged **server-side** via `console.error`. The returned error was a sanitized generic string — **invisible to browser devtools**. This is the critical logging gap.
+- **household_id:** Resolved cleanly via `resolveHouseholdId()` → `household_members` lookup. A null here returns a distinct `'Not authenticated or no active household'` message; the user saw `'Failed to create plan'`, confirming `household_id` was resolving but the INSERT failed.
+- **data serialization:** `PlanData` passed as flat object (no `data` envelope). `normalizeCreatePayload` correctly takes the raw-PlanData path. No `undefined` values; valid jsonb shape.
+- **Root cause hypothesis (ranked):** 1) `plans` table missing / migration not applied on target DB; 2) RLS policy blocking INSERT for the user's `household_id`; 3) NOT NULL constraint on an unset column.
+- **Logging gap patched:** One-line fix in `createPlan` to propagate `error.message` to the returned error payload, so the existing `console.error` on `page.tsx:97` surfaces the real Supabase error in the browser console. Shipped as draft PR on branch `squad/440-followup-error-logging`.
+- **Open for Hockney:** Confirm whether `plans` table exists + migration status; check RLS policy on `plans` INSERT; check for NOT NULL columns without defaults.
+
+## 2026-05-13 — PR #443 squad/440-error-surfacing
+
+Shipped P0 frontend fixes: error surfacing in `/plan` handleUpdatePlanData + empty-state CTA in `/cash-flow`.
+
+- `/plan`: captures `previousPlan` before optimistic write; on `result.ok === false` rolls back state, fires `toast.error()` via sonner, and `console.error`s for devtools. Installed sonner + added `<Toaster>` to root layout.
+- `/cash-flow`: replaced silent `return;` with a proper empty-state component (heading + copy + CTA link to `/plan`) when no plan exists post-load.
+- `CashFlowSankey`: updated zero-nodes message to include a navigable link to `/plan`.
+
+P1 income-stream wiring (dividends + bonds) pending Keaton architectural synthesis.
+## 2026-05-13 — PR #441 squad/441-income-streams
+
+Shipped P1 income-stream wiring: dividends + bonds + options as virtual, read-only rows in `/plan` and `/cash-flow`.
+
+- `simulation.ts`: added `dividendTotal` + `bondProjection` inputs (follow `optionsMap` pattern); dividend income is a constant annual total; bonds are per-year from `buildIncome()` income_series.
+- `plan/page.tsx` + `cash-flow/page.tsx`: extended `Promise.all` to fetch `getDividendSummary()` + `getLadderIncome()` in parallel alongside existing calls.
+- `PlanEditor.tsx`: new `virtualIncomeStreams` prop + `virtualSummaryIncomeItems` useMemo; 3 locked rows at top of Income tab with "Auto" badge (emerald) and tooltip.
+- Decision note: `.squad/decisions/inbox/fenster-virtual-income-implementation.md` — documents exact data shapes, year-bucket key, and edge cases.
+
+---
+
+## 2026-05-09 — #340 follow-up: account label rename
+
+Renamed tab display labels to match Jony's finalized directive:
+- `ibkr: "IBKR"` → `ibkr: "InteractiveBrokers"`
+- `ira: "IRA (Hishtalmut)"` → `ira: "LeumiIRA"`
+- `schwab: "Schwab"` (unchanged)
+
+Internal `account_type` codes stay as tech identifiers (ibkr, schwab, ira).
+
+**Files touched:**
+- `apps/frontend/src/app/trading/accounts/page.tsx` — central `TAB_LABELS` mapping (3-line change)
+- `apps/frontend/src/components/trading/accounts/__tests__/AggregatePortfolioFooter.test.tsx` — test fixture names
+
+**Test results:** 364/364 green (no regressions).
+
+**Commit:** 06c4984 (pushed to origin/main).
+
+---
+
+## 2026-05-11 — #363/#364 Dividends + Bonds: frontend wiring + playwright e2e (PR #365)
+
+**Scope:** Wire backend data (`getDividendPositions`, `getDividendSummary`, `getLadderOverviewByAccount`) into UI components; 3-tab layout for dividends and bonds; comprehensive e2e specs.
+
+**Files created:**
+- `apps/frontend/src/components/Dividends/DividendPositionsTable.tsx` — sorted by `forward_dividend_annual` DESC; 9 columns (Ticker/Qty/Price/TTM Yield%/TTM Yield$/Fwd Yield%/Fwd Annual$/Frequency/Last Payment)
+- `apps/frontend/src/components/Dividends/DividendAccountTab.tsx` — per-tab component with `useEffect` fetch + collapsible history
+- `apps/frontend/e2e/dividends-positions-mirror.spec.ts` — 6 e2e specs for #363
+- `apps/frontend/e2e/bonds-account-tabs.spec.ts` — 5 e2e specs for #364
+
+**Files rewritten:**
+- `apps/frontend/src/app/dividends/page.tsx` — 3-tab layout with `DividendAccountTab`, summary header, testids
+- `apps/frontend/src/app/ladder/page.tsx` — added 3-tab pattern with `getLadderOverviewByAccount`
+
+**Testids:** `dividends-summary-total`, `dividends-account-empty`, `dividends-history-toggle`, `bonds-account-empty`, `bonds-tab-{ibkr,schwab,ira}`
+
+**Test results:** 471/471 unit tests pass; 13/13 playwright specs pass (8/8 #363, 5/5 #364).
+
+**Observation:** Fenster specs lack auth fixture in current e2e/ — all specs fail on protected routes. Workaround: use `auth-cookie` fixture for real runs. Noted for Redfoot validation.
+
+**TS hygiene:** Work around type conflict — import `DividendPosition` directly from `@/types/dividends`, NOT from `@/app/dividends/actions` (had conflicting local interface).
+
+---
+
+
+### Pattern established
+
+This is the **template for all 32 MOVE endpoints**. See decision note at:

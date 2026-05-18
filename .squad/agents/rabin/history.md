@@ -105,3 +105,59 @@
 - **PR:** `squad/secret-scan-hardening` → `security: incident report + remediation tracker (Supabase service-role rotation)`
 
 📌 **Team update (2026-05-05T18:32:37Z):** Secret handling policy decision merged into shared decisions. Reskill pass extracted secret-handling-policy skill (high confidence) with defense-in-depth patterns, pre-commit scanning, push protection, and rotation response. — Scribe (wind-down)
+
+### 2026-05-13: RLS Reference Tables Security Review
+
+- **Context:** Reviewed migration `20260513153400_enable_rls_on_reference_tables.sql` reversing Hockney's prior decision to DISABLE RLS on `security_reference`, plus enabling RLS on `tase_yahoo_map` (created via Alembic without RLS).
+- **Verdict:** ✅ APPROVED — migration is secure and follows correct Supabase advisor pattern.
+- **Key findings:**
+  - Both tables are pure reference data (ticker → metadata mappings) with no household_id, owner_user_id, or PII
+  - `USING (true)` policies are appropriate for global reference data accessible to all authenticated users
+  - Backend writes via service_role/direct_engine properly bypass RLS (no INSERT/UPDATE/DELETE policies needed)
+  - Explicit `REVOKE ALL FROM anon` + `GRANT SELECT TO authenticated` pattern prevents anonymous access
+  - Migration is fully idempotent (DROP POLICY IF EXISTS, ALTER TABLE ENABLE RLS safe to re-run)
+  - Policy naming convention matches repo standard: `{table_name}_select`
+  - Addresses both Supabase advisor ERROR-level findings: `rls_disabled_in_public_public_security_reference` and `rls_disabled_in_public_public_tase_yahoo_map`
+- **Pattern codified:** For reference tables in public schema: (1) ENABLE RLS always, (2) permissive SELECT for authenticated via `USING (true)`, (3) explicit REVOKE from anon, (4) no write policies (service_role bypasses), (5) never DISABLE RLS.
+- **Learnings:**
+  - Supabase advisor `rls_disabled_in_public` (ERROR-level) flags ANY table in public schema without RLS, even pure reference data
+  - The correct pattern for global reference data is NOT "RLS disabled" but "RLS enabled + permissive policy"
+  - Service role writes automatically bypass RLS — no need for INSERT/UPDATE/DELETE policies on backend-only-write tables
+  - RLS review skill already documented this anti-pattern (updated by Hockney earlier today per skill changelog line 190)
+  - Explicit grant normalization (REVOKE ALL from anon, GRANT SELECT to authenticated, GRANT ALL to service_role) makes permissions auditable
+- **Deliverable:** Security review verdict with 8-dimension analysis per RLS review skill checklist.
+
+---
+
+## 2026-05-13 — 📌 RLS Security Fix Verified in Production
+
+**Team update:** RLS migration for reference tables (`security_reference`, `tase_yahoo_map`) successfully applied to remote Supabase. Migration follows correct security pattern: RLS enabled, SELECT policies for authenticated users, no anonymous access, service_role retains ALL privileges. Supabase advisor ERROR-level security findings now cleared.
+
+**Context:** Hockney identified the security anti-pattern (DISABLE RLS on public-schema tables) earlier today. Migration corrects this and establishes canonical pattern for reference table RLS: "enable RLS + permissive SELECT policy" (not "disable RLS").
+
+**Action:** You may close any Supabase advisor security findings related to `rls_disabled_in_public` on these tables. Re-run advisor at dashboard to confirm clearance.
+
+**Related:** Migration drift documented in `.squad/decisions.md` (10 pending local / 10 remote-only). No impact to this security fix — applied via direct psql bypass.
+
+### 2026-05-14: Supabase Platform Changes — Security Review (Fan-out Specialist)
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Security review of three Supabase platform announcements (default grants removal, API securing guide, @supabase/server package).
+
+**Key findings:**
+- **HIGH IMPACT:** 30 Data-API-exposed tables with legacy `anon` grants; Oct 30 enforcement deadline
+- **CRITICAL:** `household_audit_log` has anon SELECT — unacceptable for financial app, even with RLS
+- **MEDIUM:** Legacy symmetric JWT keys (HS256) in use — recommend asymmetric migration by June 1
+- **LOW IMPACT:** No Edge Functions → `@supabase/server` not applicable; no `pgrst.db_pre_request` hook needed
+- **COMPLIANT:** Reference-table migration (`20260513153400`) follows correct REVOKE+GRANT pattern
+
+**Verdict:** Three conventions drafted (explicit grants, no anon without justification, reference-table SELECT-only). Opt-in for future tables (safe). Backfill explicit grants on 30 legacy tables (by May 20). JWT migration independent but should land before Oct 30.
+
+**Decision merged into:** `.squad/decisions.md` § "Supabase platform changes review" (Keaton's synthesis consolidated both reviews)
+
+**Recommendations in roadmap:**
+- Phase 0.2: Revoke anon from `household_audit_log` (P0)
+- Phase 1.4: Re-run Security Advisor after backfill to validate (Rabin to own)
+- Phase 2.1: JWT asymmetric migration (Fenster frontend + Rabin review)
+
+📌 **Team update (2026-05-14T19:40:00Z):** Supabase security review complete — 30 anon-exposed tables + household_audit_log P0 fix + JWT migration to June. Recommendations merged into shared roadmap. — Rabin

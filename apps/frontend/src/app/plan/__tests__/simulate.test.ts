@@ -377,3 +377,548 @@ describe('runPlanSimulation', () => {
     expect(withEmptyOptions[0].income_details.some(d => d.type === 'options')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-account dividend + reinvestment contract tests
+// Written against: squad/cashflow-dividend-redesign contract (Keaton + McManus)
+// Field: PlanSimulationInput.dividendByAccount — added by McManus's PR.
+// These tests are TDD-style: new dividend-path tests will be red until
+// McManus lands; backward-compat test (test 6) is green immediately.
+// ---------------------------------------------------------------------------
+
+/** Forward-declared contract type — McManus adds dividendByAccount to PlanSimulationInput */
+interface DividendByAccount {
+  ibkr: number;
+  schwab: number;
+  ira: number;
+}
+
+/** Extension type used in test call-sites to avoid @ts-ignore pollution */
+type SimInputWithPerAccountDividends = Parameters<typeof runPlanSimulation>[0] & {
+  dividendByAccount?: DividendByAccount;
+};
+
+const USD_SETTINGS = { primaryUser: { birthYear: 1990 }, mainCurrency: 'USD' };
+
+describe("dividendByAccount: per-account real dividends + reinvestment", () => {
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  function surplusPlan(): PlanData {
+    return {
+      items: [
+        baseItem({
+          id: 'sal',
+          name: 'Salary',
+          category: 'Income',
+          value: 100_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+        baseItem({
+          id: 'exp',
+          name: 'Living',
+          category: 'Expense',
+          value: 30_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+  }
+
+  async function sim(input: SimInputWithPerAccountDividends) {
+    return runPlanSimulation(input as Parameters<typeof runPlanSimulation>[0]);
+  }
+
+  // ── test 1: surplus year — full reinvest ───────────────────────────────────
+
+  it('surplus year: emits 3 income lines + 3 reinvest lines; sums are equal (mass conservation)', async () => {
+    const result = await sim({
+      plan: surplusPlan(),
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 12_000, schwab: 8_000, ira: 5_000 },
+    });
+
+    const yr0 = result[0];
+    const divLines = yr0.income_details.filter(d => d.type === 'dividends' && d.name?.startsWith('Dividend - '));
+    expect(divLines).toHaveLength(3);
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - IBKR', type: 'dividends', value: 12_000 }));
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - Schwab', type: 'dividends', value: 8_000 }));
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - IRA', type: 'dividends', value: 5_000 }));
+
+    const reinvestLines = yr0.savings_details.filter(d => d.type === 'reinvestment');
+    expect(reinvestLines).toHaveLength(3);
+    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - IBKR', value: 12_000 }));
+    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - Schwab', value: 8_000 }));
+    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - IRA', value: 5_000 }));
+
+    // Mass conservation: sum(div income) === sum(reinvestment outflows)
+    const divSum = divLines.reduce((s, d) => s + (d.value ?? 0), 0);
+    const reinvestSum = reinvestLines.reduce((s, d) => s + (d.value ?? 0), 0);
+    expect(divSum).toBe(reinvestSum); // 25_000 === 25_000
+
+    expect(yr0.total_dividend_income).toBeGreaterThanOrEqual(25_000);
+  });
+
+  // ── test 2: deficit year — dividends fully consumed ───────────────────────
+
+  it('deficit year (deficit > dividends): 3 income lines emitted; zero reinvestment; withdrawals reduced vs no-dividend baseline', async () => {
+    const deficitPlan: PlanData = {
+      items: [
+        baseItem({
+          id: 'exp',
+          name: 'BigExp',
+          category: 'Expense',
+          value: 100_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+        baseItem({
+          id: 'acc',
+          name: 'Savings',
+          category: 'Account',
+          value: 500_000,
+          account_settings: accountSettings({ type: 'Savings', withdrawal_priority: 1 }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const [withDiv, withoutDiv] = await Promise.all([
+      sim({ plan: deficitPlan, finances: EMPTY_FINANCES, settings: USD_SETTINGS, dividendByAccount: { ibkr: 12_000, schwab: 8_000, ira: 5_000 } }),
+      sim({ plan: deficitPlan, finances: EMPTY_FINANCES, settings: USD_SETTINGS }),
+    ]);
+
+    const yr0 = withDiv[0];
+
+    // 3 income lines still emitted at full gross amounts
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - IBKR', type: 'dividends', value: 12_000 }));
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - Schwab', type: 'dividends', value: 8_000 }));
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - IRA', type: 'dividends', value: 5_000 }));
+
+    // No reinvestment lines
+    const reinvestLines = yr0.savings_details.filter(d => d.type === 'reinvestment');
+    expect(reinvestLines).toHaveLength(0);
+
+    // Withdrawals reduced by ~$25K vs no-dividend baseline
+    const divTotal = 12_000 + 8_000 + 5_000;
+    expect(yr0.withdrawals).toBeCloseTo(withoutDiv[0].withdrawals - divTotal, -2);
+  });
+
+  // ── test 3: deficit year — dividends partially consumed ───────────────────
+
+  it('partial deficit: proportional reinvestment of residual ($10K out of $25K dividends)', async () => {
+    // Non-dividend income = $10K salary, expenses = $25K → deficit = $15K without dividends.
+    // Dividends = $25K → residual = $10K → reinvested pro-rata.
+    // NOTE: items use explicit `currency: 'USD'` to match USD_SETTINGS.mainCurrency and the USD
+    // amounts in dividendByAccount; otherwise the default ILS values get converted and the
+    // residual math no longer lines up.
+    const partialPlan: PlanData = {
+      items: [
+        baseItem({
+          id: 'sal',
+          name: 'Salary',
+          category: 'Income',
+          currency: 'USD',
+          value: 10_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+          end_condition: 'Date',
+          end_date: `${CURRENT_YEAR}-12-31`,
+        }),
+        baseItem({
+          id: 'exp',
+          name: 'Living',
+          category: 'Expense',
+          currency: 'USD',
+          value: 25_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+        baseItem({
+          id: 'acc',
+          name: 'Cash',
+          category: 'Account',
+          currency: 'USD',
+          value: 100_000,
+          account_settings: accountSettings({ type: 'Savings', withdrawal_priority: 1 }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan: partialPlan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 12_000, schwab: 8_000, ira: 5_000 },
+    });
+
+    const yr0 = result[0];
+
+    // Full gross income lines
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - IBKR', value: 12_000 }));
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - Schwab', value: 8_000 }));
+    expect(yr0.income_details).toContainEqual(expect.objectContaining({ name: 'Dividend - IRA', value: 5_000 }));
+
+    const reinvest = yr0.savings_details.filter(d => d.type === 'reinvestment');
+    expect(reinvest).toHaveLength(3);
+
+    // Proportional: IBKR 12/25×10K=4800, Schwab 8/25×10K=3200, IRA 5/25×10K=2000
+    const ibkrR = reinvest.find(d => d.name === 'Dividend Reinvest - IBKR');
+    const schwabR = reinvest.find(d => d.name === 'Dividend Reinvest - Schwab');
+    const iraR = reinvest.find(d => d.name === 'Dividend Reinvest - IRA');
+
+    expect(ibkrR?.value).toBeCloseTo(4_800, 0);
+    expect(schwabR?.value).toBeCloseTo(3_200, 0);
+    expect(iraR?.value).toBeCloseTo(2_000, 0);
+
+    const totalReinvest = reinvest.reduce((s, d) => s + (d.value ?? 0), 0);
+    expect(totalReinvest).toBeCloseTo(10_000, 0);
+  });
+
+  // ── test 4: zero account — filtered out ───────────────────────────────────
+
+  it('zero-dividend account is omitted from income and reinvestment lines', async () => {
+    const result = await sim({
+      plan: surplusPlan(),
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 12_000, schwab: 0, ira: 5_000 },
+    });
+
+    const yr0 = result[0];
+    const divLines = yr0.income_details.filter(d => d.type === 'dividends' && d.name?.startsWith('Dividend - '));
+    expect(divLines).toHaveLength(2);
+    expect(divLines.some(d => d.name === 'Dividend - IBKR')).toBe(true);
+    expect(divLines.some(d => d.name === 'Dividend - IRA')).toBe(true);
+    expect(divLines.some(d => d.name === 'Dividend - Schwab')).toBe(false);
+
+    const reinvest = yr0.savings_details.filter(d => d.type === 'reinvestment');
+    expect(reinvest).toHaveLength(2);
+    expect(reinvest.some(d => d.name === 'Dividend Reinvest - Schwab')).toBe(false);
+  });
+
+  // ── test 5: multi-currency — USD dividends converted to ILS ───────────────
+
+  it('converts USD per-account dividends to mainCurrency (ILS) — values must differ from raw USD', async () => {
+    const bigSurplusPlan: PlanData = {
+      items: [
+        baseItem({
+          id: 'sal',
+          name: 'Salary',
+          category: 'Income',
+          value: 1_000_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+    const ilsSettings = { primaryUser: { birthYear: 1990 }, mainCurrency: 'ILS' };
+
+    const result = await sim({
+      plan: bigSurplusPlan,
+      finances: EMPTY_FINANCES,
+      settings: ilsSettings,
+      dividendByAccount: { ibkr: 12_000, schwab: 8_000, ira: 5_000 },
+    });
+
+    const yr0 = result[0];
+    const ibkrLine = yr0.income_details.find(d => d.name === 'Dividend - IBKR');
+    expect(ibkrLine).toBeDefined();
+    // ILS/USD rate is ~3.7x; value must be converted (not the raw $12K USD)
+    expect(ibkrLine!.value).not.toBe(12_000);
+    expect(ibkrLine!.value).toBeGreaterThan(12_000); // ILS > USD
+  });
+
+  // ── test 6: backward compat — no dividendByAccount → single aggregate line ─
+
+  it('backward compat: dividendTotal.annualTotal without dividendByAccount yields single "Dividend Income" line (green immediately)', async () => {
+    const plan: PlanData = { items: [], milestones: [], settings: {} };
+
+    const result = await runPlanSimulation({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendTotal: { annualTotal: 5_000 },
+    });
+
+    const yr0 = result[0];
+    const divLines = yr0.income_details.filter(d => d.type === 'dividends');
+    expect(divLines).toHaveLength(1);
+    expect(divLines[0]).toMatchObject({ name: 'Dividend Income', value: 5_000 });
+
+    // No reinvestment outflows from legacy aggregate path
+    const reinvest = yr0.savings_details.filter(d => d.type === 'reinvestment');
+    expect(reinvest).toHaveLength(0);
+  });
+
+  // ── test 7: mass conservation — account value grows by reinvested amount ──
+
+  it('IBKR account.value grows by reinvested dividend each year (growth=0, fees=0)', async () => {
+    // Pure-reinvest growth test: no salary/expenses so processSavings does not
+    // co-mingle other surplus into the IBKR balance. Currency pinned to USD to
+    // match dividendByAccount semantics.
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'ibkr-acc',
+          name: 'IBKR',
+          category: 'Account',
+          currency: 'USD',
+          value: 100_000,
+          growth_rate: 0,
+          account_settings: accountSettings({ type: 'Broker', fees: 0, dividend_yield: 0 }),
+          inflow_priority: 1,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 12_000, schwab: 0, ira: 0 },
+    });
+
+    const ibkrAcc0 = result[0].accounts.find(a => a.name === 'IBKR');
+    const ibkrAcc1 = result[1].accounts.find(a => a.name === 'IBKR');
+    const ibkrAcc2 = result[2].accounts.find(a => a.name === 'IBKR');
+
+    // year 0 snapshot is after reinvest of that year's dividend (block runs every year ≥ currentYear)
+    expect(ibkrAcc0?.value).toBeCloseTo(112_000, -2); // initial $100K + $12K yr0 reinvest
+    expect(ibkrAcc1?.value).toBeCloseTo(124_000, -2); // +$12K yr1 reinvest
+    expect(ibkrAcc2?.value).toBeCloseTo(136_000, -2); // +$12K yr2 reinvest
+  });
+
+  // ── test 8: first year (current year) — dividends emitted in projection[0] ─
+
+  it('emits per-account dividend lines in the very first projection year (year === currentYear)', async () => {
+    const plan: PlanData = { items: [], milestones: [], settings: {} };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 12_000, schwab: 8_000, ira: 5_000 },
+    });
+
+    expect(result[0].year).toBe(CURRENT_YEAR);
+    const divLines = result[0].income_details.filter(d => d.type === 'dividends' && d.name?.startsWith('Dividend - '));
+    expect(divLines).toHaveLength(3);
+    expect(divLines).toContainEqual(expect.objectContaining({ name: 'Dividend - IBKR' }));
+    expect(divLines).toContainEqual(expect.objectContaining({ name: 'Dividend - Schwab' }));
+    expect(divLines).toContainEqual(expect.objectContaining({ name: 'Dividend - IRA' }));
+  });
+
+  // ── test 9: tax handling — dividends in taxable income, no extra tax line ──
+
+  it('per-account dividends reflected in total_dividend_income; no separate "dividend tax" income_detail line', async () => {
+    const plan: PlanData = { items: [], milestones: [], settings: {} };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 1_000, schwab: 0, ira: 0 },
+    });
+
+    const yr0 = result[0];
+
+    expect(yr0.total_dividend_income).toBeGreaterThanOrEqual(1_000);
+    expect(yr0.income_details).toContainEqual(
+      expect.objectContaining({ name: 'Dividend - IBKR', type: 'dividends', value: 1_000 }),
+    );
+
+    // No separate "tax" type income_detail injected by the new per-account path
+    const taxLines = yr0.income_details.filter(d => d.type === 'tax');
+    expect(taxLines).toHaveLength(0);
+  });
+
+  // ── test 10: three-account total equals input sum ─────────────────────────
+
+  it('sum of per-account dividend income lines equals the total input (ibkr+schwab+ira)', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'sal',
+          name: 'Salary',
+          category: 'Income',
+          value: 500_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+    const dividendByAccount: DividendByAccount = { ibkr: 12_000, schwab: 8_000, ira: 5_000 };
+    const expectedTotal = dividendByAccount.ibkr + dividendByAccount.schwab + dividendByAccount.ira;
+
+    const result = await sim({ plan, finances: EMPTY_FINANCES, settings: USD_SETTINGS, dividendByAccount });
+
+    const divLineTotal = result[0].income_details
+      .filter(d => d.type === 'dividends' && d.name?.startsWith('Dividend - '))
+      .reduce((sum, d) => sum + (d.value ?? 0), 0);
+
+    expect(divLineTotal).toBeCloseTo(expectedTotal, 0);
+  });
+
+  // ── test 11: year-0 mapped account does NOT double-count with yield-based dividend ─
+
+  it('year 0 (currentYear): mapped IBKR account skips yield-based synthetic dividend (no double-count)', async () => {
+    // IBKR has dividend_yield=5% and value=$100K → would emit $5K synthetic dividend in year 0.
+    // dividendByAccount.ibkr=$12K should REPLACE that, not add to it.
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'ibkr-acc',
+          name: 'IBKR',
+          category: 'Account',
+          currency: 'USD',
+          value: 100_000,
+          growth_rate: 0,
+          account_settings: accountSettings({
+            type: 'Broker',
+            fees: 0,
+            dividend_yield: 5,
+            withdrawal_priority: 1,
+          }),
+          inflow_priority: 1,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 12_000, schwab: 0, ira: 0 },
+    });
+
+    const yr0 = result[0];
+    const dividendLines = yr0.income_details.filter(d => d.type === 'dividends' || d.type === 'Dividend Income');
+    // Only the per-account 'Dividend - IBKR' line should appear; the synthetic 'Dividend: IBKR' must not.
+    expect(dividendLines.some(d => d.name === 'Dividend: IBKR')).toBe(false);
+    expect(dividendLines.some(d => d.name === 'Dividend - IBKR')).toBe(true);
+    expect(yr0.total_dividend_income).toBeCloseTo(12_000, -1);
+  });
+
+  // ── test 12: IRA mapping via account type (no 'ira' in name) ──────────────
+
+  it('maps IRA by account type, not just name: { name: "Retirement", type: "IRA" } gets reinvested', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'retire',
+          name: 'Retirement',  // no 'ira' substring
+          category: 'Account',
+          currency: 'USD',
+          value: 100_000,
+          growth_rate: 0,
+          account_settings: accountSettings({
+            type: 'IRA',
+            fees: 0,
+            dividend_yield: 0,
+            withdrawal_priority: 1,
+          }),
+          inflow_priority: 1,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 0, schwab: 0, ira: 5_000 },
+    });
+
+    const yr0 = result[0];
+    const yr1 = result[1];
+
+    // Income + reinvest lines emitted
+    expect(yr0.income_details).toContainEqual(
+      expect.objectContaining({ name: 'Dividend - IRA', value: 5_000 }),
+    );
+    expect(yr0.savings_details).toContainEqual(
+      expect.objectContaining({ name: 'Dividend Reinvest - IRA', value: 5_000 }),
+    );
+
+    // Account balance grew by the reinvest amount (mapping worked end-to-end)
+    const retireAcc0 = yr0.accounts.find(a => a.name === 'Retirement');
+    const retireAcc1 = yr1.accounts.find(a => a.name === 'Retirement');
+    expect(retireAcc0?.value).toBeCloseTo(105_000, -2);
+    expect(retireAcc1?.value).toBeCloseTo(110_000, -2);
+  });
+
+  // ── test 13: all-zero dividendByAccount falls through to legacy aggregate ──
+
+  it('dividendByAccount = { 0, 0, 0 }: emits no per-account lines, falls back to legacy aggregate path', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'sal',
+          name: 'Salary',
+          category: 'Income',
+          currency: 'USD',
+          value: 100_000,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await sim({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendByAccount: { ibkr: 0, schwab: 0, ira: 0 },
+      // @ts-expect-error legacy dividendTotal still accepted alongside dividendByAccount
+      dividendTotal: { annualTotal: 4_000 },
+    });
+
+    const yr0 = result[0];
+    const perAccountLines = yr0.income_details.filter(d => d.type === 'dividends' && d.name?.startsWith('Dividend - '));
+    expect(perAccountLines).toHaveLength(0);
+
+    // Legacy single 'Dividend Income' line appears
+    expect(yr0.income_details).toContainEqual(
+      expect.objectContaining({ name: 'Dividend Income', type: 'dividends', value: 4_000 }),
+    );
+
+    // No reinvestment outflows from legacy aggregate path
+    const reinvest = yr0.savings_details.filter(d => d.type === 'reinvestment');
+    expect(reinvest).toHaveLength(0);
+  });
+
+  // ── test 14: legacy aggregate also updates total_dividend_income ──────────
+
+  it('legacy dividendTotal.annualTotal (no dividendByAccount) is reflected in total_dividend_income', async () => {
+    const plan: PlanData = { items: [], milestones: [], settings: {} };
+
+    const result = await runPlanSimulation({
+      plan,
+      finances: EMPTY_FINANCES,
+      settings: USD_SETTINGS,
+      dividendTotal: { annualTotal: 5_000 },
+    });
+
+    expect(result[0].total_dividend_income).toBeCloseTo(5_000, -1);
+  });
+});

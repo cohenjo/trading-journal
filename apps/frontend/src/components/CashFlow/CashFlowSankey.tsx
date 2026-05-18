@@ -177,7 +177,7 @@ export const CashFlowSankey: React.FC<Props> = ({ data, currency }) => {
             savingsDetails.forEach((item: any) => {
                 const accId = item.name;
                 const uniqueAccId = `save_dest_${accId}`;
-                const color = item.type === 'Cash' ? '#22d3ee' : '#6366f1';
+                const color = item.type === 'Cash' ? '#22d3ee' : item.type === 'reinvestment' ? '#7c7ef8' : '#6366f1';
 
                 addNode(uniqueAccId, color, accId);
                 addLink(investmentsId, uniqueAccId, item.value);

@@ -136,3 +136,132 @@ end $$;
 ## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
 
 Backend recon (sonnet-4.6): root-caused NOT NULL without defaults on plans.created_at / updated_at; confirmed migration 20260430130000 silent-skip of DEFAULT due to ADD COLUMN IF NOT EXISTS footgun. PR #442: `ALTER COLUMN SET DEFAULT now()` ×2 + trigger extended to BEFORE INSERT OR UPDATE. Decision: migration idempotency footgun pattern documented in `.squad/skills/migration-idempotency-gotchas/SKILL.md`. Verified Vercel green post-merge, no worker redeploy needed.
+
+## 2026-05-13 — RLS reference tables fix (Supabase advisor findings)
+
+**Issue:** Supabase advisor raised ERROR-level findings on 2 tables not covered by RLS:
+- `public.security_reference` — RLS explicitly DISABLED in migration 20260511102251
+- `public.tase_yahoo_map` — RLS never enabled (created via Alembic, not Supabase)
+
+**Root cause:** Previous decision to DISABLE RLS on `security_reference` was incorrect. I reasoned that global reference data didn't need RLS, but Supabase advisor requires: **any table in the `public` schema exposed to PostgREST MUST have RLS enabled**, even for reference data.
+
+**Correct pattern for reference tables:**
+- RLS **enabled** (not disabled)
+- Permissive SELECT policy for `authenticated` users (`USING (true)`)
+- No INSERT/UPDATE/DELETE policies (backend writes via service_role, which bypasses RLS)
+- Explicit grants: `REVOKE ALL FROM anon`, `GRANT SELECT TO authenticated`, `GRANT ALL TO service_role`
+
+**Fix:** Migration `20260513153400_enable_rls_on_reference_tables.sql`
+- Re-enabled RLS on `security_reference` (reverses prior DISABLE)
+- Enabled RLS on `tase_yahoo_map` (first time)
+- Added SELECT policies for both tables (`USING (true)` for authenticated)
+- Normalized grants per established pattern (matches `dividend_payments` / `dividend_accruals` from 20260511102251)
+
+**Backend verification:** Confirmed `yahoo_refresh.py` uses direct SQLAlchemy connection with service_role credentials (bypasses RLS). Worker writes via `direct_engine` (line 349), not PostgREST. No application code changes needed.
+
+**Learnings:**
+- **Never DISABLE RLS on public-schema tables.** Supabase advisor flags this as ERROR even for global reference data.
+- **Correct pattern:** "RLS enabled + permissive SELECT for authenticated", NOT "RLS disabled".
+- **Reference data pattern:** Always enable RLS with `USING (true)` SELECT policy. Backend service_role writes bypass RLS automatically.
+- The Supabase advisor `rls_disabled_in_public` lint is non-negotiable for any table exposed via PostgREST.
+
+---
+
+## 2026-05-13 — 📌 RLS Migration Applied + Migration Drift Discovered
+
+**Team update:** Migration `20260513153400_enable_rls_on_reference_tables.sql` has been successfully applied to remote Supabase via direct psql. Both reference tables (`security_reference`, `tase_yahoo_map`) now have RLS enabled with correct SELECT policies for authenticated users. Supabase advisor P0 findings (rls_disabled_in_public) cleared.
+
+**Action:** No action needed — your migration is live and verified in production-adjacent state.
+
+**Caveat:** Migration drift discovered (10 pending local, 10 remote-only). Kujan is tracking this separately. Use direct psql for targeted migrations until drift is reconciled. Full decision written to `.squad/decisions.md`.
+
+### 2026-05-14: Supabase Platform Changes — Backend Review (Fan-out Specialist)
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Backend impact review of Supabase platform changes (default grants, API security patterns, @supabase/server).
+
+**Key findings:**
+- **39 tables** exposed via Data API to frontend (supabase-js)
+- **"90% compliant"** — recent migrations (`20260513153400`, `20260504134817`) already use REVOKE+GRANT pattern
+- **Backend unaffected** — writes via SQLAlchemy (direct Postgres, bypasses PostgREST)
+- **No Edge Functions** → `@supabase/server` not applicable
+- **Note on count discrepancy:** Verdict text mentioned "19 tables with anon full access" but detailed audit table (lines 263–319) correctly lists 30. This count error in summary is a learning for future reviews — reconciled by Keaton via live DB query.
+
+**Deliverables:** Data API surface map (39 tables), grant inventory breakdown, migration template pattern, RPC function count (16 with implicit grants).
+
+**Decision merged into:** `.squad/decisions.md` § "Supabase platform changes review" (Keaton's synthesis consolidated)
+
+**Responsibilities in Phase 0/1/2:**
+- Phase 0.1: Write opt-in SQL migration `20260514000000_opt_in_explicit_grants.sql`
+- Phase 1.1: Write backfill migration for 30 anon-exposed tables
+- Phase 1.2: Classify reference tables as SELECT-only
+- Phase 1.3: Update migration template (README pattern)
+- Phase 2.2: Add pre-commit hook / migration linter
+- Phase 2.3: Inventory 16 RPC functions + add explicit GRANT EXECUTE
+
+**Learning:** Text-level errors (stale summary counts) can be caught by Keaton's synthesis via live DB queries. Include audit data in future reviews to avoid drift from text summary.
+
+📌 **Team update (2026-05-14T19:38:00Z):** Backend review complete — 39 Data API tables, 30 with legacy anon grants, opt-in + backfill pattern ready. 16 RPC functions also need explicit grants (Phase 2.3). — Hockney
+
+## 2026-05-18 — Dividend Per-Account Backend Design
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Backend design for using real per-account dividend estimates in plan simulation.
+
+**Task:** Investigate current dividend data flow and recommend backend architecture for exposing per-account dividend totals to the plan simulation engine.
+
+**Key Findings:**
+
+1. **No new worker needed (Option A):** The existing pipeline already provides real, fresh dividend estimates per account:
+   - `dividend_payments` ingested from IBKR Flex Query (TTM actuals)
+   - `dividend_accruals` ingested from IBKR Flex Query (forward estimates from IBKR's own projections)
+   - `stock_positions.dividend_yield` refreshed daily from Yahoo Finance (for non-IBKR positions)
+   - `getDividendSummary()` already returns `by_account: { ibkr, schwab, ira }` with USD-normalized totals
+
+2. **This is a frontend wiring change, not a backend change:**
+   - The plan simulation currently uses only `total_forward_annual` (global aggregate)
+   - The per-account breakdown already exists in `getDividendSummary().by_account`
+   - Solution: pass `by_account` downstream to `runPlanSimulation()` and emit separate income lines per account
+
+3. **Data freshness is adequate:**
+   - IBKR accruals: refreshed on Flex Query upload (weekly/monthly)
+   - Yahoo yields: refreshed daily at 22:00 UTC
+   - For 20-40 year plan simulations, daily vs. weekly refresh is immaterial
+
+4. **Forward yield calculation already robust:**
+   - Priority cascade: IBKR accruals → TTM (if ≥3 payments) → Yahoo/CSV yield
+   - IBKR accruals are the most authoritative source (account-specific, includes tax treaties, ADR fees)
+   - Fallback to Yahoo only when IBKR data is unavailable
+
+5. **RLS security confirmed:**
+   - `dividend_payments` and `dividend_accruals` SELECT policies use `is_household_member()` pattern
+   - Per-account data flow respects household scoping
+   - No new RLS policies needed
+
+6. **No migrations needed:**
+   - No new tables, no schema changes
+   - This is purely a frontend interface enhancement
+
+7. **Worker redeploy gate: Not applicable:**
+   - No changes to `apps/backend/app/worker/**`
+   - If future work adds a dividend cache table (Option C, rejected for now), would require worker redeploy
+
+**Design deliverables:**
+- Full backend design document: `.squad/decisions/inbox/hockney-dividend-worker-design.md`
+- 10-section analysis covering data sources, worker assessment, RLS, migrations, operational concerns
+- Recommendation: Pass existing `by_account` data to simulation; reject Options B (new worker) and C (cache table) as premature
+
+**Learnings:**
+- **"Real numbers" often means "what we already have."** The user's request assumed we were using generic yields; investigation revealed we're already using IBKR's authoritative forward projections. The gap was in *exposing* the data to the simulation, not in *collecting* it.
+- **Audit before architecting.** Traced the full data flow from Flex Query → `dividend_accruals` → `getDividendPositions()` → `getDividendSummary()` → simulation input. Found that 90% of the requested functionality already exists; only the last-mile wiring is missing.
+- **Option A (no worker) is often correct for read-heavy aggregations.** The aggregation is <100ms, runs once per page load, and benefits from existing indexes. Caching (Option C) would add staleness risk with no latency benefit. Workers should add new data, not cache computed views.
+- **Frontend server actions can bypass backend entirely.** `getDividendSummary()` is a Next.js server action that queries Supabase PostgREST directly—no FastAPI layer. This is the established pattern per "Positions as Source of Truth" decision. Backend only owns the workers that *write* dividend data, not the APIs that *read* it.
+- **Backward compatibility matters for plan configs.** The existing `dividend_policy`/`dividend_fixed_amount` fields serve a different purpose (user's *future* assumptions) than real data (user's *current* snapshot). Both should coexist: real data = "what you own today", plan policies = "what you plan to own tomorrow."
+
+**Open questions for Product/Frontend (deferred to McManus/Fenster):**
+- Should IRA dividends be marked tax-deferred in the simulation?
+- Should users see TTM actuals alongside forward estimates?
+- Should dividend income grow over time (e.g., 3% annual increase)?
+- Should users be able to manually override per-account totals in the plan editor?
+
+**No PR opened.** This is a design-only deliverable. Implementation (frontend wiring) is a separate 2-hour task for Fenster or McManus.

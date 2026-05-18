@@ -20,6 +20,7 @@ export default function PlanPage() {
     const [finances, setFinances] = useState<any>(null);
     const [optionsProjection, setOptionsProjection] = useState<Array<{ year: number; expectedIncome: number }>>([]);
     const [dividendTotal, setDividendTotal] = useState<DividendIncomeTotal | undefined>(undefined);
+    const [dividendByAccount, setDividendByAccount] = useState<{ ibkr: number; schwab: number; ira: number } | undefined>(undefined);
     const [bondProjection, setBondProjection] = useState<BondIncomePoint[]>([]);
     const [projection, setProjection] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
@@ -40,6 +41,7 @@ export default function PlanPage() {
             // Wire dividend summary: total_forward_annual is already USD, major units.
             // Display as constant annual income across all plan years.
             setDividendTotal({ annualTotal: dividendData.total_forward_annual });
+            setDividendByAccount(dividendData.by_account);
 
             // Wire bond ladder income: income_series is per-year { date, value } from buildIncome().
             // Parse year from "YYYY-01-01" date strings.
@@ -111,6 +113,7 @@ export default function PlanPage() {
                 settings: settings as unknown as Record<string, unknown>,
                 optionsProjection,
                 dividendTotal,
+                dividendByAccount,
                 bondProjection,
             })
                 .then(data => {
@@ -132,7 +135,7 @@ export default function PlanPage() {
         }, 500); // 500ms debounce
 
         return () => clearTimeout(timer);
-    }, [plan, finances, settings, optionsProjection, dividendTotal, bondProjection]); // Re-run when any input changes
+    }, [plan, finances, settings, optionsProjection, dividendTotal, dividendByAccount, bondProjection]); // Re-run when any input changes
 
     // Calculate Markers
     const markers = useMemo(() => {
@@ -317,6 +320,7 @@ export default function PlanPage() {
                             data={plan.data}
                             onChange={handleUpdatePlanData}
                             finances={finances}
+                            dividendAutoAccounts={dividendByAccount}
                             virtualIncomeStreams={{
                                 // Options: use current year's expected income from the projection
                                 optionsAnnual: optionsProjection.find(p => p.year === new Date().getFullYear())?.expectedIncome
