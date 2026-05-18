@@ -514,12 +514,16 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
   it('partial deficit: proportional reinvestment of residual ($10K out of $25K dividends)', async () => {
     // Non-dividend income = $10K salary, expenses = $25K → deficit = $15K without dividends.
     // Dividends = $25K → residual = $10K → reinvested pro-rata.
+    // NOTE: items use explicit `currency: 'USD'` to match USD_SETTINGS.mainCurrency and the USD
+    // amounts in dividendByAccount; otherwise the default ILS values get converted and the
+    // residual math no longer lines up.
     const partialPlan: PlanData = {
       items: [
         baseItem({
           id: 'sal',
           name: 'Salary',
           category: 'Income',
+          currency: 'USD',
           value: 10_000,
           start_condition: 'Date',
           start_date: `${CURRENT_YEAR}-01-01`,
@@ -530,6 +534,7 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
           id: 'exp',
           name: 'Living',
           category: 'Expense',
+          currency: 'USD',
           value: 25_000,
           start_condition: 'Date',
           start_date: `${CURRENT_YEAR}-01-01`,
@@ -538,6 +543,7 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
           id: 'acc',
           name: 'Cash',
           category: 'Account',
+          currency: 'USD',
           value: 100_000,
           account_settings: accountSettings({ type: 'Savings', withdrawal_priority: 1 }),
         }),
@@ -657,20 +663,16 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
   // ── test 7: mass conservation — account value grows by reinvested amount ──
 
   it('IBKR account.value grows by reinvested dividend each year (growth=0, fees=0)', async () => {
+    // Pure-reinvest growth test: no salary/expenses so processSavings does not
+    // co-mingle other surplus into the IBKR balance. Currency pinned to USD to
+    // match dividendByAccount semantics.
     const plan: PlanData = {
       items: [
-        baseItem({
-          id: 'sal',
-          name: 'Salary',
-          category: 'Income',
-          value: 500_000,
-          start_condition: 'Date',
-          start_date: `${CURRENT_YEAR}-01-01`,
-        }),
         baseItem({
           id: 'ibkr-acc',
           name: 'IBKR',
           category: 'Account',
+          currency: 'USD',
           value: 100_000,
           growth_rate: 0,
           account_settings: accountSettings({ type: 'Broker', fees: 0, dividend_yield: 0 }),
@@ -692,9 +694,10 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
     const ibkrAcc1 = result[1].accounts.find(a => a.name === 'IBKR');
     const ibkrAcc2 = result[2].accounts.find(a => a.name === 'IBKR');
 
-    expect(ibkrAcc0?.value).toBeCloseTo(100_000, -2);
-    expect(ibkrAcc1?.value).toBeCloseTo(112_000, -2); // +$12K reinvested
-    expect(ibkrAcc2?.value).toBeCloseTo(124_000, -2); // +$12K again
+    // year 0 snapshot is after reinvest of that year's dividend (block runs every year ≥ currentYear)
+    expect(ibkrAcc0?.value).toBeCloseTo(112_000, -2); // initial $100K + $12K yr0 reinvest
+    expect(ibkrAcc1?.value).toBeCloseTo(124_000, -2); // +$12K yr1 reinvest
+    expect(ibkrAcc2?.value).toBeCloseTo(136_000, -2); // +$12K yr2 reinvest
   });
 
   // ── test 8: first year (current year) — dividends emitted in projection[0] ─

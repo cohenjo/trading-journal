@@ -1039,7 +1039,10 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     const totalRealAssets = realAssetManager.assets.reduce((sum, asset) => sum.plus(asset.value), new Decimal(0));
     const totalAccounts = accountManager.accounts.reduce((sum, account) => sum.plus(account.value), new Decimal(0));
     const netWorth = totalAccounts.plus(unallocatedCash).plus(totalRealAssets).minus(liquidAssets.debt);
-    const totalDividendIncome = dividends.reduce((sum, dividend) => sum.plus(dividend.gross), new Decimal(0));
+    let totalDividendIncome = dividends.reduce((sum, dividend) => sum.plus(dividend.gross), new Decimal(0));
+    if (planInput.dividendByAccount !== undefined) {
+      totalDividendIncome = totalDividendIncome.plus(totalRealDividendsAnnual);
+    }
 
     projection.push({
       year,
