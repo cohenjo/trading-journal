@@ -178,3 +178,162 @@ Naming a Pydantic field same as imported stdlib type (e.g., `date: date | None`)
 ## 2026-05-13 — Plan persistence + cashflow sprint (Round 9, Issues #440 + #441)
 
 Anticipatory test authoring (sonnet-4.6): 22 test scenarios across Flow A (/plan persistence: 10 E2E) + Flow B (/cash-flow rendering: 12 E2E + 4 vitest). PR #444 (draft): A1–A5, A7–A10 in plan-persistence.spec.ts + plan-rls.spec.ts; B1–B5, B7–B12 in cash-flow.spec.ts. A6/B6 test.fixme'd pending PR-C (Fenster P1). Fixtures: plan-fixtures.ts (seedPlan, cleanupPlanData). Unit tests (4 RLS proxy + 3 null-safety) in plan-rls-integration.test.ts; currency guards (8 new test.cases) in currency.test.ts. Total: 57 unit tests pass. Skill `.squad/skills/anticipatory-test-authoring/SKILL.md` updated with Round 3 fixme discipline. PR #444 rebased ×1 post-Hockney; A6/B6 un-fixme'd after all 3 implementation PRs merged.
+
+---
+
+## 2026-06-09 — Dividend Reinvestment Simulation Design
+
+**Assigned by:** Jony (Product/Squad Lead)
+**Role:** McManus (Data/Finance Dev)
+**Scope:** Architecture design for replacing synthetic yield-driven dividends with real per-account dividend data in financial planning simulation.
+
+### Design Deliverable
+
+Created comprehensive technical design document: `.squad/decisions/inbox/mcmanus-dividend-reinvest-simulation.md`
+
+**Covers 10 technical aspects:**
+1. Input contract & account mapping strategy (dividendByAccount interface, 3-tier mapping: exact name → type fallback → fuzzy)
+2. Per-account income entries (3 "Dividend - {account}" entries, currency conversion USD→ILS)
+3. Reinvestment outflow semantics (surplus: full reinvest; deficit: proportional residual; account.value += reinvest)
+4. Mass conservation invariants (surplus: income == reinvest; deficit: income == reinvest + used_for_spending)
+5. Tax treatment (per-account `dividend_tax_rate`, reinvest from net dividends)
+6. Backward compatibility (legacy yield-based fallback when dividendByAccount undefined; deprecated fields documented)
+7. Account growth interaction (user must set growth to price-only when using real dividends; avoid double-counting)
+8. Currency handling (convert() helper for USD→ILS; getDividendSummary returns USD)
+9. First year handling (use real dividends for currentYear too, not yield-based)
+10. Test invariants (10 unit tests + 3 edge cases for Redfoot implementation)
+
+### Key Technical Decisions
+
+**Data source:**
+- `getDividendSummary()` from dividends/actions.ts provides `by_account: { ibkr, schwab, ira }` with USD-converted forward_dividend_annual
+- Replace `currentDividendPayouts()` (yield-based) in simulation.ts lines 533-598
+
+**Reinvestment algorithm:**
+```typescript
+const deficit = plannedExpenses - yearIncome.net;
+const reinvestableAmount = Math.max(0, totalNetDividends - Math.max(0, deficit));
+// Distribute proportionally: (account_net / total_net) * reinvestableAmount
+```
+
+**Sankey visualization impact:**
+- Current: 1 aggregate "Dividend Income" entry
+- New: 3 "Dividend - {account}" incomes + 3 "Dividend Reinvest - {account}" outflows
+
+**Deprecation:**
+- Ignored fields when dividendByAccount provided: `dividend_mode`, `dividend_yield`, `dividend_fixed_amount`
+- Still used: `dividend_tax_rate` (per-account tax)
+- Growth field semantics: user guidance needed (set to price growth only, exclude yield)
+
+### Open Questions Documented
+
+For user/squad review:
+1. Account mapping: explicit `dividendAccountId` field vs name/type heuristics?
+2. Unmapped sources: synthetic entry vs skip vs aggregate "Other"?
+3. Tax rate: per-account vs single plan-level?
+4. Feature flag: explicit boolean vs implicit field presence?
+5. Growth field: add `growth_includes_dividends` flag vs documentation only?
+6. Dividend growth: escalate amounts over projection years using `dividend_growth_rate`?
+
+### Handoff to Redfoot
+
+**Implementation checklist** (4 phases):
+- Phase 1: Core dividend replacement (input contract, account mapping, per-account income, tax, currency)
+- Phase 2: Reinvestment logic (surplus/deficit calc, proportional split, account.value update, savings_details)
+- Phase 3: Backward compatibility (legacy path preservation, feature detection)
+- Phase 4: Testing (10 unit + 1 integration + 3 edge cases)
+
+**Test requirements specified:**
+- Mass conservation: `sum(dividend income) === sum(reinvestment) + used_for_spending`
+- Proportional distribution formula validation
+- Currency conversion (USD→ILS when mainCurrency='ILS')
+- Account mapping (case-insensitive, type fallback for IRA)
+- Unmapped source handling (synthetic entry)
+- Tax application (gross → net, per-account rate)
+- Legacy fallback (single aggregate dividend when dividendByAccount undefined)
+
+### Learnings
+
+**Mass conservation patterns for cash-flow simulations:**
+- Surplus year: income source exactly matches reinvestment sink (dividends are internal transfers)
+- Deficit year: income partially consumed for spending, only residual reinvests
+- Dividends offset deficit **before** account withdrawals (preserves balances)
+
+**Account mapping heuristics for external data sources:**
+- Primary: exact name match (case-insensitive)
+- Secondary: type-based (retirement → ira)
+- Tertiary: fuzzy substring ("Interactive Brokers" contains "ibkr")
+- Fallback: synthetic entry for unmapped (visibility > silence)
+
+**Currency conversion in multi-currency simulations:**
+- External sources (getDividendSummary) return USD
+- Internal calculations use mainCurrency (ILS for Jony)
+- Single convert() point at income ingestion prevents drift
+- Reinvestment uses converted amounts (no double conversion)
+
+**Tax semantics for reinvestment:**
+- Reinvest from **net** dividends (post-tax), not gross
+- Per-account tax rates allow modeling of different account types (taxable vs IRA)
+- Proportional distribution uses net amounts (avoid reinvesting taxes)
+
+**Growth vs yield interaction:**
+- Total return = price growth + dividend yield
+- When modeling real dividends separately, growth field must represent price-only
+- Risk of double-counting if user doesn't adjust growth assumption
+- Need user guidance: tooltip/warning when dividendByAccount present AND dividend_yield > 0
+
+**First-year special handling:**
+- Current system uses `currentDividendPayouts()` for currentYear (yield-based)
+- When real dividends available, apply uniformly to all years including current
+- Simplifies logic, ensures consistency, matches getDividendSummary semantics
+
+**Pydantic field shadowing (reminder from 2026-05-11):**
+- Naming field same as imported stdlib type causes TypeError during class construction
+- Example: `date: date | None` fails; use `accrual_date: date | None`
+- Applies to all Pydantic models binding datetime/date/time types
+
+### Files Modified
+
+**Created:**
+- `.squad/decisions/inbox/mcmanus-dividend-reinvest-simulation.md` (22KB design doc)
+
+**Not modified (implementation pending):**
+- `apps/frontend/src/app/plan/simulation.ts` (target for Redfoot changes)
+- `apps/frontend/src/app/dividends/actions.ts` (getDividendSummary data source)
+- `apps/frontend/src/app/cash-flow/page.tsx` (caller passing dividendByAccount)
+
+### References
+
+**Related work:**
+- Dividend data inventory (2026-05-11, 2026-05-13): established getDividendSummary as canonical source
+- Flex pipeline validation (2026-05-10): dividend_accruals.gross_rate ingestion
+- Options income projection (2026-05-12): parallel alternative income stream with similar projection needs
+
+**Next sprint:**
+- Redfoot implements Phases 1-4 from checklist
+- McManus validates mass conservation in PR review
+- Keaton integrates into Sankey visualization (cash-flow page)
+
+---
+
+## 2026-05-18 — ✅ dividendByAccount Simulation Implementation (branch: squad/cashflow-dividend-redesign)
+
+**Commit:** `6f5fd5d` | **File:** `apps/frontend/src/app/plan/simulation.ts` (+137 LOC, -13 LOC)
+
+Implemented all 9 spec steps from `mcmanus-dividend-reinvest-simulation.md` + consolidated approval defaults.
+
+- Extended `PlanSimulationInput` with `dividendByAccount?: { ibkr, schwab, ira }` (USD forward annual, constant).
+- Built `dividendAccountMap` (3-tier: exact name → type/pension → fuzzy substring) + `mappedAccountIds` Set before main loop.
+- Added optional `skipAccountIds?: Set<string>` param to `Accounts.processGrowthAndIncome`; mapped accounts have yield-based dividend zeroed to prevent double-counting.
+- Pre-computed `perAccountDividends` array (USD→mainCurrency converted, once outside loop) + `totalRealDividendsAnnual`.
+- Inside main loop: conditional emit — 3 named `Dividend - {LABEL}` income lines when `dividendByAccount` provided, else legacy `Dividend Income` single entry.
+- Reinvestment block: computes `reinvestable` from three cases (full surplus / partial cover / full deficit), distributes proportionally, pushes `Dividend Reinvest - {LABEL}` savings entries, updates `account.value`, subtracts from `adjustedNetFlow` before processSavings/processDeficit.
+- Silent synthetic node (default #7): `d.account === null` path emits income without balance impact.
+
+**All 14 existing tests pass (backward compat confirmed).**
+
+### Learnings
+
+- `adjustedNetFlow = netFlow - totalReinvested` is the key to mass conservation: reinvest outflows are subtracted from the flow passed to `processSavings`/`processDeficit` so money isn't counted twice.
+- Pre-computing per-account USD→ILS conversion outside the projection loop is both correct (constant per spec) and efficient — avoids repeated Decimal allocation each year.
+- Three-case reinvestment logic (full surplus / partial cover / full deficit) maps cleanly to a single `reinvestable` scalar then proportional distribution per account.

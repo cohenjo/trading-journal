@@ -134,3 +134,7 @@
 ---
 
 2026-05-12: Regression tests for options estimation (PR #437). Math verified with known fixtures (100% growth doubling, 0% growth flat). Edge cases: <3 years, negative baseline, large N projection.
+
+## 2026-05-18: TDD test suite — cashflow dividend redesign (squad/cashflow-dividend-redesign)
+
+**Assigned:** Redfoot writes tests per approved test plan against `dividendByAccount` contract. Created 3 test files: (1) simulate.test.ts extended with 10 new cases (surplus/deficit-full/deficit-partial/zero-account/multi-currency/back-compat/mass-conservation/first-year/tax/three-account-total), (2) new `cash-flow/__tests__/page.test.tsx` with 5 toggle+a11y cases — all 5 green, (3) new `CashFlowSankey.test.tsx` with 5 node-structure cases — all 5 green (Fenster already implemented `#7c7ef8` indigo + reinvestment color). Simulate TDD tests: 6/10 green immediately (back-compat, zero-account, multi-currency, first-year, deficit-fully-consumed, three-account-total); 4 red awaiting McManus's `dividendByAccount` implementation (surplus mass-conservation, partial reinvest proportions, account.value growth, total_dividend_income). Baseline 706/713 preserved (pre-existing 7 failures unchanged). Commit: `9c42238`.

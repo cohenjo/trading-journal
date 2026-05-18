@@ -177,3 +177,65 @@ Synthesis call (opus-4.6): triaged root causes (frontend optimistic UI swallow, 
 **Tasks opened:** 7 follow-up tasks (Phase 0/1/2) in coordination with Hockney, Rabin, Fenster.
 
 📌 **Team update (2026-05-14T19:46:00Z):** Supabase platform-changes review complete — 30 tables with legacy anon grants, Oct 30 enforcement deadline, Phase 0/1/2 roadmap + 3 new conventions merged into shared decisions. Rabin + Hockney specialist reviews reconciled; migration template confirmed. Act this week on opt-in grants. Schedule JWT keys for June. — Keaton, Rabin, Hockney
+
+### 2026-05-15 — Cash Flow Dividend Redesign Architecture
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Produced comprehensive architecture design for 3 cash flow improvements: (1) monthly/yearly display toggle, (2) replace plan-configured yields with real per-account dividend data, (3) visualize dividend reinvestment in Sankey.
+
+**Key architectural findings:**
+- `getDividendSummary()` already provides per-account breakdown (ibkr, schwab, ira) — no worker changes needed
+- Current `DividendIncomeTotal` interface must change to `DividendIncome` with per-account structure
+- Simulation must emit 3 separate dividend income nodes + 3 reinvestment flows (bypassing "Net Savings" node)
+- AccountManager dividend logic must be disabled for accounts with real data (backwards compatibility via `use_real_dividends` flag)
+- Deficit year semantics require clarification (should dividends reduce deficit before withdrawals?)
+- Monthly/yearly toggle recommended as display-only (÷12 divisor at render time, not simulation rerun)
+
+**Files analyzed:**
+- `simulation.ts` (DividendIncomeTotal interface, AccountManager dividend logic, processSavings/processDeficit, projection loop)
+- `cash-flow/page.tsx` (state management, simulation invocation, summary cards)
+- `CashFlowSankey.tsx` (income/savings node rendering, Sankey structure)
+- `dividends/actions.ts` (getDividendSummary data source)
+- `plan/page.tsx` (dividend yield config UI)
+
+**Precedents applied:**
+- Options Income Estimation pattern (virtual income streams, multiple Sankey nodes)
+- Round 8 currency contract (USD major units, no ÷100 conversion)
+- Stacked-Branch protocol (merge sequencing)
+
+**Open questions for Jony:**
+1. Trailing 12-month vs. forecasted dividend data?
+2. Does getDividendSummary() distinguish paid vs. reinvested dividends?
+3. Dividend-offset-deficit semantics (Option A vs B)?
+4. Monthly toggle display-only or affect calculations?
+5. Plan page yield config UI treatment (hide, remove, or deprecate)?
+6. Gradual rollout (per-account `use_real_dividends` flag)?
+
+**Sequencing:**
+- Phase 1: Data contract + simulation engine changes (data structure, 3-node emission, reinvestment logic)
+- Phase 2: Sankey visualization updates (3 dividend nodes, 3 reinvestment edges)
+- Phase 3: Monthly/yearly toggle (independent, can merge in parallel)
+- Phase 4: Plan page integration (conditional yield config visibility)
+
+**Decision file:** `.squad/decisions/inbox/keaton-cashflow-dividend-redesign.md`
+**Estimated scope:** ~300-400 LOC across 4 frontend files, no worker changes
+
+### 2026-05-18 — Dividend Redesign Consolidated Approval Document
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Synthesized 5 agent design documents (Keaton architecture, Fenster UI, McManus simulation, Hockney backend audit, Redfoot test plan) into unified approval gate with 8 open questions.
+
+**Key synthesis findings:**
+- Resolved 4 naming/strategy conflicts (reinvestment labels, toggle persistence, tax treatment, account mapping)
+- Backend confirmed no worker needed — `getDividendSummary().by_account` already exists
+- Total scope: ~400-500 LOC production code + ~450 LOC tests = ~795 LOC
+- 28 new test cases planned across simulation/component/integration layers
+- Recommended stacked PR strategy: PR#1 (simulation) → PR#2 (toggle, independent) → PR#3 (Sankey) → PR#4 (plan page) → PR#5 (regression)
+
+**Approval document:** `.squad/decisions/inbox/keaton-consolidated-approval.md` (458 lines, 8 open questions for Jony)
+
+**[2026-05-18 22:35] Code review: cash-flow dividend redesign implementation**
+- Reviewed: commits 6f5fd5d, 09cd6c1, 9c42238, 514f16d on squad/cashflow-dividend-redesign
+- Verdict: REJECT
+- Findings: 2 critical / 5 important / 2 nits
+- See: `.squad/decisions/inbox/keaton-review-cashflow-impl.md`
