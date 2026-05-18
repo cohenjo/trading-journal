@@ -135,6 +135,19 @@
 
 2026-05-12: Regression tests for options estimation (PR #437). Math verified with known fixtures (100% growth doubling, 0% growth flat). Edge cases: <3 years, negative baseline, large N projection.
 
+## 2026-05-19: Test Review — PR #461 Flex Sync Fixes (squad/flex-sync-fixes)
+
+**Verdict: 🟢 APPROVE.** All 4 required test paths present. Orphan-filter tests use `_OrphanMixedSession` with mixed rows; warning-log assertion uses `caplog` with exact level + account_id checks (strong). `last_synced` success test passes via FakeSession synthetic mode. Failure test verifies call ordering: A_GOOD (id=10) stamped before B_FAIL (id=20) raises, B_FAIL never stamped. Backfill of `household_exists: True` in 3 existing test files correct and necessary — without it `_load_accounts` would KeyError. No silent pass-throughs.
+
+**Key non-blocking gaps:** (1) Warning log test asserts account_id but not household_id — diagnostic required both; easy one-liner fix. (2) Test #4 documents call ordering, not transaction durability — in production, A_GOOD's `last_synced` update also rolls back when B_FAIL raises (shared session, no per-account savepoint). (3) No test for `config_id=None` guard or soft-deleted household (logically covered but not explicitly named).
+
+**Regression value confirmed:** deleting the `_load_accounts` guard → test #1 fails. Moving `_update_config_last_synced` before `_ingest_account` → test #4 fails (B_FAIL's config_id would be in the stamped list before the raise).
+
+**Learning:** When reviewing `last_synced` write-through tests for nightly jobs, always check whether the test is asserting *call ordering* (unit level) vs *transaction commit* (integration level). These are different guarantees. Unit tests that use FakeSessions inherently can't test rollback behavior — flag this gap with a comment rather than blocking merge.
+
 ## 2026-05-18: TDD test suite — cashflow dividend redesign (squad/cashflow-dividend-redesign)
 
 **Assigned:** Redfoot writes tests per approved test plan against `dividendByAccount` contract. Created 3 test files: (1) simulate.test.ts extended with 10 new cases (surplus/deficit-full/deficit-partial/zero-account/multi-currency/back-compat/mass-conservation/first-year/tax/three-account-total), (2) new `cash-flow/__tests__/page.test.tsx` with 5 toggle+a11y cases — all 5 green, (3) new `CashFlowSankey.test.tsx` with 5 node-structure cases — all 5 green (Fenster already implemented `#7c7ef8` indigo + reinvestment color). Simulate TDD tests: 6/10 green immediately (back-compat, zero-account, multi-currency, first-year, deficit-fully-consumed, three-account-total); 4 red awaiting McManus's `dividendByAccount` implementation (surplus mass-conservation, partial reinvest proportions, account.value growth, total_dividend_income). Baseline 706/713 preserved (pre-existing 7 failures unchanged). Commit: `9c42238`.
+
+
+📌 Team update (2026-05-19): Strict-lockout 5-round P0 fix protocol shipped Flex sync fixes in ~2.5h (diagnostic → implement → parallel review → merge → deploy). 88 orphan trading_account_config rows discovered; cascade gap suggests future audit needed. IB Gateway is desktop app, not Docker-managed. Decided by Scribe during cross-agent orchestration.
