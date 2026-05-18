@@ -9,12 +9,14 @@ interface Props {
     onChange: (updates: Partial<PlanItem>) => void;
     mode?: 'planning' | 'snapshot';
     milestones?: PlanMilestone[];
+    /** Per-account real dividend totals — when an account has real data, yield controls are replaced with an auto-banner */
+    dividendAutoAccounts?: { ibkr: number; schwab: number; ira: number };
 }
 
 type AccountType = NonNullable<PlanItem['account_settings']>['type'];
 type DividendPayoutStartCondition = NonNullable<NonNullable<PlanItem['account_settings']>['dividend_payout_start_condition']>;
 
-export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'planning', milestones = [] }) => {
+export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'planning', milestones = [], dividendAutoAccounts }) => {
     const [priceCacheStatus, setPriceCacheStatus] = React.useState<string | null>(null);
 
     const defaults = {
@@ -27,6 +29,17 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
 
     // Merge defaults to avoid uncontrolled inputs if keys are missing
     const settings = { ...defaults, ...(item.account_settings || {}) } as NonNullable<PlanItem['account_settings']>;
+
+    // Detect if this account has real dividend data from getDividendSummary().by_account
+    const accountKey = ((): 'ibkr' | 'schwab' | 'ira' | null => {
+        const n = (item.name || '').toLowerCase();
+        if (n.includes('ibkr') || n.includes('interactive')) return 'ibkr';
+        if (n.includes('schwab')) return 'schwab';
+        if (n.includes('ira') || n.includes('leumi')) return 'ira';
+        return null;
+    })();
+    const autoRealAmount = accountKey && dividendAutoAccounts ? dividendAutoAccounts[accountKey] : 0;
+    const hasRealDividendData = autoRealAmount > 0;
 
     const updateSettings = (updates: Partial<typeof settings>) => {
         onChange({ account_settings: { ...settings, ...updates } });
@@ -439,14 +452,21 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
                                 )}
                                 <div className="relative">
                                     <label className="text-xs text-slate-400">Dividend Yield (%)</label>
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                        value={settings.dividend_yield ?? 0}
-                                        onChange={e => handleNumChange('dividend_yield', e.target.value)}
-                                    />
-                                    {settings.type === 'RSU' && settings.stock_symbol && (
+                                    {hasRealDividendData ? (
+                                        <div className="rounded-md bg-blue-950/40 border border-blue-800/40 p-3 text-xs text-blue-200 mt-1">
+                                            <span className="font-semibold">Auto from real positions:</span>{' '}
+                                            {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(autoRealAmount)}/yr forward dividend
+                                        </div>
+                                    ) : (
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                            value={settings.dividend_yield ?? 0}
+                                            onChange={e => handleNumChange('dividend_yield', e.target.value)}
+                                        />
+                                    )}
+                                    {settings.type === 'RSU' && settings.stock_symbol && !hasRealDividendData && (
                                         <span className="absolute right-2 top-8 text-[10px] text-slate-500 pointer-events-none">
                                             {settings.stock_symbol}
                                         </span>
@@ -476,7 +496,7 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
 
             {/* DIVIDEND POLICY */}
             {
-                mode === 'planning' && settings.type !== 'Pension' && settings.type !== 'Savings' && (
+                mode === 'planning' && settings.type !== 'Pension' && settings.type !== 'Savings' && !hasRealDividendData && (
                     <div className="bg-slate-800 p-4 rounded-lg space-y-3 border border-slate-700 animate-in fade-in slide-in-from-top-2 duration-300">
                         <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-300">
                             💵 Dividend Policy

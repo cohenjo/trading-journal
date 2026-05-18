@@ -11,6 +11,8 @@ interface Props {
     data: PlanData;
     onChange: (data: PlanData) => void;
     finances?: any; // Finance Snapshot
+    /** Per-account dividend totals from getDividendSummary().by_account — used to show auto-banner in account details */
+    dividendAutoAccounts?: { ibkr: number; schwab: number; ira: number };
     /** Virtual income streams (#441): computed live from /summary, NOT stored in plan.data */
     virtualIncomeStreams?: {
         /** Options income for current year (from getOptionsIncomeEstimation) */
@@ -32,7 +34,7 @@ const Tab: React.FC<{ label: string; count: number; active: boolean; onClick: ()
     </button>
 );
 
-export const PlanEditor: React.FC<Props> = ({ data, onChange, finances, virtualIncomeStreams }) => {
+export const PlanEditor: React.FC<Props> = ({ data, onChange, finances, dividendAutoAccounts, virtualIncomeStreams }) => {
     const { settings } = useSettings();
     const mainCurrency = settings.mainCurrency;
     const [activeTab, setActiveTab] = useState<'Account' | 'Income' | 'Expense' | 'Asset' | 'Milestone'>('Account');
@@ -559,6 +561,7 @@ export const PlanEditor: React.FC<Props> = ({ data, onChange, finances, virtualI
                 onSave={handleSaveItem}
                 initialData={editingItem}
                 milestones={[...data.milestones, ...virtualPensionMilestones]}
+                dividendAutoAccounts={dividendAutoAccounts}
             />
 
             {/* Milestone Modal */}

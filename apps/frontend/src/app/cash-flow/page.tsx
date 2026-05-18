@@ -11,15 +11,19 @@ import { getDividendSummary } from '../dividends/actions';
 import { getLadderIncome } from '../ladder/actions';
 import type { BondIncomePoint, DividendIncomeTotal } from '../plan/simulation';
 
+type CashFlowDisplayMode = 'yearly' | 'monthly';
+
 export default function CashFlowPage() {
     const { settings } = useSettings();
     const [plan, setPlan] = useState<any>(null);
     const [finances, setFinances] = useState<any>(null);
     const [dividendTotal, setDividendTotal] = useState<DividendIncomeTotal | undefined>(undefined);
+    const [dividendByAccount, setDividendByAccount] = useState<{ ibkr: number; schwab: number; ira: number } | undefined>(undefined);
     const [bondProjection, setBondProjection] = useState<BondIncomePoint[]>([]);
     const [projection, setProjection] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+    const [displayMode, setDisplayMode] = useState<CashFlowDisplayMode>('yearly');
 
     // Initial Load — fetch plan, finances, and the 3 summary income streams in parallel
     useEffect(() => {
@@ -34,6 +38,7 @@ export default function CashFlowPage() {
 
             // Dividend: total_forward_annual is already USD, major units (Round 8 contract)
             setDividendTotal({ annualTotal: dividendData.total_forward_annual });
+            setDividendByAccount(dividendData.by_account);
 
             // Bond ladder: income_series is per-year { date: "YYYY-01-01", value: number }
             if (bondData.ok && bondData.data) {
@@ -61,6 +66,8 @@ export default function CashFlowPage() {
                 finances,
                 settings: settings as unknown as Record<string, unknown>,
                 dividendTotal,
+                // @ts-expect-error pending PR squad/cashflow-dividend-redesign — McManus is adding dividendByAccount
+                dividendByAccount,
                 bondProjection,
             })
                 .then(data => {
@@ -82,12 +89,31 @@ export default function CashFlowPage() {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [plan, finances, settings, dividendTotal, bondProjection]);
+    }, [plan, finances, settings, dividendTotal, dividendByAccount, bondProjection]);
 
     // Derived Data
     const selectedData = useMemo(() => {
         return projection.find(p => p.year === selectedYear) || null;
     }, [projection, selectedYear]);
+
+    // Scale data for monthly/yearly display mode
+    const displayData = useMemo(() => {
+        if (!selectedData) return null;
+        if (displayMode === 'yearly') return selectedData;
+        const divisor = 12;
+        const scale = (v: number | undefined | null) => (typeof v === 'number' ? v / divisor : v);
+        return {
+            ...selectedData,
+            income: scale(selectedData.income),
+            withdrawals: scale(selectedData.withdrawals),
+            tax_paid: scale(selectedData.tax_paid),
+            expenses: scale(selectedData.expenses),
+            income_details: selectedData.income_details?.map((d: Record<string, unknown>) => ({ ...d, value: scale(d.value as number | undefined | null), gross: scale(d.gross as number | undefined | null), tax: scale(d.tax as number | undefined | null) })),
+            expense_details: selectedData.expense_details?.map((d: Record<string, unknown>) => ({ ...d, value: scale(d.value as number | undefined | null) })),
+            savings_details: selectedData.savings_details?.map((d: Record<string, unknown>) => ({ ...d, value: scale(d.value as number | undefined | null) })),
+            withdrawal_details: selectedData.withdrawal_details?.map((d: Record<string, unknown>) => ({ ...d, value: scale(d.value as number | undefined | null) })),
+        };
+    }, [selectedData, displayMode]);
 
     const minYear = projection.length > 0 ? projection[0].year : new Date().getFullYear();
     const maxYear = projection.length > 0 ? projection[projection.length - 1].year : new Date().getFullYear() + 40;
@@ -136,13 +162,35 @@ export default function CashFlowPage() {
                                 Visualize income, expenses, and savings flow
                             </p>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
+                        <div className="flex flex-col items-end gap-2">
                             <div className="text-3xl font-mono text-slate-100 font-bold">
                                 {selectedYear}
                             </div>
                             <div className="flex items-center gap-3 text-slate-400 text-sm">
                                 <span>Age {primaryAge}</span>
                                 {spouseAge && <span className="opacity-60">Spouse {spouseAge}</span>}
+                            </div>
+                            <div role="group" aria-label="Display mode" className="inline-flex rounded-lg bg-slate-900/60 p-1 border border-slate-800">
+                                <button
+                                    type="button"
+                                    aria-pressed={displayMode === 'yearly'}
+                                    onClick={() => setDisplayMode('yearly')}
+                                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                                        displayMode === 'yearly' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                    Yearly
+                                </button>
+                                <button
+                                    type="button"
+                                    aria-pressed={displayMode === 'monthly'}
+                                    onClick={() => setDisplayMode('monthly')}
+                                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                                        displayMode === 'monthly' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                >
+                                    Monthly
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -168,33 +216,33 @@ export default function CashFlowPage() {
             {/* Main Content: Sankey Chart */}
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
                 <div className="max-w-6xl mx-auto w-full h-full flex flex-col">
-                    <CashFlowSankey data={selectedData} currency={settings.mainCurrency || 'USD'} />
+                    <CashFlowSankey data={displayData} currency={settings.mainCurrency || 'USD'} />
 
                     {/* Summary Cards below chart */}
-                    {selectedData && (
+                    {displayData && (
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
                             <div className="bg-slate-900/80 p-4 rounded-lg border border-slate-800">
-                                <span className="text-xs text-slate-500 uppercase font-semibold">Total Inflow</span>
+                                <span className="text-xs text-slate-500 uppercase font-semibold">Total Inflow{displayMode === 'monthly' ? ' / mo' : ''}</span>
                                 <div className="text-xl font-mono text-emerald-400 mt-1">
-                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format((selectedData.income || 0) + (selectedData.withdrawals || 0))}
+                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format((displayData.income || 0) + (displayData.withdrawals || 0))}
                                 </div>
                             </div>
                             <div className="bg-slate-900/80 p-4 rounded-lg border border-slate-800">
-                                <span className="text-xs text-slate-500 uppercase font-semibold">Spending</span>
+                                <span className="text-xs text-slate-500 uppercase font-semibold">Spending{displayMode === 'monthly' ? ' / mo' : ''}</span>
                                 <div className="text-xl font-mono text-fuchsia-400 mt-1">
-                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format(selectedData.expenses)}
+                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format(displayData.expenses)}
                                 </div>
                             </div>
                             <div className="bg-slate-900/80 p-4 rounded-lg border border-slate-800">
-                                <span className="text-xs text-slate-500 uppercase font-semibold">Taxes</span>
+                                <span className="text-xs text-slate-500 uppercase font-semibold">Taxes{displayMode === 'monthly' ? ' / mo' : ''}</span>
                                 <div className="text-xl font-mono text-slate-400 mt-1">
-                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format(selectedData.tax_paid)}
+                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format(displayData.tax_paid)}
                                 </div>
                             </div>
                             <div className="bg-slate-900/80 p-4 rounded-lg border border-slate-800">
-                                <span className="text-xs text-slate-500 uppercase font-semibold">Net Savings</span>
+                                <span className="text-xs text-slate-500 uppercase font-semibold">Net Savings{displayMode === 'monthly' ? ' / mo' : ''}</span>
                                 <div className="text-xl font-mono text-cyan-400 mt-1">
-                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format((selectedData.income || 0) + (selectedData.withdrawals || 0) - (selectedData.tax_paid || 0) - (selectedData.expenses || 0))}
+                                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: settings.mainCurrency || 'USD', maximumFractionDigits: 0 }).format((displayData.income || 0) + (displayData.withdrawals || 0) - (displayData.tax_paid || 0) - (displayData.expenses || 0))}
                                 </div>
                             </div>
                         </div>
