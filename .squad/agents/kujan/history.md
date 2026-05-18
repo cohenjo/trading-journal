@@ -219,3 +219,33 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/<timestamp>_<name
 - Direct psql apply bypasses tracking but solves immediate RLS security concern
 
 **Recommendation:** Dedicated drift-reconciliation task before next `supabase db push`
+
+---
+
+## 2026-05-18 — Dependabot Batch Merge: 8 PRs (Post-#460 Merge)
+
+**Scope:** Review and merge 8 open Dependabot PRs after Jony merged PR #460 (cash-flow dividend redesign).
+
+**Execution:**
+
+**Phase 1 — Safe Patch/Minor Merges (5 PRs):** ✅ ALL MERGED
+- #454 (cachetools 7.1.1 → 7.1.2, Python patch): ✅ MERGED
+- #455 (react 19.2.5 → 19.2.6, npm patch): ✅ MERGED
+- #456 (python-multipart 0.0.27 → 0.0.29, Python patch): ✅ MERGED (resolved pyproject.toml conflict via rebase + manual fix to align cachetools with #454's update)
+- #457 (lucide-react 1.14.0 → 1.16.0, npm minor): ✅ MERGED
+- #458 (@vitest/coverage-v8 4.1.5 → 4.1.6, npm dev patch): ✅ MERGED
+
+**Phase 2 — Major Bump Validation (3 PRs):**
+- **#459 (eslint 9.30.1 → 10.4.0, MAJOR):** 🔴 HELD — Breaking: eslint 10 incompatible with eslint-config-next@15.x. Blocked by Next.js version requirement. Recommend Jony merge #393 first to upgrade eslint-config-next, then #459 becomes mergeable.
+- **#453 (actions/upload-artifact 4 → 7, MAJOR):** ✅ MERGED — Safe; 6 workflow bumps with compatible parameters; no artifact download logic in workflows that would break.
+- **#393 (next 15.5.15 → 16.2.6, MAJOR):** 🟡 HELD — Builds & tests pass (no new failures beyond 3 pre-existing in dividend-positions/SettingsContext). Recommend Jony decide; major framework migration warrants human oversight despite passing automated checks. Note: merging #393 first enables #459.
+
+**Key Learnings:**
+- Framework major upgrades often ship with dependency updates (Next.js 16 includes eslint-config-next update). Plan upgrade sequences accordingly.
+- PR conflicts during sequential merges (dep PRs) can be resolved via rebase + manual version alignment.
+- Repo CI does not run full build/test on PRs (Vercel deploy-time build); local validation (npm install, npm run build, vitest) required to detect breaking changes.
+
+**Final Summary:**
+- 6 of 8 PRs merged (5 Phase 1 + 1 Phase 2 safe)
+- 2 PRs held pending Jony decision (#393 + #459 pending framework migration coordination)
+- Decision file: `.squad/decisions/inbox/kujan-dep-batch-2026-05-18.md`
