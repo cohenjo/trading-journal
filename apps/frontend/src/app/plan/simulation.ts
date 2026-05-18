@@ -54,6 +54,17 @@ export interface PlanSimulationInput {
    * When absent, bond ladder income from /summary is not reflected in the plan.
    */
   bondProjection?: BondIncomePoint[];
+  /**
+   * Optional per-account real dividend amounts from getDividendSummary().by_account (#NEW).
+   * USD, forward annual, constant across all simulation years.
+   * When provided, takes precedence over `dividendTotal` and disables yield-based
+   * dividends for accounts matched by name/type. Emits 3 income lines + reinvest outflows.
+   */
+  dividendByAccount?: {
+    ibkr: number;
+    schwab: number;
+    ira: number;
+  };
 }
 
 export interface PlanSimulationDetail {
@@ -539,7 +550,7 @@ class Accounts {
     });
   }
 
-  processGrowthAndIncome(year: number, unallocatedCash: Decimal, resolved: Map<string, number>): { unallocatedCash: Decimal; dividends: DividendPayout[] } {
+  processGrowthAndIncome(year: number, unallocatedCash: Decimal, resolved: Map<string, number>, skipAccountIds?: Set<string>): { unallocatedCash: Decimal; dividends: DividendPayout[] } {
     let cash = unallocatedCash;
     const dividends: DividendPayout[] = [];
     const age = year - this.birthYear;
@@ -563,7 +574,10 @@ class Accounts {
         }
       }
 
-      const gross = this.grossDividend(account);
+      // Skip yield-based dividend for accounts with real per-account dividend data (prevents double-counting)
+      const gross = (skipAccountIds && account.id && skipAccountIds.has(account.id))
+        ? new Decimal(0)
+        : this.grossDividend(account);
       const net = gross.mul(new Decimal(1).minus(account.dividend_tax_rate.div(100)));
       account.value = account.value.plus(account.value.mul(account.growth.div(100))).minus(account.value.mul(account.fees.div(100)));
 
@@ -794,13 +808,59 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     (planInput.bondProjection ?? []).map(p => [p.year, p.amount]),
   );
 
+  // --- Account mapping for dividendByAccount (#NEW) ---
+  // Maps each by_account key (ibkr/schwab/ira) to a real plan Account for balance tracking.
+  // Three-tier strategy: exact name → type-based → fuzzy substring.
+  // Silent synthetic node per default #7: unmapped keys still emit income lines with no balance impact.
+  const mappedAccountIds = new Set<string>();
+  const dividendAccountMap = new Map<string, Account | null>();
+
+  if (planInput.dividendByAccount) {
+    const ibkrAcc = accounts.find(a => a.name.toLowerCase().includes('ibkr')) ?? null;
+    if (ibkrAcc?.id) mappedAccountIds.add(ibkrAcc.id);
+    dividendAccountMap.set('ibkr', ibkrAcc);
+
+    const schwabAcc = accounts.find(a => a.name.toLowerCase().includes('schwab')) ?? null;
+    if (schwabAcc?.id) mappedAccountIds.add(schwabAcc.id);
+    dividendAccountMap.set('schwab', schwabAcc);
+
+    // IRA: prefer type=Pension with 'ira' in name, fallback to any account with 'ira' in name
+    const iraAcc =
+      accounts.find(a => a.type === 'Pension' && a.name.toLowerCase().includes('ira')) ??
+      accounts.find(a => a.name.toLowerCase().includes('ira')) ??
+      null;
+    if (iraAcc?.id) mappedAccountIds.add(iraAcc.id);
+    dividendAccountMap.set('ira', iraAcc);
+  }
+
+  // Pre-compute constant per-account dividend amounts (USD → mainCurrency, constant across all years).
+  // Default #4: CONSTANT escalation — no annual growth applied to these forward estimates.
+  const mainCurrency = stringValue(settings.mainCurrency, 'ILS');
+  const perAccountDividends: Array<{ key: string; label: string; amount: Decimal; account: Account | null }> = [];
+  let totalRealDividendsAnnual = new Decimal(0);
+
+  if (planInput.dividendByAccount) {
+    const byAcct = planInput.dividendByAccount;
+    const entries = [
+      { key: 'ibkr', label: 'IBKR', usd: byAcct.ibkr ?? 0 },
+      { key: 'schwab', label: 'Schwab', usd: byAcct.schwab ?? 0 },
+      { key: 'ira', label: 'IRA', usd: byAcct.ira ?? 0 },
+    ];
+    for (const e of entries) {
+      const amount = convert(new Decimal(e.usd), 'USD', mainCurrency);
+      const account = dividendAccountMap.get(e.key) ?? null;
+      perAccountDividends.push({ key: e.key, label: e.label, amount, account });
+      totalRealDividendsAnnual = totalRealDividendsAnnual.plus(amount);
+    }
+  }
+
   for (let year = currentYear; year <= endYear; year += 1) {
     const age = year - birthYear;
     milestoneManager.checkDynamic(year, accountManager.liquidValue().plus(unallocatedCash), new Decimal(0));
     let dividends: DividendPayout[] = [];
 
     if (year > currentYear) {
-      const growth = accountManager.processGrowthAndIncome(year, unallocatedCash, milestoneManager.resolved);
+      const growth = accountManager.processGrowthAndIncome(year, unallocatedCash, milestoneManager.resolved, mappedAccountIds);
       unallocatedCash = growth.unallocatedCash;
       dividends = growth.dividends;
       realAssetManager.processGrowth();
@@ -879,12 +939,30 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       incomeDetails.push({ name: 'Options Income', type: 'options', value: roundMoney(optionsIncome) });
     }
 
-    // Virtual dividend income — forward annual total, constant every year (#441)
-    const dividendIncome = new Decimal(dividendAnnualTotal);
-    if (dividendIncome.gt(0)) {
-      grossIncome = grossIncome.plus(dividendIncome);
-      taxableIncome = taxableIncome.plus(dividendIncome);
-      incomeDetails.push({ name: 'Dividend Income', type: 'dividends', value: roundMoney(dividendIncome) });
+    // Real per-account dividend income (NEW) OR legacy aggregate virtual dividend (#441).
+    // When dividendByAccount is provided and non-zero, emit 3 named income lines (IBKR/Schwab/IRA)
+    // and suppress the single-aggregate fallback to prevent double-counting.
+    // Per default #6: all dividends taxed equally via taxableIncome (no special IRA tax-deferred treatment in MVP).
+    if (planInput.dividendByAccount !== undefined && totalRealDividendsAnnual.gt(0)) {
+      for (const d of perAccountDividends) {
+        if (d.amount.gt(0)) {
+          grossIncome = grossIncome.plus(d.amount);
+          taxableIncome = taxableIncome.plus(d.amount);
+          incomeDetails.push({
+            name: `Dividend - ${d.label}`,
+            type: 'dividends',
+            value: roundMoney(d.amount),
+          });
+        }
+      }
+    } else {
+      // Virtual dividend income — forward annual total, constant every year (#441)
+      const dividendIncome = new Decimal(dividendAnnualTotal);
+      if (dividendIncome.gt(0)) {
+        grossIncome = grossIncome.plus(dividendIncome);
+        taxableIncome = taxableIncome.plus(dividendIncome);
+        incomeDetails.push({ name: 'Dividend Income', type: 'dividends', value: roundMoney(dividendIncome) });
+      }
     }
 
     // Virtual bond ladder income — per-year coupon + principal amounts (#441)
@@ -896,18 +974,64 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     }
 
     const netFlow = grossIncome.minus(taxPaid).minus(expenses);
+
+    // --- Real dividend reinvestment logic (#NEW) ---
+    // Distributes per-account dividends back into their source accounts after deficit coverage.
+    // Per default #5: dividends offset deficit BEFORE triggering account withdrawals.
+    // Per default #7: unmapped accounts (dividendAccountMap returns null) get no balance impact (silent synthetic node).
+    // Mass conservation: sum(dividend income) == sum(reinvest outflows) + dividends_used_for_spending.
+    const reinvestDetails: PlanSimulationDetail[] = [];
+    let adjustedNetFlow = netFlow;
+
+    if (planInput.dividendByAccount !== undefined && totalRealDividendsAnnual.gt(0)) {
+      const netFlowWithoutDividends = netFlow.minus(totalRealDividendsAnnual);
+      let reinvestable: Decimal;
+      if (netFlowWithoutDividends.gte(0)) {
+        // Surplus even without dividends — full dividend amount reinvestable
+        reinvestable = totalRealDividendsAnnual;
+      } else if (netFlow.gt(0)) {
+        // Dividends partially cover a deficit — residual after coverage is reinvestable
+        reinvestable = netFlow;
+      } else {
+        // Deficit equals or exceeds dividends — all dividends consumed for spending
+        reinvestable = new Decimal(0);
+      }
+
+      let totalReinvested = new Decimal(0);
+      for (const d of perAccountDividends) {
+        if (d.amount.lte(0) || reinvestable.lte(0)) continue;
+        const reinvestAmount = reinvestable.mul(d.amount.div(totalRealDividendsAnnual));
+        if (reinvestAmount.gt(0)) {
+          reinvestDetails.push({
+            name: `Dividend Reinvest - ${d.label}`,
+            value: roundMoney(reinvestAmount),
+            type: 'reinvestment',
+          });
+          if (d.account !== null) {
+            // Reinvested amount flows back into the source account's balance
+            d.account.value = d.account.value.plus(reinvestAmount);
+          }
+          // else: silent synthetic node — income emitted but no account balance impact (default #7)
+          totalReinvested = totalReinvested.plus(reinvestAmount);
+        }
+      }
+      // Subtract reinvested portion from netFlow so processSavings/processDeficit doesn't double-count
+      adjustedNetFlow = netFlow.minus(totalReinvested);
+    }
+
     let savingsDetails: PlanSimulationDetail[] = [];
     let withdrawals = new Decimal(0);
     let withdrawalDetails: PlanSimulationDetail[] = [];
-    if (netFlow.gt(0)) {
-      const saved = accountManager.processSavings(netFlow, unallocatedCash);
+    if (adjustedNetFlow.gt(0)) {
+      const saved = accountManager.processSavings(adjustedNetFlow, unallocatedCash);
       unallocatedCash = saved.unallocatedCash;
-      savingsDetails = saved.details;
+      savingsDetails = [...reinvestDetails, ...saved.details];
     } else {
-      const withdrawn = accountManager.processDeficit(netFlow.abs(), unallocatedCash);
+      const withdrawn = accountManager.processDeficit(adjustedNetFlow.abs(), unallocatedCash);
       unallocatedCash = withdrawn.unallocatedCash;
       withdrawals = withdrawn.withdrawals;
       withdrawalDetails = withdrawn.details;
+      savingsDetails = reinvestDetails;
     }
 
     const liquidAssets = realAssetManager.liquidValue(planItems);
