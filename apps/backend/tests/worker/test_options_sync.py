@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
 from typing import Any
+
+import pytest
 
 from app.services.options.flex_parser import OptionLegKey
 from app.worker.handlers.options_sync import _load_accounts, _source_conid_for_insert, run_flex_options_sync
@@ -54,6 +57,7 @@ class FakeSession:
         self.cash_events: list[Mapping[str, Any]] = []
         self.positions: list[Mapping[str, Any]] = []
         self.sync_states = 0
+        self.last_synced_updates: list[int] = []
 
     def execute(self, statement: object, params: dict[str, Any] | None = None) -> FakeScalar | FakeMappings:
         sql = str(statement)
@@ -66,9 +70,14 @@ class FakeSession:
                         "id": 1,
                         "household_id": "10000000-0000-0000-0000-000000000001",
                         "account_id": "U1234567",
+                        "household_exists": True,
                     }
                 ]
             )
+        if "update public.trading_account_config" in sql:
+            if "last_synced" in sql:
+                self.last_synced_updates.append(params.get("config_id"))
+            return FakeMappings([])
         if "insert into public.options_legs" in sql:
             key = (
                 params["account_id"],
@@ -203,3 +212,127 @@ def test_select_flex_source_synthetic_when_no_token_and_unset(monkeypatch) -> No
     monkeypatch.setattr(mod, "_synthetic_files", lambda: sentinel)
     paths = mod._select_flex_source(from_date=None, to_date=None, synthetic=False)
     assert paths is sentinel
+
+
+# ---------------------------------------------------------------------------
+# Bug #1B — _load_accounts orphan-filter tests
+# ---------------------------------------------------------------------------
+
+
+class _OrphanMixedSession:
+    """Returns one valid config row and one orphaned config row (no matching household)."""
+
+    def execute(self, statement: object, params: dict[str, Any] | None = None) -> FakeMappings:
+        sql = str(statement)
+        if "from public.trading_account_config" in sql:
+            return FakeMappings(
+                [
+                    {
+                        "id": 1,
+                        "household_id": "aaaabbbb-0000-0000-0000-000000000001",
+                        "account_id": "U_VALID",
+                        "household_exists": True,
+                    },
+                    {
+                        "id": 2,
+                        "household_id": "649510c1-9695-4ff6-928c-b10f78b30942",
+                        "account_id": "E2E_TRADING_1778493037442-7fkxg",
+                        "household_exists": False,
+                    },
+                ]
+            )
+        return FakeMappings([])
+
+
+def test_load_accounts_filters_orphaned_household(caplog: pytest.LogCaptureFixture) -> None:
+    """Configs whose household is missing from households are excluded with a WARNING."""
+    with caplog.at_level(logging.WARNING, logger="app.worker.handlers.options_sync"):
+        accounts = _load_accounts(_OrphanMixedSession(), account_id=None)  # type: ignore[arg-type]
+
+    account_ids = [a.account_id for a in accounts]
+    assert "U_VALID" in account_ids
+    assert "E2E_TRADING_1778493037442-7fkxg" not in account_ids
+
+    orphan_warnings = [r for r in caplog.records if "E2E_TRADING_1778493037442-7fkxg" in r.message]
+    assert orphan_warnings, "expected a WARNING log naming the orphaned account_id"
+    assert all(r.levelno == logging.WARNING for r in orphan_warnings)
+
+
+def test_load_accounts_returns_valid_config() -> None:
+    """A config whose household exists is included in the returned list."""
+    accounts = _load_accounts(_OrphanMixedSession(), account_id=None)  # type: ignore[arg-type]
+
+    assert len(accounts) == 1
+    assert accounts[0].account_id == "U_VALID"
+    assert accounts[0].config_id == 1
+    assert accounts[0].household_id == "aaaabbbb-0000-0000-0000-000000000001"
+
+
+# ---------------------------------------------------------------------------
+# Bug #2 — last_synced write-through tests
+# ---------------------------------------------------------------------------
+
+
+def test_successful_flex_sync_updates_last_synced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After a successful per-account Flex ingest, trading_account_config.last_synced is stamped."""
+    monkeypatch.setenv("OPTIONS_FLEX_SOURCE", "synthetic")
+    session = FakeSession()
+    run_flex_options_sync(session)  # type: ignore[arg-type]
+    assert session.last_synced_updates, "expected last_synced to be updated for at least one account"
+    assert 1 in session.last_synced_updates, "config_id=1 should have been stamped after successful sync"
+
+
+def test_failed_flex_sync_does_not_update_last_synced_for_failing_account(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_update_config_last_synced is skipped for an account whose ingest raises."""
+    from app.worker.handlers import options_sync as mod
+
+    last_synced_updates: list[int] = []
+
+    class _TwoAccountSession:
+        """Returns two valid configs; records last_synced update calls by config_id."""
+
+        def execute(self, statement: object, params: dict[str, Any] | None = None) -> FakeMappings:
+            sql = str(statement)
+            params = params or {}
+            if "from public.trading_account_config" in sql:
+                return FakeMappings(
+                    [
+                        {
+                            "id": 10,
+                            "household_id": "aaaabbbb-0000-0000-0000-000000000001",
+                            "account_id": "A_GOOD",
+                            "household_exists": True,
+                        },
+                        {
+                            "id": 20,
+                            "household_id": "aaaabbbb-0000-0000-0000-000000000002",
+                            "account_id": "B_FAIL",
+                            "household_exists": True,
+                        },
+                    ]
+                )
+            if "update public.trading_account_config" in sql and "last_synced" in sql:
+                last_synced_updates.append(params.get("config_id"))
+            return FakeMappings([])
+
+    original_ingest = mod._ingest_account
+
+    def patched_ingest(
+        session: Any, household_id: str, account_id: str, parsed: Any, from_date: Any, to_date: Any
+    ) -> Any:  # noqa: ANN401
+        if account_id == "B_FAIL":
+            raise RuntimeError("simulated ingest failure for B_FAIL")
+        return original_ingest(session, household_id, account_id, parsed, from_date, to_date)
+
+    monkeypatch.setattr(mod, "_ingest_account", patched_ingest)
+    monkeypatch.setattr(mod, "_sync_stock_positions", lambda *a, **kw: 0)
+    monkeypatch.setattr(mod, "_sync_bond_positions", lambda *a, **kw: 0)
+
+    session = _TwoAccountSession()
+    with pytest.raises(RuntimeError, match="simulated ingest failure"):
+        run_flex_options_sync(session, pre_fetched_paths=[])  # type: ignore[arg-type]
+
+    assert 10 in last_synced_updates, "config 10 (A_GOOD) should have been stamped before the failure"
+    assert 20 not in last_synced_updates, "config 20 (B_FAIL) must NOT be stamped when ingest raises"

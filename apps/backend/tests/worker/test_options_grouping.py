@@ -42,6 +42,7 @@ class FakeSession:
                         "household_id": "10000000-0000-0000-0000-000000000001",
                         "account_id": "U1234567",
                         "name": "IBKR Synthetic",
+                        "household_exists": True,
                     }
                 ]
             )
@@ -145,7 +146,14 @@ class FakeSessionBackfill:
         params = params or {}
         if "from public.trading_account_config" in sql:
             return FakeMappings(
-                [{"id": 1, "household_id": "10000000-0000-0000-0000-000000000001", "account_id": "U2515365"}]
+                [
+                    {
+                        "id": 1,
+                        "household_id": "10000000-0000-0000-0000-000000000001",
+                        "account_id": "U2515365",
+                        "household_exists": True,
+                    }
+                ]
             )
         if "from public.options_trades t" in sql:
             return FakeMappings(_backfill_trade_rows())
@@ -229,7 +237,9 @@ def test_backfill_expired_trade_sets_group_status_to_expired() -> None:
         def execute(self, statement: object, params: dict[str, Any] | None = None) -> FakeMappings:
             sql = str(statement)
             if "from public.trading_account_config" in sql:
-                return FakeMappings([{"id": 1, "household_id": household_id, "account_id": "U2515365"}])
+                return FakeMappings(
+                    [{"id": 1, "household_id": household_id, "account_id": "U2515365", "household_exists": True}]
+                )
             if "from public.options_trades t" in sql:
                 return FakeMappings(
                     [
