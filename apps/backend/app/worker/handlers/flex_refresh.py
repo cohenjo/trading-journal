@@ -21,6 +21,7 @@ from sqlmodel import Session
 
 from app.core.config import settings
 from app.dal.database import engine
+from app.worker.handlers.options_sync import run_flex_options_sync
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +42,6 @@ def run_flex_refresh_poll() -> None:
     - Re-checks the throttle inside the worker as defence-in-depth (handles
       the case where a nightly cron ran between the user's click and this poll).
     """
-    # Import here to avoid circular imports at module load time
-    from app.worker.handlers.options_sync import run_flex_options_sync
-
     throttle_seconds = settings.flex_refresh_throttle_seconds
 
     with Session(engine) as session:
@@ -72,6 +70,11 @@ def run_flex_refresh_poll() -> None:
         )
 
         for row in pending:
+            # Note: the FOR UPDATE OF c SKIP LOCKED lock is released on the
+            # first per-account session.commit() below; remaining iterations
+            # in this loop are unprotected.  Acceptable because Flex sync is
+            # idempotent and the 5-min poll interval makes concurrent overlap
+            # rare (see decisions Section D).
             config_id: int = row["id"]
             account_id: str | None = row["account_id"]
             household_id: str = row["household_id"]
@@ -106,6 +109,12 @@ def run_flex_refresh_poll() -> None:
                     config_id,
                     account_id,
                 )
+                # Roll back any tainted state from a DB-layer failure in
+                # run_flex_options_sync (caller-commits pattern).  Without this,
+                # the session is in PendingRollbackError state and the UPDATE
+                # in the finally block would also raise — leaving the flag set
+                # and causing an infinite-retry loop (Section C prohibition).
+                session.rollback()
             finally:
                 # Always clear the flag — success or failure.
                 session.execute(
