@@ -347,7 +347,7 @@ def test_worker_picks_up_pending_and_triggers_sync() -> None:
         mock_session_cls.return_value.__enter__ = lambda s, *_: session
         mock_session_cls.return_value.__exit__ = lambda s, *_: False
 
-        with patch("app.worker.handlers.options_sync.run_flex_options_sync") as mock_sync:
+        with patch("app.worker.handlers.flex_refresh.run_flex_options_sync") as mock_sync:
             run_flex_refresh_poll()
 
     mock_sync.assert_called_once_with(session, account_id=ACCOUNT_ID)
@@ -374,7 +374,7 @@ def test_worker_respects_throttle_no_sync() -> None:
         mock_session_cls.return_value.__enter__ = lambda s, *_: session
         mock_session_cls.return_value.__exit__ = lambda s, *_: False
 
-        with patch("app.worker.handlers.options_sync.run_flex_options_sync") as mock_sync:
+        with patch("app.worker.handlers.flex_refresh.run_flex_options_sync") as mock_sync:
             with patch("app.worker.handlers.flex_refresh.settings") as mock_settings:
                 mock_settings.flex_refresh_throttle_seconds = 3600
                 run_flex_refresh_poll()
@@ -403,7 +403,7 @@ def test_worker_skips_orphaned_household() -> None:
         mock_session_cls.return_value.__enter__ = lambda s, *_: session
         mock_session_cls.return_value.__exit__ = lambda s, *_: False
 
-        with patch("app.worker.handlers.options_sync.run_flex_options_sync") as mock_sync:
+        with patch("app.worker.handlers.flex_refresh.run_flex_options_sync") as mock_sync:
             run_flex_refresh_poll()
 
     mock_sync.assert_not_called()
@@ -429,7 +429,7 @@ def test_worker_clears_flag_on_sync_failure() -> None:
         mock_session_cls.return_value.__exit__ = lambda s, *_: False
 
         with patch(
-            "app.worker.handlers.options_sync.run_flex_options_sync",
+            "app.worker.handlers.flex_refresh.run_flex_options_sync",
             side_effect=RuntimeError("IBKR API timeout"),
         ):
             # Must not propagate the exception
@@ -470,7 +470,7 @@ def test_worker_clears_stale_flag_after_nightly_sync() -> None:
         mock_session_cls.return_value.__enter__ = lambda s, *_: session
         mock_session_cls.return_value.__exit__ = lambda s, *_: False
 
-        with patch("app.worker.handlers.options_sync.run_flex_options_sync") as mock_sync:
+        with patch("app.worker.handlers.flex_refresh.run_flex_options_sync") as mock_sync:
             with patch("app.worker.handlers.flex_refresh.settings") as mock_settings:
                 mock_settings.flex_refresh_throttle_seconds = 3600
                 run_flex_refresh_poll()
