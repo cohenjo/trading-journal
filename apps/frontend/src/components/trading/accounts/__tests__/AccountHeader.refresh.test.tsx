@@ -161,12 +161,16 @@ describe("AccountHeader — Refresh button (G11-G14)", () => {
     // Button should be disabled in QUEUED state
     expect(button).toBeDisabled();
 
-    // Advance one 30-second poll tick — router.refresh should fire
+    // Advance TWO 30-second poll ticks — confirms setInterval (not one-shot setTimeout)
     await act(async () => {
       vi.advanceTimersByTime(30_000);
     });
-
     expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mockRouterRefresh).toHaveBeenCalledTimes(2);
   });
 
   // ── G13: Throttled response → toast with countdown ──────────────────────────
@@ -225,6 +229,13 @@ describe("AccountHeader — Refresh button (G11-G14)", () => {
       "Refresh may have failed. Check back later.",
     );
     expect(button).not.toBeDisabled();
+
+    // Verify interval was cleared — one extra tick must NOT increment the call count
+    const refreshCountAtTimeout = mockRouterRefresh.mock.calls.length;
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mockRouterRefresh).toHaveBeenCalledTimes(refreshCountAtTimeout);
   });
 
   // ── Bonus: Error response ────────────────────────────────────────────────────
@@ -284,5 +295,39 @@ describe("AccountHeader — Refresh button (G11-G14)", () => {
     expect(toast.success).toHaveBeenCalledWith("Data refreshed!");
     expect(onRefreshComplete).toHaveBeenCalledTimes(1);
     expect(button).not.toBeDisabled();
+  });
+
+  // ── Unmount cleanup: polling stops after unmount ────────────────────────────
+  it("stops polling and does not call router.refresh after unmount", async () => {
+    vi.useFakeTimers();
+
+    mockTriggerIBKRSync.mockResolvedValue(QUEUED_RESULT);
+
+    const { unmount } = renderHeader();
+    const button = screen.getByTestId("refresh-button");
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+
+    // Confirm polling started
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
+
+    // Unmount — clearInterval in the useEffect cleanup should fire
+    act(() => {
+      unmount();
+    });
+
+    const refreshCountAtUnmount = mockRouterRefresh.mock.calls.length;
+
+    // Advance two more intervals (60s) — interval must be dead
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(mockRouterRefresh).toHaveBeenCalledTimes(refreshCountAtUnmount);
   });
 });
