@@ -826,18 +826,85 @@ export async function getTickerSymbols(): Promise<string[]> {
   return tickers;
 }
 
+// ── Account refresh types ─────────────────────────────────────────────────────
+
+/** Discriminated union returned by `triggerIBKRSync`. */
+export type AccountRefreshResult =
+  | { ok: true; status: 'queued'; last_synced_at: string | null; next_eligible_at: null }
+  | { ok: true; status: 'throttled'; last_synced_at: string | null; next_eligible_at: string }
+  | { ok: false; status: 'error'; error: string };
+
 /**
- * Triggers an IBKR Flex re-sync for the specified account.
- * Returns ok:true if the sync was accepted; errors degrade gracefully.
+ * Triggers a manual IBKR Flex refresh for the specified account config.
+ *
+ * Calls `POST /api/trading/accounts/{configId}/refresh` on the FastAPI
+ * backend and returns a discriminated union so callers can branch on the
+ * `status` field ("queued" | "throttled" | "error").
+ *
+ * HTTP 200 is used for both queued and throttled responses per the backend
+ * contract (Section B of the refresh-button design doc).
  */
-export async function triggerIBKRSync(accountId: number): Promise<{ ok: boolean; error?: string }> {
+export async function triggerIBKRSync(configId: number): Promise<AccountRefreshResult> {
   try {
-    const res = await fetch(`/api/accounts/${accountId}/sync`, { method: 'POST' });
-    if (!res.ok) return { ok: false, error: `Sync request failed (${res.status})` };
-    return { ok: true };
+    const supabase = await createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session?.access_token) {
+      return { ok: false, status: 'error', error: 'Not authenticated' };
+    }
+
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+    const res = await fetch(`${backendUrl}/api/trading/accounts/${configId}/refresh`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+      },
+    });
+
+    if (res.status === 403) {
+      return { ok: false, status: 'error', error: 'You do not have permission to refresh this account.' };
+    }
+    if (res.status === 404) {
+      return { ok: false, status: 'error', error: 'Account not found.' };
+    }
+    if (!res.ok) {
+      return { ok: false, status: 'error', error: `Refresh request failed (${res.status})` };
+    }
+
+    const json = await res.json() as unknown;
+
+    if (
+      typeof json === 'object' &&
+      json !== null &&
+      'status' in json
+    ) {
+      const body = json as Record<string, unknown>;
+
+      if (body.status === 'queued') {
+        return {
+          ok: true,
+          status: 'queued',
+          last_synced_at: typeof body.last_synced_at === 'string' ? body.last_synced_at : null,
+          next_eligible_at: null,
+        };
+      }
+
+      if (body.status === 'throttled' && typeof body.next_eligible_at === 'string') {
+        return {
+          ok: true,
+          status: 'throttled',
+          last_synced_at: typeof body.last_synced_at === 'string' ? body.last_synced_at : null,
+          next_eligible_at: body.next_eligible_at,
+        };
+      }
+    }
+
+    return { ok: false, status: 'error', error: 'Unexpected response from refresh endpoint' };
   } catch (err) {
     console.error('[triggerIBKRSync] fetch error:', err);
-    return { ok: false, error: 'Unable to reach sync endpoint' };
+    return { ok: false, status: 'error', error: 'Unable to reach refresh endpoint' };
   }
 }
 

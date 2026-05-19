@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
-import type { TradingAccountConfig } from "@/app/trading/actions";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import type { TradingAccountConfig, AccountRefreshResult } from "@/app/trading/actions";
 import { triggerIBKRSync } from "@/app/trading/actions";
 import CSVImportButton from "@/components/trading/accounts/CSVImportButton";
 
@@ -11,6 +13,22 @@ export interface AccountHeaderProps {
   onRefreshComplete?: () => void;
   onImportSuccess?: (imported: number) => void;
 }
+
+// ── State machine ─────────────────────────────────────────────────────────────
+
+type RefreshState =
+  | { status: "IDLE" }
+  | { status: "SUBMITTING" }
+  | { status: "QUEUED"; preSyncTimestamp: string | null }
+  | { status: "THROTTLED"; nextEligibleAt: string; minutesRemaining: number }
+  | { status: "COMPLETED" }
+  | { status: "ERROR"; message: string }
+  | { status: "TIMEOUT" };
+
+const POLL_INTERVAL_MS = 30_000;
+const MAX_POLL_ITERATIONS = 20; // 30s × 20 = 10 min
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TYPE_LABELS: Record<string, { label: string; badgeClass: string }> = {
   ibkr: { label: "Flex", badgeClass: "bg-blue-900/40 text-blue-300 border-blue-700/50" },
@@ -37,14 +55,29 @@ function isIBKRAccount(accountType: string): boolean {
   return accountType.toLowerCase() === "ibkr";
 }
 
+/** Minutes until `isoTimestamp` from now, minimum 0. */
+function minutesUntil(isoTimestamp: string): number {
+  const diff = new Date(isoTimestamp).getTime() - Date.now();
+  return Math.max(0, Math.ceil(diff / 60_000));
+}
+
+/** Minutes since `isoTimestamp` from now, minimum 0. */
+function minutesSince(isoTimestamp: string | null): number {
+  if (!isoTimestamp) return 0;
+  const diff = Date.now() - new Date(isoTimestamp).getTime();
+  return Math.max(0, Math.floor(diff / 60_000));
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function AccountHeader({
   config,
   onAddPosition,
   onRefreshComplete,
   onImportSuccess,
 }: AccountHeaderProps) {
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const router = useRouter();
+  const [refreshState, setRefreshState] = useState<RefreshState>({ status: "IDLE" });
 
   const typeKey = config.account_type ?? "ibkr";
   const typeInfo = TYPE_LABELS[typeKey] ?? {
@@ -57,18 +90,131 @@ export default function AccountHeader({
   const lastDate = config.last_synced;
   const dateLabel = isIBKR ? "Last synced" : "Last updated";
 
-  const handleRefresh = async () => {
-    setSyncing(true);
-    setSyncMessage(null);
-    const result = await triggerIBKRSync(config.id);
-    setSyncing(false);
-    if (result.ok) {
-      setSyncMessage("Sync triggered — data will refresh shortly.");
-      onRefreshComplete?.();
-    } else {
-      setSyncMessage(result.error ?? "Sync failed");
+  // Refs so polling callbacks always read the latest values without stale closures
+  const lastSyncedRef = useRef<string | null>(config.last_synced ?? null);
+  // INTENTIONAL: no dependency array — refresh every render so the polling
+  // callback (in a setInterval closure) sees the latest config.last_synced
+  // after router.refresh(). Do NOT add [] or [config.last_synced] —
+  // it will break the completion-detection path.
+  useEffect(() => {
+    lastSyncedRef.current = config.last_synced ?? null;
+  });
+
+  const preSyncTimestampRef = useRef<string | null>(null);
+
+  const onRefreshCompleteRef = useRef(onRefreshComplete);
+  useEffect(() => {
+    onRefreshCompleteRef.current = onRefreshComplete;
+  }, [onRefreshComplete]);
+
+  // ── Polling interval while QUEUED ────────────────────────────────────────────
+  useEffect(() => {
+    if (refreshState.status !== "QUEUED") return;
+
+    let iterations = 0;
+
+    const interval = setInterval(() => {
+      // Detect completion: last_synced changed from pre-request snapshot
+      if (lastSyncedRef.current !== preSyncTimestampRef.current) {
+        clearInterval(interval);
+        setRefreshState({ status: "COMPLETED" });
+        toast.success("Data refreshed!");
+        onRefreshCompleteRef.current?.();
+        return;
+      }
+
+      iterations += 1;
+      if (iterations >= MAX_POLL_ITERATIONS) {
+        clearInterval(interval);
+        setRefreshState({ status: "TIMEOUT" });
+        toast.error("Refresh may have failed. Check back later.");
+        return;
+      }
+
+      router.refresh();
+    }, POLL_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [refreshState.status, router]);
+
+  // ── Throttle countdown ───────────────────────────────────────────────────────
+  const throttledNextEligibleAt =
+    refreshState.status === "THROTTLED" ? refreshState.nextEligibleAt : null;
+
+  useEffect(() => {
+    if (!throttledNextEligibleAt) return;
+
+    const interval = setInterval(() => {
+      const remaining = minutesUntil(throttledNextEligibleAt);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+        setRefreshState({ status: "IDLE" });
+        return;
+      }
+
+      setRefreshState((prev) => {
+        if (prev.status !== "THROTTLED") return prev;
+        return { ...prev, minutesRemaining: remaining };
+      });
+    }, 60_000);
+
+    return () => clearInterval(interval);
+  }, [throttledNextEligibleAt]);
+
+  // ── Click handler ────────────────────────────────────────────────────────────
+  const handleRefresh = useCallback(async () => {
+    preSyncTimestampRef.current = config.last_synced ?? null;
+    setRefreshState({ status: "SUBMITTING" });
+
+    const result: AccountRefreshResult = await triggerIBKRSync(config.id);
+
+    if (!result.ok) {
+      setRefreshState({ status: "ERROR", message: result.error });
+      toast.error(`Refresh failed: ${result.error}`);
+      return;
     }
-  };
+
+    if (result.status === "queued") {
+      setRefreshState({ status: "QUEUED", preSyncTimestamp: preSyncTimestampRef.current });
+      toast.info("Refresh queued. Data will update within 5 minutes.");
+      return;
+    }
+
+    if (result.status === "throttled") {
+      const minutesAgo = minutesSince(result.last_synced_at);
+      const minutesLeft = minutesUntil(result.next_eligible_at);
+      setRefreshState({
+        status: "THROTTLED",
+        nextEligibleAt: result.next_eligible_at,
+        minutesRemaining: minutesLeft,
+      });
+      toast.warning(
+        `Last sync was ${minutesAgo} min ago. Try again in ${minutesLeft} min.`,
+      );
+    }
+  }, [config.id, config.last_synced]);
+
+  // ── Derived button state ─────────────────────────────────────────────────────
+  const isButtonDisabled =
+    refreshState.status === "SUBMITTING" ||
+    refreshState.status === "QUEUED" ||
+    refreshState.status === "THROTTLED";
+
+  function getButtonLabel(): string {
+    switch (refreshState.status) {
+      case "SUBMITTING":
+        return "Syncing…";
+      case "QUEUED":
+        return "Queued…";
+      case "THROTTLED":
+        return `Try in ${refreshState.minutesRemaining}m`;
+      default:
+        return "↻ Refresh";
+    }
+  }
+
+  const isSpinning = refreshState.status === "SUBMITTING" || refreshState.status === "QUEUED";
 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-slate-900/50 rounded-lg border border-slate-800 mb-4">
@@ -94,7 +240,7 @@ export default function AccountHeader({
         {isIBKR ? (
           <button
             onClick={handleRefresh}
-            disabled={syncing}
+            disabled={isButtonDisabled}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:border-slate-600 transition-all text-sm disabled:opacity-50"
             data-testid="refresh-button"
           >
@@ -108,13 +254,14 @@ export default function AccountHeader({
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
-              className={syncing ? "animate-spin" : ""}
+              className={isSpinning ? "animate-spin" : ""}
+              aria-hidden="true"
             >
               <path d="M23 4v6h-6" />
               <path d="M1 20v-6h6" />
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
             </svg>
-            {syncing ? "Syncing…" : "↻ Refresh"}
+            {getButtonLabel()}
           </button>
         ) : (
           <>
@@ -149,12 +296,6 @@ export default function AccountHeader({
           </>
         )}
       </div>
-
-      {syncMessage && (
-        <p className="text-xs text-slate-400 w-full sm:w-auto" data-testid="sync-message">
-          {syncMessage}
-        </p>
-      )}
     </div>
   );
 }
