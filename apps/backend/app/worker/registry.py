@@ -14,6 +14,7 @@ from app.worker.handlers.options_margin_sync import (
     run_intraday_options_margin_sync,
     run_scheduled_options_margin_sync,
 )
+from app.worker.handlers.flex_refresh import run_flex_refresh_poll
 from app.worker.handlers.options_sync import handle_flex_options_sync, run_scheduled_flex_options_sync
 from app.worker.handlers.pnl_daily import handle_pnl_daily
 from app.worker.pension_pdf_parse import handle_pension_pdf_parse
@@ -74,5 +75,11 @@ JOB_SCHEDULES: list[JobSchedule] = [
         kind="cron",
         handler=run_scheduled_options_margin_sync,
         cron_expr="35 22 * * *",
+    ),
+    JobSchedule(
+        job_id="flex_refresh_poll",
+        kind="interval",
+        seconds=5 * 60,  # every 5 minutes
+        handler=run_flex_refresh_poll,
     ),
 ]
