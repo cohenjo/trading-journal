@@ -92,6 +92,10 @@ export default function AccountHeader({
 
   // Refs so polling callbacks always read the latest values without stale closures
   const lastSyncedRef = useRef<string | null>(config.last_synced ?? null);
+  // INTENTIONAL: no dependency array — refresh every render so the polling
+  // callback (in a setInterval closure) sees the latest config.last_synced
+  // after router.refresh(). Do NOT add [] or [config.last_synced] —
+  // it will break the completion-detection path.
   useEffect(() => {
     lastSyncedRef.current = config.last_synced ?? null;
   });
