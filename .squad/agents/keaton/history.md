@@ -53,3 +53,4 @@ See `.squad/decisions/inbox/keaton-flex-backfill-strategy.md` for full 3-tier an
 
 
 📌 Team update (2026-05-19): Strict-lockout 5-round P0 fix protocol shipped Flex sync fixes in ~2.5h (diagnostic → implement → parallel review → merge → deploy). 88 orphan trading_account_config rows discovered; cascade gap suggests future audit needed. IB Gateway is desktop app, not Docker-managed. Decided by Scribe during cross-agent orchestration.
+📌 2026-05-19: Refresh button architecture designed + reviewed (#463, #464) — REQUEST CHANGES + APPROVE posted via cohenjo auth (strict lockout, no code changes by reviewer)

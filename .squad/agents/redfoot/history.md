@@ -151,3 +151,4 @@
 
 
 📌 Team update (2026-05-19): Strict-lockout 5-round P0 fix protocol shipped Flex sync fixes in ~2.5h (diagnostic → implement → parallel review → merge → deploy). 88 orphan trading_account_config rows discovered; cascade gap suggests future audit needed. IB Gateway is desktop app, not Docker-managed. Decided by Scribe during cross-agent orchestration.
+📌 2026-05-19: R3 test reviews (#463 APPROVE WITH NITS vacuous test + mock fragility; #464 APPROVE WITH NITS unmount cleanup + ambiguity + timeout assertion)

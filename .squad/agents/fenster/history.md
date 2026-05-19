@@ -203,3 +203,4 @@ Applied 4 targeted fixes to bring PR #393 from "builds + tests pass" to "ready t
 ## Learnings
 
 **Always revert tsconfig.json after `next build`.** Next 16 silently rewrites `jsx: "preserve"` → `"react-jsx"` and injects `.next/dev/types` into the include array. This must be caught and reverted BEFORE commit. Add `git checkout -- apps/frontend/tsconfig.json` to the post-build verification sequence for every Next.js upgrade sprint. If left in, it will cause unwanted diffs and break Keaton's merge gate criterion #8 without any error message.
+📌 2026-05-19: PR #464 frontend shipped (Refresh button rewire, state machine, 7 tests, 4 nits addressed) merged a9e2444

@@ -1127,3 +1127,99 @@ The four required regression tests are present, named descriptively, and will ca
 
 ## If REQUEST_CHANGES — proposed test author
 N/A — verdict is APPROVE.
+
+---
+
+### 2026-05-19: Manual Refresh Button Shipped — PR #463 + #464
+
+**Lead:** Keaton (Architecture)
+**Backend:** Hockney (PR #463 — `34d83d7`)
+**Frontend:** Fenster (PR #464 — `a9e2444`)
+**DevOps:** Kujan (R5 deploy + research)
+**Testing:** Redfoot (R3 validation)
+**Related issues:** [#393](https://github.com/cohenjo/trading-journal/issues/393) (parent feature request, closed by merges)
+
+**PRs merged:**
+- [#462](https://github.com/cohenjo/trading-journal/pull/462) — Hockney: env-doc (IBKR_FLEX_TOKEN + related vars) — merged `a57d4c8`
+- [#463](https://github.com/cohenjo/trading-journal/pull/463) — Hockney: backend migration + endpoint + worker poll — merged `34d83d7` (639 → 641 tests passing)
+- [#464](https://github.com/cohenjo/trading-journal/pull/464) — Fenster: frontend rewire + state machine — merged `a9e2444` (6 → 7 tests passing)
+
+**Architecture (Keaton design, `.squad/decisions/inbox/archive/2026-05-19/`):**
+- Schema: single `refresh_requested_at TIMESTAMPTZ NULL` column on `trading_account_config` (sparse index included)
+- API: `POST /api/trading/accounts/{config_id}/refresh` returns 200 OK with `{ status: "queued" | "throttled", last_synced_at, next_eligible_at }`
+- Throttle: 1 hour from `options_flex_sync_state.last_sync_at` (configurable via `FLEX_REFRESH_THROTTLE_SECONDS`)
+- Worker: new `flex_refresh_poll` interval job (5-min cadence); uses `FOR UPDATE SKIP LOCKED` for concurrency safety
+- Frontend: rewired existing Refresh button (was calling broken endpoint) → new state machine (IDLE/SUBMITTING/QUEUED/THROTTLED/ERROR/COMPLETED) + polling + countdown UX
+
+**Review feedback (strict lockout):**
+- Keaton: #463 REQUEST CHANGES (blocker: missing `session.rollback()` before flag-clear), #464 APPROVE
+- Redfoot: #463 APPROVE WITH NITS (vacuous test + mock patch fragility), #464 APPROVE WITH NITS (no unmount cleanup + ambiguity + no timeout assertion)
+
+**Fixups (R3):**
+- Hockney: 3 commits addressing blocker + chosen "easier" comment approach + import hoist. Tests: 641 ✅
+- Fenster: 2 commits addressing all 4 nits. Tests: 7 ✅
+
+**Deployment (Kujan R5):**
+- Migration `20260519120000_add_refresh_requested_at` applied via direct psql (canonical — `db push --linked` remains drift-blocked)
+- Column + sparse index verified live ✅
+- Container rebuild: new image `f6a00f73e972` (`trading-journal-backend:latest`); old docker-commit image `3b36e65fa6f5` removed
+- Worker healthy; 12 jobs registered incl. new `run_flex_refresh_poll` ✅
+- Smoke test: schema verified; end-to-end click test deferred to Jony
+
+**Key decisions (from Keaton design):**
+1. **200 OK for all success cases** (not 202/429) — `status` discriminator handles "queued" vs "throttled"; simpler UX, no browser retry loop
+2. **Throttle from last successful Flex sync** — authoritative timestamp (covers nightly + manual); if nightly runs during request, idempotent upsert prevents double-fetch
+3. **Interaction with nightly cron** — if refresh request pending when nightly fires, nightly processes normally, advances `last_sync_at`, next poll sees throttle gate satisfied and clears flag without re-fetch; no double-fetch
+
+**Auth pattern reinforced (EMU cross-tenant):**
+- `gh pr create`, `gh pr comment`, `gh pr merge` required auth switch to `cohenjo` (personal account; EMU blocks some ops from service account)
+- Strategy: `gh auth switch --user cohenjo` before comment/merge ops; documented in decisions.md
+
+---
+
+### 2026-05-19: Python 3.12 + Distroless Container Research (Kujan)
+
+**Researcher:** Kujan (DevOps)
+**Status:** RESEARCH — Option 4 (conservative split) chosen; follow-up PRs queued
+**Archive:** `.squad/decisions/inbox/archive/2026-05-19/kujan-py312-distroless-research-2026-05-19.md`
+
+**Finding: Python 3.12 ready, distroless ready, but staged approach recommended.**
+
+**Python 3.12 compatibility:** All dependencies (psycopg2-binary, numpy, scipy, pydantic, bcrypt, etc.) have native cp312 wheels confirmed in `uv.lock`. `uv.lock` already resolves Python 3.12 markers — no `uv lock` re-run required. Only caveat: `datetime.utcnow()` deprecated in Python 3.12 (used in 14 files: `analyze.py`, `*_models.py`, `plans.py`, `insurance.py`, `trading_service.py`, `flex_probe.py`). Emits `DeprecationWarning` only — no runtime breakage. Schedule cleanup ticket.
+
+**Distroless deep dive:** `mcr.microsoft.com/azurelinux/distroless/python:3.12` (96.4 MB arm64) contains bare Python interpreter only — no pip/uv/shell/curl. Requires multi-stage Dockerfile (builder: `3.12-slim`, runtime: distroless). Current healthcheck (`["CMD", "python", "-m", "app.worker.healthcheck"]`) is exec-form compatible. Current CMD requires update: `uv run python` → `/app/.venv/bin/python`. Same update needed for `rebuild-worker.sh` Phase E.
+
+**Recommendation: Option 4 — Conservative split (staged PRs)**
+- **PR A (immediate, ~1 h):** Bump `FROM python:3.11-slim` → `FROM python:3.12-slim` in `apps/backend/Dockerfile`; update CI pin in `.github/workflows/pr-backend.yml` (3 job steps). Zero risk — all deps ready; `datetime.utcnow()` warnings schedule cleanup ticket.
+- **PR B (next sprint, ~3 h, gated on A):** Rewrite Dockerfile as two-stage multi-stage build (builder/distroless runtime); update `rebuild-worker.sh` Phase E; remove curl (distroless has no APT). Image size: 150 MB → 96 MB (36% reduction), meaningful security posture improvement for financial app.
+
+**Why split?** Distroless multi-stage is a structural build change. If something breaks in a combined PR, hard to isolate root cause (Py3.12 vs. distroless rewrite). Separate PRs allow independent testing, rollback, and blame isolation.
+
+**Image size trajectory:** 150 MB (current) → 144 MB (3.12-slim only) → 96 MB (full distroless).
+
+---
+
+### 2026-05-19: Follow-Up Issues Queued (Kujan research outputs)
+
+**Follow-up A: Bump backend to `python:3.12-slim`**
+**Scope:** ~1 hour; mechanical change to `apps/backend/Dockerfile` + CI pin
+**Details:** Reference Kujan's research; non-blocking cleanup: schedule separate ticket for `datetime.utcnow()` → `datetime.now(timezone.utc)` migration across 14 call sites
+
+**Follow-up B: Distroless container migration**
+**Scope:** ~3 hours; multi-stage Dockerfile rewrite + `rebuild-worker.sh` Phase E update + `docker-compose.backend.yml` healthcheck path
+**Details:** Reference Kujan research; gated on PR A; image size reduction 150 MB → 96 MB; meaningful security improvement (eliminates APT/curl surface); use `:3.12-debug` tag in staging for interactive debug access
+
+**Status:** Queued in this decision; issue creation blocked by EMU auth (attempted `gh issue create` with `cohenjo` auth, but multi-step scenario may still require retry). Documented as decision-level items for now.
+
+---
+
+## EMU Auth Pattern (Reinforced 2026-05-19)
+
+When operating across tenants (e.g., `cohenjo` personal account + `trading-journal-backend` service account):
+- **`gh pr create`:** requires `cohenjo` auth to post in personal fork
+- **`gh pr comment`:** requires `cohenjo` auth to post comments (service account comments sometimes fail cross-tenant)
+- **`gh pr merge`:** requires `cohenjo` auth to trigger merge
+- **Switch pattern:** `gh auth switch --user cohenjo` before multi-op batch; switch back if needed
+- **Note:** `gh auth status` shows active account; list all with `gh auth list`
+
+This pattern emerged from R3 review+fixup cycle where Keaton (opus, code review) needed to post REQUEST CHANGES + Approve comments on PRs #463 and #464. Strict lockout prevented code changes during review; all feedback was PR-comment-based. Auth switch required for Scribe to post follow-up comments when reviewing Keaton's reviews.

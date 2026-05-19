@@ -23,3 +23,4 @@
 
 
 📌 Team update (2026-05-19): Strict-lockout 5-round P0 fix protocol shipped Flex sync fixes in ~2.5h (diagnostic → implement → parallel review → merge → deploy). 88 orphan trading_account_config rows discovered; cascade gap suggests future audit needed. IB Gateway is desktop app, not Docker-managed. Decided by Scribe during cross-agent orchestration.
+📌 2026-05-19: PR #462 (env-doc) merged a57d4c8; PR #463 backend shipped (migration, endpoint, worker poll, throttle, 10+2 tests, blocker fixed) merged 34d83d7 (641 passing)
