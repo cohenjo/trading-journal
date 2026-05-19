@@ -1,6 +1,6 @@
 """Tests for the manual Flex refresh endpoint and worker poll job.
 
-Covers all 10 items from the design spec (Section G):
+Covers all items from the design spec (Section G) plus additions:
 
   1. Endpoint queues request — 200 queued + DB has refresh_requested_at
   2. Endpoint throttles when within 1 hour — 200 throttled with next_eligible_at
@@ -9,9 +9,11 @@ Covers all 10 items from the design spec (Section G):
   5. Idempotent multi-click — only one row updated (latest timestamp)
   6. Worker picks up pending request and triggers sync
   7. Worker respects throttle (no sync, flag left in place)
-  8. Worker skips orphaned households
+  8. Worker no-ops on empty queue (renamed from "skips orphaned household")
+  8b. Worker orphan-guard — h.id IS NOT NULL predicate filters orphaned config
   9. Worker clears flag on sync failure
   10. Nightly interaction — pending flag cleared after nightly advances last_sync_at
+  11. Worker calls session.rollback() on DB-layer exception (blocks infinite retry)
 
 Design reference:
     ``.squad/decisions/inbox/keaton-refresh-button-design-2026-05-19.md``
@@ -308,6 +310,9 @@ class _WorkerSession:
     def commit(self) -> None:
         self.commit_count += 1
 
+    def rollback(self) -> None:
+        self.rollback_count = getattr(self, "rollback_count", 0) + 1
+
     def __enter__(self) -> "_WorkerSession":
         return self
 
@@ -386,18 +391,17 @@ def test_worker_respects_throttle_no_sync() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 8. Worker skips orphaned households
+# 8. Worker no-ops when queue is empty (G8 — renamed for accuracy)
 # ---------------------------------------------------------------------------
 
 
-def test_worker_skips_orphaned_household() -> None:
-    """Config whose household is gone is excluded by the JOIN guard → no sync."""
+def test_worker_no_pending_requests() -> None:
+    """Empty pending queue → no sync, no flag-clear, no commit."""
     from app.worker.handlers.flex_refresh import run_flex_refresh_poll
 
-    # The orphan guard (h.id IS NOT NULL) lives in the SQL the worker issues.
-    # Simulate it by having the pending-rows query return nothing (the JOIN
-    # filters the orphaned row out before it reaches Python).
-    session = _WorkerSession(pending_rows=[])  # JOIN excluded the orphan
+    # An empty queue is the simple no-op case — distinct from the orphan-guard
+    # test below which verifies the JOIN predicate itself.
+    session = _WorkerSession(pending_rows=[])
 
     with patch("app.worker.handlers.flex_refresh.Session") as mock_session_cls:
         mock_session_cls.return_value.__enter__ = lambda s, *_: session
@@ -406,6 +410,64 @@ def test_worker_skips_orphaned_household() -> None:
         with patch("app.worker.handlers.flex_refresh.run_flex_options_sync") as mock_sync:
             run_flex_refresh_poll()
 
+    mock_sync.assert_not_called()
+    assert session.flag_cleared == []
+
+
+# ---------------------------------------------------------------------------
+# 8b. Worker orphan-guard — h.id IS NOT NULL filters orphaned config
+# ---------------------------------------------------------------------------
+
+
+def test_worker_orphan_guard_filters_row() -> None:
+    """The pending-rows SELECT must contain the orphan-guard predicate.
+
+    The guard (``h.id IS NOT NULL`` via LEFT JOIN on households) is the sole
+    SQL mechanism preventing configs whose household was soft-deleted from
+    being processed.  This test:
+
+    1. Captures the SQL issued by the worker.
+    2. Asserts the orphan-guard predicate is present.
+    3. Simulates the DB-level filtering: returns the row only when the guard
+       is ABSENT (meaning deletion of the guard would make the test fail by
+       causing sync to be called unexpectedly).
+    """
+    from app.worker.handlers.flex_refresh import run_flex_refresh_poll
+
+    captured_sql: list[str] = []
+
+    class _OrphanGuardSession(_WorkerSession):
+        def execute(self, statement: object, params: dict | None = None) -> _FakeWorkerMappings:
+            sql = str(statement).lower()
+            captured_sql.append(sql)
+            # Simulate DB-level filtering: if the guard is present the orphaned
+            # row is excluded (return []); if absent the row leaks through.
+            if "refresh_requested_at is not null" in sql or "refresh_requested_at is not null" in sql:
+                if "h.id is not null" in sql:
+                    return _FakeWorkerMappings([])  # guard filters orphan out
+                # Guard removed — row leaks through (makes test fail intentionally)
+                return _FakeWorkerMappings(self._pending_rows)
+            return super().execute(statement, params)
+
+    orphan_row = _pending_row()  # row that would be orphaned at DB level
+    session = _OrphanGuardSession(pending_rows=[orphan_row], last_sync_at=None)
+
+    with patch("app.worker.handlers.flex_refresh.Session") as mock_session_cls:
+        mock_session_cls.return_value.__enter__ = lambda s, *_: session
+        mock_session_cls.return_value.__exit__ = lambda s, *_: False
+
+        with patch("app.worker.handlers.flex_refresh.run_flex_options_sync") as mock_sync:
+            run_flex_refresh_poll()
+
+    # The guard must be present in the SELECT SQL
+    poll_sql = next(
+        (s for s in captured_sql if "refresh_requested_at is not null" in s),
+        None,
+    )
+    assert poll_sql is not None, "worker never issued the pending-rows SELECT"
+    assert "h.id is not null" in poll_sql, "orphan-guard predicate missing from SELECT"
+
+    # Guard was present → orphaned row was filtered → no sync
     mock_sync.assert_not_called()
     assert session.flag_cleared == []
 
@@ -478,3 +540,48 @@ def test_worker_clears_stale_flag_after_nightly_sync() -> None:
     # Poll dispatches sync because 70 min > 60 min threshold
     mock_sync.assert_called_once_with(session, account_id=ACCOUNT_ID)
     assert CONFIG_ID in session.flag_cleared
+
+
+# ---------------------------------------------------------------------------
+# 11. Worker calls session.rollback() on DB-layer exception (blocks inf-retry)
+# ---------------------------------------------------------------------------
+
+
+def test_worker_rollback_called_on_db_layer_exception() -> None:
+    """DB-layer exception in run_flex_options_sync → rollback + flag cleared.
+
+    run_flex_options_sync follows a caller-commits pattern.  A DB-layer
+    exception (e.g. OperationalError from a mid-upsert connection drop) leaves
+    the session in PendingRollbackError state.  The worker must:
+
+    1. Call session.rollback() to clean the session before the finally UPDATE.
+    2. Still issue the UPDATE refresh_requested_at = NULL (clear the flag).
+    3. Not propagate the exception (avoids crashing the poll loop).
+    """
+    import sqlalchemy.exc
+
+    from app.worker.handlers.flex_refresh import run_flex_refresh_poll
+
+    session = _WorkerSession(
+        pending_rows=[_pending_row()],
+        last_sync_at=None,
+    )
+
+    db_error = sqlalchemy.exc.OperationalError("connection dropped mid-upsert", params=None, orig=None)
+
+    with patch("app.worker.handlers.flex_refresh.Session") as mock_session_cls:
+        mock_session_cls.return_value.__enter__ = lambda s, *_: session
+        mock_session_cls.return_value.__exit__ = lambda s, *_: False
+
+        with patch(
+            "app.worker.handlers.flex_refresh.run_flex_options_sync",
+            side_effect=db_error,
+        ):
+            # Must NOT propagate the OperationalError
+            run_flex_refresh_poll()
+
+    # session.rollback() must have been called before the flag-clear UPDATE
+    assert getattr(session, "rollback_count", 0) >= 1, "session.rollback() was not called"
+    # Flag must still be cleared despite the error
+    assert CONFIG_ID in session.flag_cleared
+    assert session.commit_count == 1
