@@ -42,6 +42,7 @@ class PriceQuote:
     currency: str
     price: Decimal
     as_of: datetime
+    dividend_yield: Decimal | None = None  # trailing 12m yield as percentage form (0.87 = 0.87%)
 
 
 def _default_session_factory() -> AbstractContextManager[Session]:
@@ -77,8 +78,50 @@ def _to_decimal(value: object) -> Decimal | None:
     return amount
 
 
+def _yfinance_yield_to_percent(raw: object) -> Decimal | None:
+    """Convert a raw yfinance dividend yield value to percentage form.
+
+    CONVENTION: dividend_yield is stored as percentage form (0.87 = 0.87%).
+    yfinance's ``trailingAnnualDividendYield`` returns a decimal fraction
+    (0.0087 for 0.87%); the ``dividendYield`` info field occasionally returns
+    a percentage integer (10.43 for 10.43%).  Both are normalised here so that
+    every downstream consumer sees consistent percentage form.
+
+    Args:
+        raw: Raw yfinance yield value — decimal fraction (e.g. 0.0087),
+             percentage form (e.g. 10.43), zero, or ``None``.
+
+    Returns:
+        ``Decimal`` in percentage form (e.g. 0.87), or ``None`` when there
+        is no meaningful yield (zero, negative, ``None``, or non-numeric).
+    """
+    if raw is None:
+        return None
+    try:
+        raw_float = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not (raw_float > 0):
+        # Covers zero, negatives, and NaN — no dividend to report.
+        return None
+    if raw_float > 1:
+        # Already in percentage form (e.g. 10.43 from dividendYield info field).
+        percent = raw_float
+    else:
+        # Decimal fraction (e.g. 0.0087 from trailingAnnualDividendYield) → ×100.
+        percent = raw_float * 100.0
+    return Decimal(str(round(percent, 6)))
+
+
 def fetch_external_price(symbol: str) -> PriceQuote:
-    """Fetch one symbol from Yahoo Finance for the scheduled cache refresh."""
+    """Fetch one symbol from Yahoo Finance for the scheduled cache refresh.
+
+    Fetches both the latest mark price and the trailing 12-month dividend yield.
+    Yield is stored as percentage form (0.87 = 0.87%) — see
+    ``_yfinance_yield_to_percent`` for the normalisation logic.  When the ticker
+    pays no dividend or Yahoo does not report a yield, ``dividend_yield`` is
+    ``None``.
+    """
 
     import yfinance as yf
 
@@ -96,11 +139,24 @@ def fetch_external_price(symbol: str) -> PriceQuote:
         raise ValueError(f"Could not fetch price for {normalized_symbol}")
 
     currency = normalize_currency(getattr(fast_info, "currency", None))
+
+    # Fetch trailing annual dividend yield and normalise to percentage form.
+    # trailingAnnualDividendYield returns a decimal fraction (0.0087 for 0.87%);
+    # _yfinance_yield_to_percent converts it to percentage form (0.87).
+    dividend_yield: Decimal | None = None
+    try:
+        info = ticker.info or {}
+        raw_yield = info.get("trailingAnnualDividendYield") or info.get("dividendYield")
+        dividend_yield = _yfinance_yield_to_percent(raw_yield)
+    except Exception:  # noqa: BLE001
+        pass  # yield is best-effort; price is the critical value
+
     return PriceQuote(
         symbol=normalized_symbol,
         currency=currency,
         price=price,
         as_of=datetime.now(UTC),
+        dividend_yield=dividend_yield,
     )
 
 
@@ -195,18 +251,20 @@ class PriceCacheRefresher:
         session.execute(
             text(
                 """
-                insert into public.price_cache (symbol, currency, price, as_of, refreshed_at)
-                values (:symbol, :currency, :price, :as_of, now())
+                insert into public.price_cache (symbol, currency, price, dividend_yield, as_of, refreshed_at)
+                values (:symbol, :currency, :price, :dividend_yield, :as_of, now())
                 on conflict (symbol, currency) do update
-                   set price = excluded.price,
-                       as_of = excluded.as_of,
-                       refreshed_at = now()
+                   set price          = excluded.price,
+                       dividend_yield = excluded.dividend_yield,
+                       as_of          = excluded.as_of,
+                       refreshed_at   = now()
                 """
             ),
             {
                 "symbol": quote.symbol,
                 "currency": quote.currency,
                 "price": quote.price,
+                "dividend_yield": str(quote.dividend_yield) if quote.dividend_yield is not None else None,
                 "as_of": quote.as_of,
             },
         )
@@ -216,3 +274,67 @@ def refresh_price_cache() -> dict[str, int]:
     """Run one scheduled price-cache refresh using the global DB engine."""
 
     return PriceCacheRefresher().refresh_once()
+
+
+@dataclass(frozen=True)
+class CachedPriceData:
+    """Price and dividend yield returned from the local price_cache table."""
+
+    symbol: str
+    currency: str
+    price: Decimal
+    dividend_yield: Decimal | None
+    refreshed_at: datetime
+
+
+def lookup_cached_price_data(
+    symbol: str,
+    currency: str,
+    session: Session,
+) -> CachedPriceData | None:
+    """Look up price and dividend yield from the local price_cache table.
+
+    Args:
+        symbol: Ticker symbol (case-insensitive, normalised to upper-case).
+        currency: ISO currency code (normalised to upper-case, defaults to USD).
+        session: Open SQLAlchemy session (caller manages lifecycle).
+
+    Returns:
+        A ``CachedPriceData`` instance when the symbol/currency pair is cached,
+        ``None`` when the cache has no entry for this symbol.
+    """
+    sym = normalize_symbol(symbol)
+    curr = normalize_currency(currency)
+    row = (
+        session.execute(
+            text(
+                """
+            SELECT symbol, currency, price, dividend_yield, refreshed_at
+              FROM public.price_cache
+             WHERE symbol   = :symbol
+               AND currency = :currency
+            """
+            ),
+            {"symbol": sym, "currency": curr},
+        )
+        .mappings()
+        .first()
+    )
+
+    if row is None:
+        return None
+
+    price = _to_decimal(row["price"])
+    if price is None:
+        return None
+
+    dy_raw = row["dividend_yield"]
+    dividend_yield = _to_decimal(dy_raw) if dy_raw is not None else None
+
+    return CachedPriceData(
+        symbol=str(row["symbol"]),
+        currency=str(row["currency"]),
+        price=price,
+        dividend_yield=dividend_yield,
+        refreshed_at=row["refreshed_at"],
+    )

@@ -9,7 +9,7 @@ from app.dal.database import get_session
 from app.dependencies import get_current_user_id
 from app.schema.finance_models import FinanceSnapshot, SnapshotData
 from app.services.household_service import get_user_household_id
-from app.services.price_cache import fetch_external_price
+from app.services.price_cache import fetch_external_price, lookup_cached_price_data
 
 router = APIRouter(prefix="/api/finances", tags=["finances"])
 
@@ -19,7 +19,9 @@ def get_stock_price(symbol: str):
     """Deprecated live lookup retained for local maintenance only.
 
     TJ-020 moved frontend reads to ``public.price_cache`` populated by the
-    scheduled ``prices_refresh`` worker. New callers should read that cache.
+    scheduled ``prices_refresh`` worker. New callers should use
+    ``GET /api/finances/price-data/{symbol}`` which reads from the cache and
+    also returns ``dividend_yield``.
     """
 
     try:
@@ -38,11 +40,48 @@ def get_stock_price(symbol: str):
     }
 
 
-@router.get("/latest", response_model=FinanceSnapshot)
-def get_latest_snapshot(
-    user_id: UUID = Depends(get_current_user_id),
-    db: Session = Depends(get_session)
+@router.get("/price-data/{symbol}")
+def get_cached_price_data(
+    symbol: str,
+    currency: str = "USD",
+    db: Session = Depends(get_session),
 ):
+    """Return the latest cached price and dividend yield for a symbol.
+
+    Reads from ``public.price_cache`` populated by the nightly
+    ``prices_refresh`` worker.  Returns ``dividend_yield`` in percentage form
+    (0.87 for 0.87%); ``null`` when the symbol pays no dividend.
+
+    This endpoint is the primary way for frontend RSU account configuration
+    to pull current price and yield without triggering a live Yahoo Finance
+    request.
+
+    Args:
+        symbol: Ticker symbol (e.g. ``MSFT``, ``WIX``).
+        currency: ISO currency code; defaults to ``USD``.
+
+    Raises:
+        404: When the symbol/currency pair is not yet in the cache.
+    """
+    data = lookup_cached_price_data(symbol, currency, db)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No cached price data found for {symbol.upper()} ({currency.upper()}). "
+            "The nightly price refresh worker populates this cache.",
+        )
+
+    return {
+        "symbol": data.symbol,
+        "price": str(data.price),
+        "dividend_yield": str(data.dividend_yield) if data.dividend_yield is not None else None,
+        "currency": data.currency,
+        "refreshed_at": data.refreshed_at.isoformat() if data.refreshed_at else None,
+    }
+
+
+@router.get("/latest", response_model=FinanceSnapshot)
+def get_latest_snapshot(user_id: UUID = Depends(get_current_user_id), db: Session = Depends(get_session)):
     """
     Get the most recent finance snapshot for the authenticated user's household,
     enriched with latest dashboard dividend data.
@@ -50,7 +89,7 @@ def get_latest_snapshot(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     statement = (
         select(FinanceSnapshot)
         .where(FinanceSnapshot.household_id == household_id)
@@ -60,23 +99,24 @@ def get_latest_snapshot(
     snapshot = db.exec(statement).first()
     if not snapshot:
         raise HTTPException(status_code=404, detail="No finance snapshots found")
-    
+
     # Enrich with latest dashboard dividends for linked accounts
     try:
         from app.schema.dividend_models import DividendAccount, DividendPosition, DividendTickerData
         from app.utils.currency import convert_currency
-        
-        items = snapshot.data.get('items', [])
+
+        items = snapshot.data.get("items", [])
         updated = False
-        
+
         for item in items:
-            linked_id = item.get('id')
-            if not linked_id: continue
-            
+            linked_id = item.get("id")
+            if not linked_id:
+                continue
+
             # Find linked dividend account
             stmt = select(DividendAccount).where(DividendAccount.linked_id == linked_id)
             div_acc = db.exec(stmt).first()
-            
+
             if div_acc:
                 # Calculate total annual income
                 d_positions = db.exec(select(DividendPosition).where(DividendPosition.account == div_acc.name)).all()
@@ -84,25 +124,28 @@ def get_latest_snapshot(
                     tickers = [p.ticker for p in d_positions]
                     td_list = db.exec(select(DividendTickerData).where(DividendTickerData.ticker.in_(tickers))).all()
                     td_map = {t.ticker: t for t in td_list}
-                    
+
                     total_income = 0.0
                     for p in d_positions:
                         td = td_map.get(p.ticker)
                         if td:
                             # Convert to item's native currency
-                            total_income += convert_currency(p.shares * td.dividend_rate, td.currency, item.get('currency', 'USD'))
-                    
+                            total_income += convert_currency(
+                                p.shares * td.dividend_rate, td.currency, item.get("currency", "USD")
+                            )
+
                     if total_income > 0:
-                        if 'details' not in item: item['details'] = {}
-                        item['details']['dividend_fixed_amount'] = round(total_income, 2)
-                        item['details']['dividend_mode'] = 'Fixed'
+                        if "details" not in item:
+                            item["details"] = {}
+                        item["details"]["dividend_fixed_amount"] = round(total_income, 2)
+                        item["details"]["dividend_mode"] = "Fixed"
                         updated = True
-        
+
         if updated:
-            # We don't commit it to the DB here to avoid side effects during GET, 
+            # We don't commit it to the DB here to avoid side effects during GET,
             # just return the enriched object.
             # But the caller expects a model.
-             pass 
+            pass
     except Exception as e:
         # Log and continue with non-enriched snapshot
         print(f"Failed to enrich snapshot: {e}")
@@ -112,9 +155,7 @@ def get_latest_snapshot(
 
 @router.post("/", response_model=FinanceSnapshot)
 def create_snapshot(
-    data: SnapshotData, 
-    user_id: UUID = Depends(get_current_user_id),
-    db: Session = Depends(get_session)
+    data: SnapshotData, user_id: UUID = Depends(get_current_user_id), db: Session = Depends(get_session)
 ):
     """
     Create or update a finance snapshot for the authenticated user's household.
@@ -123,9 +164,9 @@ def create_snapshot(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     snapshot_date = data.date if data.date else date.today()
-    
+
     # Check if a snapshot already exists for this household and date
     statement = (
         select(FinanceSnapshot)
@@ -133,10 +174,10 @@ def create_snapshot(
         .where(FinanceSnapshot.date == snapshot_date)
     )
     existing_snapshot = db.exec(statement).first()
-    
+
     # Prepare the snapshot data dictionary
-    snapshot_data_dict = data.model_dump(mode='json')
-    
+    snapshot_data_dict = data.model_dump(mode="json")
+
     if existing_snapshot:
         # Update existing
         existing_snapshot.data = snapshot_data_dict
@@ -155,7 +196,7 @@ def create_snapshot(
             data=snapshot_data_dict,
             net_worth=data.net_worth,
             total_assets=data.total_assets,
-            total_liabilities=data.total_liabilities
+            total_liabilities=data.total_liabilities,
         )
         db.add(new_snapshot)
         db.commit()
@@ -165,9 +206,7 @@ def create_snapshot(
 
 @router.get("/history", response_model=List[FinanceSnapshot])
 def get_snapshot_history(
-    limit: int = 30,
-    user_id: UUID = Depends(get_current_user_id),
-    db: Session = Depends(get_session)
+    limit: int = 30, user_id: UUID = Depends(get_current_user_id), db: Session = Depends(get_session)
 ):
     """
     Get historical snapshots for the authenticated user's household, useful for graphing.
@@ -176,7 +215,7 @@ def get_snapshot_history(
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     statement = (
         select(FinanceSnapshot)
         .where(FinanceSnapshot.household_id == household_id)
@@ -188,28 +227,24 @@ def get_snapshot_history(
 
 
 @router.delete("/{date_str}", response_model=bool)
-def delete_snapshot(
-    date_str: date,
-    user_id: UUID = Depends(get_current_user_id),
-    db: Session = Depends(get_session)
-):
+def delete_snapshot(date_str: date, user_id: UUID = Depends(get_current_user_id), db: Session = Depends(get_session)):
     """
     Delete a finance snapshot by date for the authenticated user's household.
     """
     household_id = get_user_household_id(db, user_id)
     if not household_id:
         raise HTTPException(status_code=403, detail="User not associated with any household")
-    
+
     statement = (
         select(FinanceSnapshot)
         .where(FinanceSnapshot.household_id == household_id)
         .where(FinanceSnapshot.date == date_str)
     )
     snapshot = db.exec(statement).first()
-    
+
     if not snapshot:
         raise HTTPException(status_code=404, detail="Snapshot not found")
-        
+
     db.delete(snapshot)
     db.commit()
     return True

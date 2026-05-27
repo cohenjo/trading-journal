@@ -6,8 +6,9 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+from unittest.mock import MagicMock, patch
 
-from app.services.price_cache import PriceCacheRefresher, PriceQuote
+from app.services.price_cache import PriceCacheRefresher, PriceQuote, _yfinance_yield_to_percent
 from app.worker.registry import JOB_SCHEDULES
 from app.worker.runtime import start_worker  # noqa: F401 - imports schedule registration
 
@@ -98,6 +99,7 @@ def test_price_refresher_fetches_and_upserts_symbols() -> None:
         "currency": "USD",
         "price": Decimal("123.45"),
         "as_of": datetime(2026, 5, 3, 12, tzinfo=UTC),
+        "dividend_yield": None,
     }
     assert "on conflict (symbol, currency) do update" in upserts[0]["sql"]
     assert session.commits == 2
@@ -131,3 +133,103 @@ def test_price_refresher_continues_after_symbol_failure() -> None:
     assert session.rollbacks == 1
     assert session.commits == 1
     assert any(call["params"].get("symbol") == "GOOD" for call in session.executions)
+
+
+# ---------------------------------------------------------------------------
+# _yfinance_yield_to_percent unit tests
+# ---------------------------------------------------------------------------
+#
+# CONVENTION: dividend_yield is stored as percentage form (0.87 = 0.87%).
+# yfinance returns decimal fraction (0.0087) — normalize on write.
+# ---------------------------------------------------------------------------
+
+
+def test_yfinance_yield_to_percent_decimal_fraction_msft() -> None:
+    """MSFT: trailingAnnualDividendYield=0.0087 → stored as 0.87 (percentage form)."""
+    # CONVENTION: dividend_yield stored as percentage form (0.87 = 0.87%).
+    # yfinance returns decimal fraction (0.0087) — normalize on write.
+    result = _yfinance_yield_to_percent(0.0087)
+    assert result is not None
+    assert abs(float(result) - 0.87) < 1e-9
+
+
+def test_yfinance_yield_to_percent_zero_returns_none() -> None:
+    """WIX scenario: yield=0 (no dividend) → None stored."""
+    assert _yfinance_yield_to_percent(0) is None
+
+
+def test_yfinance_yield_to_percent_none_returns_none() -> None:
+    """None yield from yfinance → None (no crash)."""
+    assert _yfinance_yield_to_percent(None) is None
+
+
+def test_yfinance_yield_to_percent_negative_returns_none() -> None:
+    """Negative yield is invalid → None."""
+    assert _yfinance_yield_to_percent(-0.5) is None
+
+
+def test_yfinance_yield_to_percent_already_percent_form() -> None:
+    """dividendYield sometimes returns percentage form (10.43 for 10.43%) — stored as-is."""
+    result = _yfinance_yield_to_percent(10.43)
+    assert result is not None
+    assert abs(float(result) - 10.43) < 1e-5
+
+
+def test_yfinance_yield_to_percent_non_numeric_returns_none() -> None:
+    """Non-numeric value → None (no crash)."""
+    assert _yfinance_yield_to_percent("n/a") is None
+
+
+# ---------------------------------------------------------------------------
+# fetch_external_price dividend yield normalisation tests
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_external_price_normalises_yield_to_percent() -> None:
+    """yfinance trailingAnnualDividendYield=0.0087 → stored dividend_yield=0.87.
+
+    CONVENTION: dividend_yield stored as percentage form (0.87 = 0.87%).
+    yfinance returns decimal fraction (0.0087) — normalize on write.
+    """
+    from app.services.price_cache import fetch_external_price
+
+    mock_ticker = MagicMock()
+    mock_ticker.fast_info.last_price = 420.5
+    mock_ticker.fast_info.currency = "USD"
+    mock_ticker.info = {"trailingAnnualDividendYield": 0.0087}
+
+    with patch("yfinance.Ticker", return_value=mock_ticker):
+        quote = fetch_external_price("MSFT")
+
+    assert quote.dividend_yield is not None
+    assert abs(float(quote.dividend_yield) - 0.87) < 1e-9
+
+
+def test_fetch_external_price_zero_yield_returns_none() -> None:
+    """WIX scenario: trailingAnnualDividendYield=0 → dividend_yield=None."""
+    from app.services.price_cache import fetch_external_price
+
+    mock_ticker = MagicMock()
+    mock_ticker.fast_info.last_price = 15.2
+    mock_ticker.fast_info.currency = "USD"
+    mock_ticker.info = {"trailingAnnualDividendYield": 0}
+
+    with patch("yfinance.Ticker", return_value=mock_ticker):
+        quote = fetch_external_price("WIX")
+
+    assert quote.dividend_yield is None
+
+
+def test_fetch_external_price_none_yield_returns_none() -> None:
+    """No yield field in yfinance info → dividend_yield=None (no crash)."""
+    from app.services.price_cache import fetch_external_price
+
+    mock_ticker = MagicMock()
+    mock_ticker.fast_info.last_price = 15.2
+    mock_ticker.fast_info.currency = "USD"
+    mock_ticker.info = {}
+
+    with patch("yfinance.Ticker", return_value=mock_ticker):
+        quote = fetch_external_price("NODIV")
+
+    assert quote.dividend_yield is None

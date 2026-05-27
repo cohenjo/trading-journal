@@ -29,6 +29,32 @@
 
 ---
 
+## 2026-05-27 — RSU Yield Units Fix
+
+**Task:** Normalize `dividend_yield` to percentage form at the yfinance boundary — fixes 100× calculation error in `plan_components.py`.
+
+**Learnings:**
+
+- **Chosen convention: percentage form (0.87 = 0.87%).** `plan_components.py` line 427 computes `acc['value'] * (yield_rate / 100.0)`, treating the stored value as percentage. The UI `<input>` in `PlanAccountDetails.tsx` also shows percentage with a "%" label. Storing decimal fraction (0.0087) caused projections to be 100× too small.
+
+- **Normalization boundary: `_yfinance_yield_to_percent()` in `price_cache.py`.** yfinance's `trailingAnnualDividendYield` returns decimal fraction (0.0087). The helper multiplies by 100 before any DB write. `dividendYield` occasionally returns percentage integers (10.43) — the helper detects values > 1 and passes them through unchanged.
+
+- **`yahoo_refresh.py` / `stock_positions` use decimal fraction — do NOT change.** That is a different table with its own downstream consumers. The convention unification applies only to `price_cache.dividend_yield` and `account_settings.dividend_yield` in plan/snapshot JSON.
+
+- **Data migration is idempotent.** Migration `f2a3b4c5d6e7` multiplies only rows where `0 < dividend_yield < 1`. Re-running is safe — already-migrated rows (>= 1) are untouched.
+
+**Files changed:**
+- `apps/backend/app/services/price_cache.py` (add `_yfinance_yield_to_percent`, update `fetch_external_price`, update `PriceQuote` docstring)
+- `apps/backend/app/api/finances.py` (update docstring)
+- `apps/backend/app/worker/rsu_plan_hydration.py` (update docstring)
+- `apps/backend/alembic/versions/f2a3b4c5d6e7_normalize_price_cache_yield_to_percent.py` (new data migration)
+- `apps/backend/tests/test_price_cache_worker.py` (add `_yfinance_yield_to_percent` + `fetch_external_price` tests)
+- `apps/backend/tests/test_rsu_plan_hydration.py` (update all 0.0087 → 0.87 fixtures)
+
+**Decisions:** `.squad/decisions/inbox/hockney-rsu-yield-units.md`
+
+---
+
 ## 2026-05-19 — Flex Query Worker Diagnostic
 
 **Task:** Read-only diagnostic of IBKR Flex Query worker for Jony's 5 questions.
