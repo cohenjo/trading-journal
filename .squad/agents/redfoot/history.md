@@ -1,74 +1,3 @@
-## 2026-05-12: LURVG — PR #371 broker-form fix (issue #359)
-
-**Assigned:** Redfoot validates Hockney's `fix(settings): normalize account_type to lowercase + surface save errors (#359)`.
-
-**Context:** Jony reported silent failure when adding a broker — uppercase `account_type` rejected by `chk_account_type` constraint with no user feedback. PR #371 adds: (1) `normalizeAccountType()` utility with validation before DB write, (2) duplicate prevention with friendly error message, (3) `data-testid` rename `tab-{type}` → `account-tab-{type}`, (4) 17 new unit tests, (5) 2 new e2e tests.
-
-**Reproduce-Before-Fix Rule applied:** The original uppercase bug was already patched in `cf2fd19` (`.toLowerCase()` added). Tested the remaining unfixed behavior: duplicate account_type insertion. On main, inserting a second Schwab silently succeeds (no unique constraint on `(household_id, account_type)`). Bug reproduced ✅.
-
-**Spec defect found:** Hockney's `add-broker-form.spec.ts` used `getByLabel(/account name/i)` — but the Account Name `<label>` has no `htmlFor` attribute association. Fix applied: `getByLabel` → `getByTitle('Account Name')`. Both tests then pass 2/2.
-
-**Procedure:** LURVG Path 2.
-1. **Main build + pre-fix spec:** Seeded ephemeral Schwab config. Submitted duplicate Schwab via form. On main: no duplicate check → INSERT succeeds → **success banner shown** (bug — should be rejected). ✅ Bug reproduced.
-2. **Fix branch build + Hockney's spec:** 2/2 tests pass. Happy path: Schwab added successfully, 3 tabs visible after reload. Negative: duplicate Schwab rejected with "Schwab account is already configured for this household." ✅ Fix confirmed.
-3. **Smoke tests:** /dividends, /ladder, /summary all load without regression (3/3 ✅).
-4. **Unit tests:** **492/492** including 17 new `account-type.test.ts` tests ✅.
-5. **DB cleanup:** Restored production rows (ids 1, 71, 72 intact). Cleared stale test households via trigger-bypass.
-
-**Evidence files:**
-- `e2e/lurvg-evidence/pr371-prebug-broker-add-silent-fail.png` — pre-fix: duplicate succeeds silently
-- `e2e/lurvg-evidence/pr371-prebug-dom-state.txt` — pre-fix DOM state text
-- `e2e/lurvg-evidence/add-broker-schwab-success.png` — post-fix: happy path success banner
-- `e2e/lurvg-evidence/add-broker-schwab-after-reload.png` — post-fix: 3 tabs visible after reload
-- `e2e/lurvg-evidence/add-broker-schwab-duplicate-error.png` — post-fix: duplicate rejection banner
-- `e2e/lurvg-evidence/pr371-smoke-dividends.png` — smoke: dividends no regression
-- `e2e/lurvg-evidence/pr371-smoke-ladder.png` — smoke: ladder no regression
-- `e2e/lurvg-evidence/pr371-smoke-summary.png` — smoke: summary no regression
-
-**Verdict: 🟢 APPROVED** — pre-fix reproduced, fix confirmed, all tests pass, no regressions.
-
-**Learnings banked:** `TradingAccountSettings.tsx` Account Name/Type `<label>` elements lack `htmlFor` attribute — always use `getByTitle()` not `getByLabel()` for these inputs. E2e spec authors should associate labels properly (`htmlFor` / `aria-labelledby`) to enable `getByLabel` matching.
-
-## 2026-05-11: LURVG — PR #375 RLS policies fix (issue #374)
-
-**Assigned:** Redfoot validates Hockney's `fix(security): add RLS policies for dividend tables, disable RLS on security_reference (#374)`. HIGH STAKES — migration already applied to prod DB.
-
-**Context:** PR #375 removes `createAdminClient()` workaround from `getDividendPositions()` (introduced PR #368) and switches to standard `createClient()`. The new RLS migration (`20260511102251`) adds SELECT policies on `dividend_payments` + `dividend_accruals` (household-scoped via `trading_account_config.account_id → is_household_member(household_id)`), and disables RLS on `security_reference` (global reference data). If the new standard client cannot read through the policies, dividends will go empty in prod on merge.
-
-**Reproduce-Before-Fix Rule:** INVERTED here — the migration is already applied to prod. Bug to validate is "the new RLS policies allow authenticated reads". Skipped main pre-fix step per instructions; went directly to fix branch validation.
-
-**Procedure:** LURVG Path 2.
-1. **Migration verified in prod via Supabase MCP:**
-   - `dividend_payments_select` (r) ✅
-   - `dividend_accruals_select` (r) ✅
-   - `security_reference rowsecurity = false` ✅
-   - Version `20260511102251` tracked in `supabase_migrations.schema_migrations` ✅
-2. **Code verification:** `actions.ts` uses only `createClient()` — no `createAdminClient` import ✅
-3. **Fix branch build:** `npm run build` ✅ — clean compile on `squad/374-rls-policies`
-4. **Unit tests:** **518/519** (1 pre-existing `LadderPage coupon formatting` failure). Confirmed same failure on `main` — truly pre-existing, unrelated to #375. ✅
-5. **LURVG Playwright spec:** 5/5 passed (Path 2, local prod build, authenticated ephemeral test user).
-
-   **Key insight on RLS seed strategy:** The new policy uses `dividend_payments.account_id IN (SELECT account_id FROM trading_account_config WHERE is_household_member(household_id))`. Seeding with a fake account ID (as PR #368 spec did) causes a false skip because the RLS join returns 0 rows. Correct approach: seed `trading_account_config` with the real IBKR broker number (`U2515365`) under the ephemeral household. `is_household_member` returns true for the ephemeral user's own household → RLS allows reads from `dividend_payments`.
-
-6. **Evidence files:**
-   - `pr375-postfix-dividends-ibkr-populated.png` — JEPI/O/GS rows visible in `dividends-positions-table` ✅
-   - `pr375-postfix-dividends-ibkr-dom.txt` — DOM: `dividend-row-GS`, `dividend-row-JEPI`, `dividend-row-O` ✅
-   - `pr375-postfix-dividends-schwab-empty.png` — Schwab correct empty state ✅
-   - `pr375-postfix-ladder-ibkr-populated.png` — ladder loads, no regression ✅
-   - `pr375-postfix-summary.png` — summary loads, no regression ✅
-   - `pr375-postfix-accounts-tabs.png` — 3 account tabs visible ✅
-   - `pr375-postfix-accounts-tabs-dom.txt` — DOM: `account-tab-ibkr`, `account-tab-schwab`, `account-tab-ira`, `account-tab-settings` ✅
-7. **Negative test (unauthenticated):** `curl localhost:3000/dividends` → `307` redirect (not 500) ✅
-8. **`security_reference` accessible:** `SELECT count(*) FROM security_reference` → 75 rows, no RLS error ✅
-
-**Verdict: 🟢 APPROVED** — all 5 Playwright tests pass, unit tests 518/519 (pre-existing failure confirmed on main), migration confirmed in prod, cookie-client reads correctly through new RLS policies. Safe to merge.
-
-**Learnings banked:**
-- **RLS seed strategy for account_id joins:** When the RLS policy joins `dividend_payments.account_id → trading_account_config.account_id`, seed with the REAL broker account number (not a fake UUID/string). Using a fake ID causes RLS to return 0 rows → test passes for the wrong reason (empty state shown as "correct" when it's actually blocked).
-- **`trading_account_config` select with duplicate account_id:** After seeding the real account_id (`U2515365`) which already exists in Jony's household, `.single()` fails with multiple rows. Always filter by `household_id` too, or use `.maybeSingle()` with household scoping.
-- **`account-tab-{type}` testids:** Trading accounts page uses `<button data-testid="account-tab-ibkr">` not `role="tablist"` / `role="tab"`. Always use `getByTestId('account-tab-ibkr')` for tab assertions on this page.
-
-
 ## 2026-05-11: LURVG — PR #379 insurance_policies cleanup (prod-applied migration)
 
 **Verdict: 🟢 APPROVED.** Schema verified via Supabase MCP: `user_id` dropped, `household_id` NOT NULL, 2/2 rows preserved, 4 canonical household-scoped RLS policies intact, 0 wave2 `_own` policies remain. Unit tests: 519/519. Playwright: 3/3 passed (`/insurance` renders clean, no `user_id` errors, Add Policy flow functional). Server log clean. PR #379 ready to squash-merge.
@@ -152,3 +81,47 @@
 
 📌 Team update (2026-05-19): Strict-lockout 5-round P0 fix protocol shipped Flex sync fixes in ~2.5h (diagnostic → implement → parallel review → merge → deploy). 88 orphan trading_account_config rows discovered; cascade gap suggests future audit needed. IB Gateway is desktop app, not Docker-managed. Decided by Scribe during cross-agent orchestration.
 📌 2026-05-19: R3 test reviews (#463 APPROVE WITH NITS vacuous test + mock fragility; #464 APPROVE WITH NITS unmount cleanup + ambiguity + timeout assertion)
+
+## 2025-07-10: TDD — RSU Automation Acceptance Criteria (issue: RSU plan account feature)
+
+**Assigned:** Redfoot writes acceptance criteria and test implementations for RSU plan account automation (Wix RSU / MSFT RSU, 25% dividend tax, mandatory Payout routing).
+
+**Context:** RSU plan accounts need: (1) `yahoo_refresh` worker extended to price RSU plan account positions, (2) engine to enforce 25% dividend tax and Payout-only policy, (3) UI fields for RSU strategy section. Two accounts in scope — WIX (no dividends) and MSFT (~0.87% trailing yield).
+
+**Work completed:**
+
+1. **Backend tests** (`apps/backend/tests/test_rsu_refresh.py`) — 21 tests, all passing:
+   - `TestAC1_MSFTRefresh` — Yahoo price/yield upsert for MSFT RSU
+   - `TestAC2_WIXNoDiv` — WIX stores `None` yield (not 0.0, which is falsy)
+   - `TestAC7_TickerChangeRefresh` — ticker change triggers new Yahoo lookup
+   - `TestAC8_MissingYahooData` — graceful handling of missing Yahoo fields
+   - `TestAC9_CurrencyUSD` — USD RSU positions fetched with correct currency
+   - `TestAC10_ZeroShares` — zero-share positions handled without crash
+   - *Note*: These are TDD stubs; backend implementation (Hockney's worker extension) pending.
+
+2. **Component tests** (`apps/frontend/src/components/Plan/__tests__/PlanAccountDetails.rsu.test.tsx`) — 12 tests, all passing:
+   - AC6: RSU strategy section renders in snapshot mode
+   - AC7: ticker lookup calls `getPrice` after 800ms debounce
+   - AC8: missing/network error handled gracefully
+   - Key pattern: `vi.useFakeTimers()` + `vi.runAllTimersAsync()` for the debounce
+
+3. **Engine tests** (appended to `apps/frontend/src/app/plan/__tests__/simulate.test.ts`) — 13 new RSU tests, all passing:
+   - AC3: 25% tax ratio check in yr1 (yr0 has no tax field in `currentDividendPayouts`)
+   - AC4: Payout forced even with user Accumulate override; dividend visible in income_details
+   - AC9: USD→ILS 3× RATES conversion for net_worth and dividend income
+   - AC10 edge cases: zero yield, explicit tax override, multiple RSU accounts, two-account totals
+
+**Key technical discoveries:**
+- `yr0` uses `currentDividendPayouts()` (no `tax` field) — always check `yr1+` for tax assertions
+- Savings routing re-invests Payout income back into accounts — so account.value grows even with Payout; the distinction is that dividend is trackable in `income_details` and tax is tracked
+- WIX Yahoo `0.0` yield is falsy in Python → stored as `None` (not `Decimal('0')`)
+- `toBeCloseTo(numDigits)` tolerance boundary can bite floating point: use ratio checks over absolute values for tax assertions
+- `simulateUsd()` helper needed: default `simulate()` uses ILS main currency which 3×-multiplies USD amounts
+
+**Test counts:** 21 backend ✅ + 12 component ✅ + 13 engine ✅ = 46 new tests. Pre-existing 3 failures (SettingsContext, 2 TTM yield) unchanged.
+
+**Acceptance criteria doc:** `.squad/decisions/inbox/redfoot-rsu-acceptance.md`
+
+---
+
+📌 **Team update (2026-05-27)**: RSU automation batch completed. All 5 agents collaborated on price_cache extension (backend), engine tax/policy enforcement (frontend), and UI configuration. 46 acceptance tests pass. Branch: squad/rsu-ui-wiring. Decisions merged to .squad/decisions.md. Next: yield-units normalization follow-up pending from Hockney.

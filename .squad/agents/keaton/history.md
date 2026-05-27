@@ -54,3 +54,37 @@ See `.squad/decisions/inbox/keaton-flex-backfill-strategy.md` for full 3-tier an
 
 📌 Team update (2026-05-19): Strict-lockout 5-round P0 fix protocol shipped Flex sync fixes in ~2.5h (diagnostic → implement → parallel review → merge → deploy). 88 orphan trading_account_config rows discovered; cascade gap suggests future audit needed. IB Gateway is desktop app, not Docker-managed. Decided by Scribe during cross-agent orchestration.
 📌 2026-05-19: Refresh button architecture designed + reviewed (#463, #464) — REQUEST CHANGES + APPROVE posted via cohenjo auth (strict lockout, no code changes by reviewer)
+
+### 2026-05-27 — RSU Dividend Automation Architecture
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Architecture and contracts for RSU stock price + dividend yield automation across worker, Plan engine, and cash-flow income pool.
+
+**Architecture Decisions:**
+
+1. **Q1 (dividend_tax_rate):** Default to 25% for RSU accounts, allow user override. Rationale: Israeli 25% dividend withholding is standard, but edge cases exist.
+
+2. **Q2 (dividend_policy):** Force-locked to 'Payout' for RSU. Rationale: RSU dividends are cash payouts (no broker DRIP); must route to income pool.
+
+3. **Q3 (WIX ticker):** No mapping needed. WIX is NASDAQ-listed; `yahoo_refresh.py` resolves US tickers verbatim.
+
+4. **Q4 (stock_positions sync):** Not required. `price_cache` already scans `plans.items[].account_settings.stock_symbol`. Extend with `dividend_yield` column instead of syncing to `stock_positions`.
+
+**Key File Paths:**
+- `apps/backend/app/services/price_cache.py` — extend `PriceQuote` with `dividend_yield`, add DB column
+- `apps/backend/app/worker/yahoo_refresh.py` — existing yield fetch logic (L195-220) already normalizes to [0,1]
+- `apps/frontend/src/app/finances/actions.ts` — extend `getPrice()` to return yield
+- `apps/frontend/src/components/Plan/PlanAccountDetails.tsx` — auto-populate yield, enforce RSU defaults
+- `apps/frontend/src/components/Plan/PlanEngine.ts` — L146/199/231 account normalization, L307 tax calc, L320 policy override
+
+**Cross-System Patterns:**
+- `price_cache` is the single source of truth for real-time market data (price + yield) across Plan, Snapshot, and Dashboard.
+- RSU accounts are identified by `account_settings.type === 'RSU'` in both `finance_snapshots` and `plans` JSONB.
+- `generated_income` flows to `yearIncome` at L495-497 in PlanEngine; Sankey consumes this automatically.
+
+**Design Doc:** `.squad/log/2026-05-27-rsu-automation-design.md`
+**Decision Entry:** `.squad/decisions/inbox/keaton-rsu-design.md`
+
+---
+
+📌 **Team update (2026-05-27)**: RSU automation batch completed. All 5 agents collaborated on price_cache extension (backend), engine tax/policy enforcement (frontend), and UI configuration. 46 acceptance tests pass. Branch: squad/rsu-ui-wiring. Decisions merged to .squad/decisions.md. Next: yield-units normalization follow-up pending from Hockney.
