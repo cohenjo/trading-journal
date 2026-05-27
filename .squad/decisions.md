@@ -16,7 +16,8 @@ RSU accounts (Wix RSU, MSFT RSU) require special handling across the entire syst
    - Extended `price_cache` table with `dividend_yield NUMERIC(18,8)` column (migration `e5f6a7b8c9d0`)
    - New worker `rsu_plan_hydration` (cron `5 22 * * MON-FRI`) scans all plans for RSU items and patches JSON with current price, yield, fixed 25% tax rate, and Payout policy
    - New API endpoint `GET /api/finances/price-data/{symbol}` returns cached price + yield
-   - Yahoo Finance resolution: MSFT and WIX are NASDAQ-listed; resolved as-is. Dividend yield stored as decimal fraction (0.0087 for 0.87%). Zero-yield tickers (WIX) store `null`.
+   - Yahoo Finance resolution: MSFT and WIX are NASDAQ-listed; resolved as-is. Zero-yield tickers (WIX) store `null`.
+   - **Dividend yield convention: percentage form** throughout `price_cache` and plan/snapshot JSON (`0.87` means 0.87%). yfinance returns decimal fraction (`0.0087`) — normalized exactly once at the boundary by `_yfinance_yield_to_percent()` in `price_cache.py`. `plan_components.py` divides by 100 to get the multiplication fraction; UI `<input>` shows the percentage value next to a `%` label. NOTE: `public.stock_positions.dividend_yield` (separate, older table owned by `yahoo_refresh.py`) remains decimal-fraction — do not change. Data migration `f2a3b4c5d6e7` backfills existing `price_cache` rows where `0 < dividend_yield < 1` by multiplying by 100 (idempotent).
 
 2. **Tax & Policy Enforcement**
    - **Dividend tax rate = 25% fixed** (not plan-level `incomeTaxRate`). Applied via `applyRsuDividendOverrides()` in both `PlanEngine.ts` and `simulation.ts`
