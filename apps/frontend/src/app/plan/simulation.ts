@@ -192,6 +192,11 @@ const RATES: Readonly<Record<string, Decimal>> = {
   EUR: new Decimal(3.5),
 };
 
+// RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
+// RSU dividends are taxed at a fixed 25% rate regardless of the plan-level incomeTaxRate.
+// This overrides Default #6 for RSU account types only.
+const RSU_DIVIDEND_TAX_RATE = new Decimal(25);
+
 function thisYear(): number {
   return new Date().getFullYear();
 }
@@ -284,6 +289,23 @@ function details(item: PlanSimulationItem): Record<string, unknown> {
 
 function settingsRecord(settings: Record<string, unknown> | undefined): Record<string, unknown> {
   return settings ?? {};
+}
+
+/**
+ * Applies RSU-specific dividend overrides to an account object in place.
+ * RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
+ *  - dividend_policy is forced to 'Payout': RSU dividends NEVER accumulate/reinvest.
+ *  - dividend_tax_rate defaults to RSU_DIVIDEND_TAX_RATE (25%) unless the user
+ *    has explicitly set a non-zero rate on the account.
+ */
+function applyRsuDividendOverrides(account: Account): void {
+  if (account.type !== 'RSU') return;
+  // Force Payout — RSU dividends always flow to income pool, never reinvest.
+  account.dividend_policy = 'Payout';
+  // Use 25% flat tax unless user explicitly configured a different rate (non-zero override wins).
+  if (account.dividend_tax_rate.isZero()) {
+    account.dividend_tax_rate = RSU_DIVIDEND_TAX_RATE;
+  }
 }
 
 function primaryBirthYear(settings: Record<string, unknown>): number {
@@ -428,6 +450,8 @@ function loadAccounts(plan: PlanData, finances: PlanSimulationInput['finances'],
       dividendPayoutStartCondition: merged.dividend_payout_start_condition == null ? undefined : stringValue(merged.dividend_payout_start_condition),
       dividendPayoutStartReference: typeof merged.dividend_payout_start_reference === 'string' || typeof merged.dividend_payout_start_reference === 'number' ? merged.dividend_payout_start_reference : undefined,
     }));
+    // RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
+    applyRsuDividendOverrides(accounts[accounts.length - 1]);
   }
 
   for (const item of planItems) {
@@ -461,6 +485,8 @@ function loadAccounts(plan: PlanData, finances: PlanSimulationInput['finances'],
       dividendPayoutStartCondition: accSettings.dividend_payout_start_condition == null ? undefined : stringValue(accSettings.dividend_payout_start_condition),
       dividendPayoutStartReference: typeof accSettings.dividend_payout_start_reference === 'string' || typeof accSettings.dividend_payout_start_reference === 'number' ? accSettings.dividend_payout_start_reference : undefined,
     }));
+    // RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
+    applyRsuDividendOverrides(accounts[accounts.length - 1]);
   }
 
   return accounts;
@@ -594,7 +620,7 @@ class Accounts {
       }
 
       if (policy === 'Payout') {
-        if (account.value.gt(0)) dividends.push({ name: `Dividend: ${account.name}`, type: 'Dividend Income', value: net, gross, tax: gross.minus(net) });
+        if (account.value.gt(0) && gross.gt(0)) dividends.push({ name: `Dividend: ${account.name}`, type: 'Dividend Income', value: net, gross, tax: gross.minus(net) });
       } else {
         account.value = account.value.plus(net);
       }

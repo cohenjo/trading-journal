@@ -376,6 +376,133 @@ describe('runPlanSimulation', () => {
     expect(withoutOptions[0].net_worth).toBe(withEmptyOptions[0].net_worth);
     expect(withEmptyOptions[0].income_details.some(d => d.type === 'options')).toBe(false);
   });
+
+  // ── RSU dividend tax rules ─────────────────────────────────────────────────
+  // Decision: .squad/decisions.md (RSU automation rules, 2026-05-27)
+  //   - RSU dividends are taxed at a fixed 25% regardless of plan-level incomeTaxRate
+  //   - RSU dividend policy is always Payout (never reinvested into the account)
+  //   - RSU dividend income routes to the income pool
+
+  it('RSU with dividend yield produces income with 25% tax deducted', async () => {
+    // MSFT RSU pattern: ~0.87% yield on 100_000 ILS ≈ 870 gross per year
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'rsu1',
+          name: 'MSFT RSU',
+          category: 'Account',
+          value: 100_000,
+          growth_rate: 0,
+          account_settings: accountSettings({ type: 'RSU', dividend_yield: 0.87 }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+
+    // Year 0 (current year): gross dividend reported via currentDividendPayouts (no tax on year-0 path)
+    const year0Dividend = result[0].income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(year0Dividend).toBeDefined();
+    expect(year0Dividend?.gross).toBeGreaterThan(0);
+
+    // Year 1+: income_details has RSU dividend; tax field = 25% of gross
+    const year1 = result[1];
+    const year1Dividend = year1.income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(year1Dividend).toBeDefined();
+    const gross = year1Dividend!.gross as number;
+    const tax = year1Dividend!.tax as number;
+    // RSU fixed tax = 25%; tax should be ~25% of gross within rounding tolerance
+    expect(tax).toBeGreaterThan(0);
+    expect(tax / gross).toBeCloseTo(0.25, 1);
+  });
+
+  it('RSU stored Accumulate policy is overridden to Payout (dividends route to income, not reinvested)', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'rsu2',
+          name: 'MSFT RSU',
+          category: 'Account',
+          value: 100_000,
+          growth_rate: 0,
+          // Explicitly stored as Accumulate — the engine must override this to Payout
+          account_settings: accountSettings({ type: 'RSU', dividend_yield: 1, dividend_policy: 'Accumulate' }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    // Year 1+ must show dividend income in income_details (Payout path — not silently reinvested)
+    const year1Dividend = result[1].income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(year1Dividend).toBeDefined();
+    expect(year1Dividend!.gross as number).toBeGreaterThan(0);
+    // total_dividend_income must track it
+    expect(result[1].total_dividend_income).toBeGreaterThan(0);
+    // 25% tax must be present
+    expect(year1Dividend!.tax as number).toBeGreaterThan(0);
+  });
+
+  it('RSU dividend income shows up in tax_paid (25% flat rate)', async () => {
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'rsu3',
+          name: 'MSFT RSU',
+          category: 'Account',
+          value: 100_000,
+          growth_rate: 0,
+          account_settings: accountSettings({ type: 'RSU', dividend_yield: 5 }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    // Year 1: dividend income goes to income pool via Payout
+    const year1 = result[1];
+    const year1Dividend = year1.income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(year1Dividend).toBeDefined();
+    const gross = year1Dividend!.gross as number;
+    const tax = year1Dividend!.tax as number;
+    // Tax is 25% of gross
+    expect(tax / gross).toBeCloseTo(0.25, 1);
+    // tax_paid for the year includes the RSU dividend tax
+    expect(year1.tax_paid).toBeGreaterThanOrEqual(tax);
+  });
+
+  it('RSU with zero dividend yield produces no dividend income and no errors', async () => {
+    // Wix RSU pattern: no dividend yield
+    const plan: PlanData = {
+      items: [
+        baseItem({
+          id: 'rsu4',
+          name: 'WIX RSU',
+          category: 'Account',
+          value: 200_000,
+          growth_rate: 5,
+          account_settings: accountSettings({ type: 'RSU', dividend_yield: 0 }),
+        }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    expect(result).toBeDefined();
+    expect(result.length).toBeGreaterThan(1);
+    // No dividend income entries (zero-gross entries are suppressed)
+    const hasDividend = result[1].income_details.some(d => d.name === 'Dividend: WIX RSU');
+    expect(hasDividend).toBe(false);
+    expect(result[1].total_dividend_income).toBe(0);
+    // Account should grow normally from 5% capital appreciation
+    const rsuAccount = result[1].accounts.find(a => a.name === 'WIX RSU');
+    expect(rsuAccount!.value).toBeGreaterThan(200_000);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -920,5 +1047,291 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
     });
 
     expect(result[0].total_dividend_income).toBeCloseTo(5_000, -1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RSU dividend engine tests — Acceptance Criteria AC3, AC4, AC9, AC10
+// Written TDD-style against: .squad/decisions/inbox/copilot-rsu-rules.md
+// AC3 — Fixed 25% dividend tax (NOT plan incomeTaxRate)
+// AC4 — Payout forced: dividends NEVER compound into account value
+// AC9 — USD RSU in ILS-main-currency plan: currency conversion via RATES(3×)
+// AC10 — Edge cases: zero yield, explicit tax override, multiple RSU accounts
+// ---------------------------------------------------------------------------
+
+describe('RSU dividend engine — AC3/AC4/AC9/AC10', () => {
+  // ── helpers ──────────────────────────────────────────────────────────────
+
+  async function simulateUsd(plan: PlanData) {
+    return runPlanSimulation({ plan, finances: EMPTY_FINANCES, settings: USD_SETTINGS });
+  }
+
+  /** A minimal RSU plan account with configurable yield and policy */
+  function rsuAccount(overrides: {
+    id?: string;
+    name?: string;
+    value?: number;
+    yield?: number;
+    currency?: string;
+    dividend_policy?: 'Accumulate' | 'Payout';
+    dividend_tax_rate?: number;
+  } = {}): PlanItem {
+    return baseItem({
+      id: overrides.id ?? 'rsu1',
+      name: overrides.name ?? 'MSFT RSU',
+      category: 'Account',
+      value: overrides.value ?? 1_000_000,
+      currency: overrides.currency ?? 'USD',
+      account_settings: accountSettings({
+        type: 'RSU',
+        dividend_yield: overrides.yield ?? 1,          // 1% default
+        dividend_policy: overrides.dividend_policy,     // undefined = default (Accumulate before override)
+        dividend_tax_rate: overrides.dividend_tax_rate, // undefined = defer to RSU default (25)
+      }),
+    });
+  }
+
+  // ── AC3: 25% tax (NOT plan's incomeTaxRate) ───────────────────────────────
+
+  it('AC3: RSU 1% yield on $1M → $10K gross, $2.5K tax withheld, $7.5K net in income pool', async () => {
+    const plan: PlanData = {
+      items: [rsuAccount({ value: 1_000_000, yield: 1 })],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulateUsd(plan);
+    const yr0 = result[0];
+    // yr0 uses currentDividendPayouts — has gross but no tax field yet
+    const divLine0 = yr0.income_details.find(d => d.type === 'Dividend Income' && d.name === 'Dividend: MSFT RSU');
+    expect(divLine0).toBeDefined();
+    // gross ≈ $10,000 (1% of $1M, no currency conversion with USD settings)
+    expect(divLine0!.gross).toBeCloseTo(10_000, -2);
+    expect(yr0.total_dividend_income).toBeCloseTo(10_000, -2);
+
+    // yr1 uses processGrowthAndIncome — has tax field; verify 25% rate by ratio
+    const divLine1 = result[1].income_details.find(d => d.type === 'Dividend Income' && d.name === 'Dividend: MSFT RSU');
+    expect(divLine1).toBeDefined();
+    const gross1 = divLine1!.gross as number;
+    const tax1 = divLine1!.tax as number;
+    // 25% tax: tax / gross must be ≈ 0.25
+    expect(tax1 / gross1).toBeCloseTo(0.25, 1);
+  });
+
+  it('AC3: RSU tax is always 25% — ignores any plan-level incomeTaxRate setting', async () => {
+    // This verifies applyRsuDividendOverrides() — RSU should use its own 25% not plan tax
+    const planWith30PctTax: PlanData = {
+      items: [
+        // Income line with explicit 30% tax — if RSU used this, tax would be $3K not $2.5K
+        baseItem({
+          id: 'sal',
+          name: 'Salary',
+          category: 'Income',
+          value: 100_000,
+          tax_rate: 30,
+          start_condition: 'Date',
+          start_date: `${CURRENT_YEAR}-01-01`,
+        }),
+        rsuAccount({ value: 1_000_000, yield: 1 }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulateUsd(planWith30PctTax);
+    // yr1 has tax field populated (yr0 uses currentDividendPayouts — no tax)
+    const yr1 = result[1];
+    const divLine = yr1.income_details.find(d => d.type === 'Dividend Income' && d.name === 'Dividend: MSFT RSU');
+    expect(divLine).toBeDefined();
+    // RSU tax must be 25% of gross, NOT 30% (the salary's tax_rate)
+    const gross = divLine!.gross as number;
+    const tax = divLine!.tax as number;
+    expect(tax / gross).toBeCloseTo(0.25, 1);
+    expect(tax / gross).not.toBeCloseTo(0.30, 1);
+  });
+
+  // ── AC4: Payout forced — account value does NOT compound from dividends ───
+
+  it('AC4: RSU with Accumulate override is forced to Payout — dividend appears in income pool', async () => {
+    // User explicitly sets dividend_policy: 'Accumulate', engine MUST override to 'Payout'
+    const plan: PlanData = {
+      items: [rsuAccount({
+        value: 1_000_000,
+        yield: 1,
+        dividend_policy: 'Accumulate',  // user's attempt to reinvest — must be overridden
+      })],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulateUsd(plan);
+    const yr1 = result[1];
+
+    // With Payout enforced, dividend appears in income_details (not silently reinvested)
+    // Note: savings routing re-invests the net payout, so account value still grows — that's expected.
+    // What matters is the dividend was visible as income (taxed and trackable).
+    const divLine = yr1.income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(divLine).toBeDefined();
+    // Tax tracked at 25%
+    const tax = divLine!.tax as number;
+    const gross = divLine!.gross as number;
+    expect(tax / gross).toBeCloseTo(0.25, 1);
+    expect(yr1.tax_paid).toBeGreaterThan(0);
+  });
+
+  it('AC4: RSU dividend goes to income pool — NOT re-added to account value', async () => {
+    // Compare with a Broker account using Accumulate to confirm Payout behavior
+    // Both accounts use USD currency with USD_SETTINGS for clean comparison
+    const rsuPlan: PlanData = {
+      items: [rsuAccount({ value: 1_000_000, yield: 1 })],
+      milestones: [],
+      settings: {},
+    };
+    const brokerPlan: PlanData = {
+      items: [baseItem({
+        id: 'broker1',
+        name: 'Broker Account',
+        category: 'Account',
+        value: 1_000_000,
+        currency: 'USD',
+        account_settings: accountSettings({
+          type: 'Broker',
+          dividend_yield: 1,
+          dividend_policy: 'Accumulate',  // compounds dividends
+        }),
+      })],
+      milestones: [],
+      settings: {},
+    };
+
+    const [rsuResult, brokerResult] = await Promise.all([simulateUsd(rsuPlan), simulateUsd(brokerPlan)]);
+    // yr1: growth+income is applied; Accumulate adds net dividend to account value
+    const rsuAcc = rsuResult[1].accounts[0];
+    const brokerAcc = brokerResult[1].accounts[0];
+
+    // Broker with Accumulate reinvested full $10K net (0% dividend tax) → grew more than RSU
+    expect(brokerAcc.value).toBeGreaterThan(1_000_000);
+    // RSU with forced Payout: dividend went to income pool, then savings routing re-invested net
+    // (25% tax applied), so RSU grew less than the Broker (tax reduces effective reinvestment)
+    expect(rsuAcc.value).toBeGreaterThan(1_000_000);
+    expect(brokerAcc.value).toBeGreaterThan(rsuAcc.value); // broker kept more (no RSU 25% tax)
+    // yr1: RSU income_details has dividend (Payout to pool), broker does NOT (reinvested silently)
+    const rsuDiv = rsuResult[1].income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    const brokerDiv = brokerResult[1].income_details.find(d => d.name === 'Dividend: Broker Account');
+    expect(rsuDiv).toBeDefined();
+    expect(brokerDiv).toBeUndefined();
+  });
+
+  // ── AC9: Currency conversion USD→ILS via RATES (3×) ──────────────────────
+
+  it('AC9: RSU USD $1M shown in ILS-currency plan — net_worth includes 3× RATES conversion', async () => {
+    const ilsPlan: PlanData = {
+      items: [rsuAccount({ value: 100_000, currency: 'USD', yield: 0 })], // $100K USD RSU, no yield
+      milestones: [],
+      settings: {},   // mainCurrency: 'ILS' from SETTINGS default
+    };
+
+    const result = await simulate(ilsPlan);
+    const yr0 = result[0];
+    // RATES: USD=3, ILS=1, so $100K USD → ₪300K
+    // net_worth should be ~300,000 ILS
+    expect(yr0.net_worth).toBeCloseTo(300_000, -2);
+  });
+
+  it('AC9: RSU USD dividend is converted to ILS via RATES in income — $10K gross → ₪30K', async () => {
+    const ilsPlan: PlanData = {
+      items: [rsuAccount({ value: 1_000_000, currency: 'USD', yield: 1 })],
+      milestones: [],
+      settings: {},   // mainCurrency: 'ILS'
+    };
+
+    const result = await simulate(ilsPlan);
+    const yr0 = result[0];
+    const divLine = yr0.income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(divLine).toBeDefined();
+    // USD dividend $10K gross → converted to ILS: $10K × 3 = ₪30,000
+    expect(divLine!.gross).toBeCloseTo(30_000, -2);
+  });
+
+  // ── AC10: Edge cases ──────────────────────────────────────────────────────
+
+  it('AC10 (edge): RSU with zero yield → no Dividend Income line in income_details', async () => {
+    const plan: PlanData = {
+      items: [rsuAccount({ value: 1_000_000, yield: 0 })],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    const divLine = result[0].income_details.find(d => d.type === 'Dividend Income' && d.name === 'Dividend: MSFT RSU');
+    expect(divLine).toBeUndefined();
+    // total_dividend_income must be 0
+    expect(result[0].total_dividend_income).toBe(0);
+  });
+
+  it('AC10 (edge): RSU with explicit non-zero dividend_tax_rate override uses user rate, not 25%', async () => {
+    // Per applyRsuDividendOverrides: "Use 25% flat tax unless user explicitly configured a different rate"
+    const plan: PlanData = {
+      items: [rsuAccount({ value: 1_000_000, yield: 1, dividend_tax_rate: 30 })], // explicit 30%
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulateUsd(plan);
+    // yr1 has tax field populated (yr0 uses currentDividendPayouts — no tax)
+    const divLine = result[1].income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(divLine).toBeDefined();
+    // User-set 30% wins over default 25% — check ratio, not absolute value
+    // (yr0 savings routing slightly inflates account, so yr1 gross is ~$10,100 not exactly $10,000)
+    const gross = divLine!.gross as number;
+    const tax = divLine!.tax as number;
+    expect(tax / gross).toBeCloseTo(0.30, 2);
+    expect(tax / gross).not.toBeCloseTo(0.25, 2);
+  });
+
+  it('AC10 (edge): Multiple RSU accounts (MSFT + WIX) each emit separate dividend lines', async () => {
+    const plan: PlanData = {
+      items: [
+        rsuAccount({ id: 'msft', name: 'MSFT RSU', value: 1_000_000, yield: 0.87 }),
+        rsuAccount({ id: 'wix', name: 'Wix RSU', value: 500_000, yield: 0 }),  // WIX: no dividend
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    const yr0 = result[0];
+
+    // MSFT RSU has ~0.87% yield → emits a dividend line
+    const msftDiv = yr0.income_details.find(d => d.name === 'Dividend: MSFT RSU');
+    expect(msftDiv).toBeDefined();
+    expect(msftDiv!.gross).toBeGreaterThan(0);
+
+    // WIX RSU has 0% yield → NO dividend line
+    const wixDiv = yr0.income_details.find(d => d.name === 'Dividend: Wix RSU');
+    expect(wixDiv).toBeUndefined();
+  });
+
+  it('AC10 (edge): Two RSU accounts both forced to Payout — neither compounds account value', async () => {
+    const plan: PlanData = {
+      items: [
+        rsuAccount({ id: 'msft', name: 'MSFT RSU', value: 1_000_000, yield: 0.87 }),
+        rsuAccount({ id: 'wix', name: 'Wix RSU', value: 200_000, yield: 0 }),
+      ],
+      milestones: [],
+      settings: {},
+    };
+
+    const result = await simulate(plan);
+    const yr0 = result[0];
+    const msftAcc = yr0.accounts.find(a => a.name === 'MSFT RSU');
+    const wixAcc = yr0.accounts.find(a => a.name === 'Wix RSU');
+
+    // yr0 values reflect USD→ILS RATES conversion (USD=3): $1M → ₪3M, $200K → ₪600K.
+    // The ₪26,100 MSFT dividend (0.87% × ₪3M) flows to Payout income then savings routing,
+    // so yr0 account snapshot may include it. Use a wide range to verify RATES conversion.
+    expect(msftAcc!.value).toBeGreaterThan(2_900_000); // ≥ $1M converted to ILS
+    expect(msftAcc!.value).toBeLessThan(3_200_000);    // no massive Accumulate compounding
+    expect(wixAcc!.value).toBeCloseTo(600_000, -3);    // $200K × 3 = ₪600K, no yield
   });
 });

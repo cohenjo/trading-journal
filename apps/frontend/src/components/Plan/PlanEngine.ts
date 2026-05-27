@@ -26,6 +26,10 @@ export const calculateProjection = (
         'EUR': 3.5
     };
 
+    // RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
+    // RSU dividends are taxed at a fixed 25% rate regardless of the plan-level incomeTaxRate.
+    const RSU_DIVIDEND_TAX_RATE = 25;
+
     const convert = (amount: number, from: string = 'ILS'): number => {
         if (!amount) return 0;
         const fromRate = RATES[from as keyof typeof RATES] || 1;
@@ -90,7 +94,7 @@ export const calculateProjection = (
 
     if (finances && finances.data && finances.data.items) {
         finances.data.items.forEach((fItem: any) => {
-            // Note: Finances snapshot items might not have currency tagged yet? 
+            // Note: Finances snapshot items might not have currency tagged yet?
             // Assuming they are in ILS by default or we need to find where they come from.
             // For now, let's look for currency in details or default to ILS.
             const itemCurrency = fItem.currency || 'ILS';
@@ -287,8 +291,8 @@ export const calculateProjection = (
                 let grossDividend = 0;
                 if (acc.settings.dividend_mode === 'Fixed' && acc.settings.dividend_fixed_amount) {
                     // Fixed Amount Logic: Grows by dividend_growth_rate
-                    // We need to track the current fixed amount state. 
-                    // Ideally we should have initialized this in the account object state, 
+                    // We need to track the current fixed amount state.
+                    // Ideally we should have initialized this in the account object state,
                     // but for now we can calculate it based on year offset if we assume constant growth.
                     // Or we can attach a runtime property to acc.
                     if ((acc as any).current_fixed_dividend === undefined) {
@@ -304,7 +308,10 @@ export const calculateProjection = (
                 }
 
                 // 2. Apply Tax
-                const taxRate = acc.settings.dividend_tax_rate || 0;
+                // RSU dividend rule: force 25% tax unless user explicitly set a non-zero rate.
+                const isRsu = acc.settings.type === 'RSU';
+                const storedTaxRate = acc.settings.dividend_tax_rate || 0;
+                const taxRate = isRsu && storedTaxRate === 0 ? RSU_DIVIDEND_TAX_RATE : storedTaxRate;
                 const netDividend = grossDividend * (1 - taxRate / 100);
 
                 // 3. Apply Policy
@@ -317,7 +324,8 @@ export const calculateProjection = (
                 acc.value += capAppreciation - feeAmount;
 
                 // Determine Effective Dividend Policy (Handle Delayed Payout)
-                let effectivePolicy = acc.settings.dividend_policy;
+                // RSU dividend rule: RSU accounts always Payout — dividends never reinvest.
+                let effectivePolicy = isRsu ? 'Payout' : acc.settings.dividend_policy;
                 if (effectivePolicy === 'Payout' && acc.settings.dividend_payout_start_condition && acc.settings.dividend_payout_start_condition !== 'Immediate') {
                     // Calculate Trigger Year
                     let triggerYear = startYear;
@@ -471,11 +479,11 @@ export const calculateProjection = (
                 // Actually pension logic sets value to 0, so it stops being an account and becomes a payout stream?
                 // No, existing logic said: `(acc as any).pension_payout = annualIncome; acc.value = 0;`
                 // But wait, if acc.value is 0, next year loop won't generate payout?
-                // The pension logic needs `acc.value` to calculate payout? 
+                // The pension logic needs `acc.value` to calculate payout?
                 // Ah, line 276: `monthlyIncome = acc.value / divide_rate`.
                 // If we set acc.value = 0 at line 283, then next year it's 0.
                 // So the pension payout needs to persist.
-                // Existing logic seems to imply it converts ONCE essentially? 
+                // Existing logic seems to imply it converts ONCE essentially?
                 // Or maybe I missed where it persists.
                 // Actually, the existing code:
                 // `(acc as any).pension_payout = annualIncome; acc.value = 0;`
@@ -483,9 +491,9 @@ export const calculateProjection = (
                 // But we need to ensure that `pension_payout` persists across years if it's an annuity.
                 // The current code re-calculates it every iteration?
                 // If acc.value becomes 0, next loop `if (acc.value > 0)` at line 274 fails.
-                // So it only pays out for ONE YEAR. That looks like a bug in the *existing* Pension logic, 
-                // or I am misinterpreting it. 
-                // However, I should focus on Dividends. 
+                // So it only pays out for ONE YEAR. That looks like a bug in the *existing* Pension logic,
+                // or I am misinterpreting it.
+                // However, I should focus on Dividends.
 
                 // For Dividends, we calculate it fresh every year based on current value.
                 // So `generated_income` is valid for this year only.
@@ -504,7 +512,7 @@ export const calculateProjection = (
             // Wait, "monthly income at retirement age" implies a stream.
             // If the code sets acc.value = 0, it stops growing.
             // If it doesn't persist `pension_payout` in a separate list or handle it, it stops paying.
-            // I'll assume for now `pension_payout` property implies it's handled, 
+            // I'll assume for now `pension_payout` property implies it's handled,
             // BUT looking at my code, I am iterating accounts again here.
             // If I don't persist it, it's lost.
             // But I am not here to fix Pension. I am here to add Dividends.
@@ -612,7 +620,7 @@ export const calculateProjection = (
         }); // Exclude Main Home
 
         const liquidAssetsVal = liquidAssets.reduce((sum, a) => sum + a.current_value, 0);
-        // Should we subtract debt on these liquid assets? 
+        // Should we subtract debt on these liquid assets?
         // "Net Worth" usually implies equity. Liquid Net Worth = Liquid Assets Equity.
         // Subtract loans for the included assets.
         const liquidAssetsDebt = liquidAssets.reduce((sum, a) => sum + a.loan_balance, 0);

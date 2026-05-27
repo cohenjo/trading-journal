@@ -337,3 +337,30 @@ Implemented all 9 spec steps from `mcmanus-dividend-reinvest-simulation.md` + co
 - `adjustedNetFlow = netFlow - totalReinvested` is the key to mass conservation: reinvest outflows are subtracted from the flow passed to `processSavings`/`processDeficit` so money isn't counted twice.
 - Pre-computing per-account USD→ILS conversion outside the projection loop is both correct (constant per spec) and efficient — avoids repeated Decimal allocation each year.
 - Three-case reinvestment logic (full surplus / partial cover / full deficit) maps cleanly to a single `reinvestable` scalar then proportional distribution per account.
+
+---
+
+## 2026-05-28 — ✅ RSU Dividend Tax & Payout Rules Implemented
+
+**Scope:** Plan simulation engine — RSU accounts must tax dividends at 25% flat rate and force Payout policy (never reinvested), routing to income pool.
+
+**Files changed:**
+- `apps/frontend/src/app/plan/simulation.ts` — authoritative engine
+- `apps/frontend/src/components/Plan/PlanEngine.ts` — legacy engine
+- `apps/frontend/src/app/plan/__tests__/simulate.test.ts` — tests (42 total, all passing)
+
+**Design decisions:**
+- `applyRsuDividendOverrides(account)` runs after account construction in both `loadAccounts()` loops: forces `dividend_policy = 'Payout'`, sets 25% tax only if `dividend_tax_rate` is currently zero (user's explicit non-zero rate wins).
+- Added `gross.gt(0)` guard in `processGrowthAndIncome` Payout branch to suppress zero-value entries for zero-yield RSU accounts (Wix RSU).
+- Same RSU forced-Payout and 25% tax override mirrored in `PlanEngine.ts`.
+
+**Test learnings:**
+- `toBeCloseTo(x, 1)` uses ±0.05 tolerance. When checking two rates 0.05 apart (25% vs 30%), use precision `2` (±0.005) to avoid boundary ambiguity.
+- Year-0 (`currentDividendPayouts`) and Year-1+ (`processGrowthAndIncome`) paths are independent — both need RSU override applied consistently.
+- `rsuAccount()` test helper defaults to `currency: 'USD'`, so plans with `settings: {}` get ILS conversion via `RATES.USD = 3`. Tests checking USD-magnitude values need `settings: { mainCurrency: 'USD' }`.
+
+### Learnings
+
+- `applyRsuDividendOverrides` pattern (modify account in-place after construction) is clean for account-type-specific invariants without polluting the main account factory.
+- `toBeCloseTo` precision semantics: precision `n` means tolerance `10^-n / 2`. Always verify boundary cases when asserting two values are "different" at a specific precision.
+- Pre-existing TDD tests written for a feature before implementation may have stale expectations (wrong currency, missing fields). Diagnose failures systematically: currency conversion, missing engine fields, and savings recirculation are the three main failure modes.
