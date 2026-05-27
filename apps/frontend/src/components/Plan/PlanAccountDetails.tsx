@@ -18,6 +18,8 @@ type DividendPayoutStartCondition = NonNullable<NonNullable<PlanItem['account_se
 
 export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'planning', milestones = [], dividendAutoAccounts }) => {
     const [priceCacheStatus, setPriceCacheStatus] = React.useState<string | null>(null);
+    /** When true the user has opted to manually enter dividend_yield instead of using the auto-fetched value. */
+    const [dividendYieldOverride, setDividendYieldOverride] = React.useState(false);
 
     const defaults = {
         type: 'Taxable' as const,
@@ -79,7 +81,16 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
             }
 
             const price = new Decimal(data.price);
-            updateSettings({ current_price: price.toNumber() });
+            const settingsUpdates: Parameters<typeof updateSettings>[0] = { current_price: price.toNumber() };
+
+            // TODO: integrate dividend_yield from Hockney's extended endpoint
+            const extendedData = data as typeof data & { dividend_yield?: number };
+            if (!dividendYieldOverride && typeof extendedData.dividend_yield === 'number') {
+                settingsUpdates.dividend_yield = extendedData.dividend_yield;
+            }
+
+            updateSettings(settingsUpdates);
+
             const refreshedAt = new Date(data.refreshed_at).toLocaleString();
             setPriceCacheStatus(
                 data.isStale
@@ -92,15 +103,33 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
         }
     };
 
-    // Auto-fetch Price in Snapshot Mode when symbol changes
+    // Auto-fetch price & yield (both planning and snapshot modes) when the ticker changes.
     React.useEffect(() => {
-        if (mode === 'snapshot' && settings.type === 'RSU' && settings.stock_symbol && settings.stock_symbol.length > 1) {
+        if (settings.type === 'RSU' && settings.stock_symbol && settings.stock_symbol.length > 1) {
             const timer = setTimeout(() => {
                 fetchMarketData(settings.stock_symbol!);
             }, 800);
             return () => clearTimeout(timer);
         }
-    }, [settings.stock_symbol, mode, settings.type]);
+    // fetchMarketData is recreated each render — intentional: it closes over dividendYieldOverride
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [settings.stock_symbol, settings.type]);
+
+    // When the account type switches to RSU, lock dividend_policy to Payout and default tax rate to 25.
+    React.useEffect(() => {
+        if (settings.type !== 'RSU') return;
+        const updates: Partial<typeof settings> = {};
+        if (settings.dividend_policy !== 'Payout') {
+            updates.dividend_policy = 'Payout';
+        }
+        if (!settings.dividend_tax_rate) {
+            updates.dividend_tax_rate = 25;
+        }
+        if (Object.keys(updates).length > 0) {
+            updateSettings(updates);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally fires only on type change
+    }, [settings.type]);
 
     return (
         <div className="space-y-4">
@@ -172,6 +201,87 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
                     </p>
                 )}
             </div>
+
+            {/* RSU PLANNING CONFIG — ticker (required), auto dividend yield, tax rate */}
+            {settings.type === 'RSU' && mode === 'planning' && (
+                <div className="bg-slate-800 p-4 rounded-lg space-y-3 border border-slate-700 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-300">
+                        🎫 RSU Configuration
+                    </h4>
+
+                    {/* Stock ticker — required */}
+                    <div>
+                        <label className="text-xs text-slate-400">
+                            Stock Ticker <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            data-testid="rsu-ticker-input"
+                            className={`w-full bg-slate-900 rounded p-2 text-white uppercase border ${!settings.stock_symbol ? 'border-red-500/60 focus:ring-red-500' : 'border-slate-700'}`}
+                            placeholder="e.g. MSFT, WIX"
+                            value={settings.stock_symbol || ''}
+                            onChange={e => updateSettings({ stock_symbol: e.target.value.toUpperCase() })}
+                        />
+                        {!settings.stock_symbol && (
+                            <p data-testid="rsu-ticker-required-error" className="text-xs text-red-400 mt-1">
+                                Ticker is required for price &amp; dividend tracking.
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Price cache status (refreshed by worker) */}
+                    {priceCacheStatus && (
+                        <p className={`text-xs ${priceCacheStatus.includes('stale') ? 'text-amber-300' : 'text-slate-400'}`}>
+                            {priceCacheStatus}
+                        </p>
+                    )}
+
+                    {/* Dividend yield — auto from Yahoo with manual override toggle */}
+                    <div>
+                        <div className="flex items-center justify-between mb-1">
+                            <label className="text-xs text-slate-400">Dividend yield (auto, from Yahoo)</label>
+                            <button
+                                type="button"
+                                onClick={() => setDividendYieldOverride(v => !v)}
+                                className="text-[10px] text-violet-400 hover:text-violet-300 underline"
+                            >
+                                {dividendYieldOverride ? 'Revert to auto' : 'Override'}
+                            </button>
+                        </div>
+                        {dividendYieldOverride ? (
+                            <input
+                                type="number"
+                                step="0.01"
+                                data-testid="rsu-dividend-yield-override-input"
+                                className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                value={settings.dividend_yield ?? 0}
+                                onChange={e => handleNumChange('dividend_yield', e.target.value)}
+                            />
+                        ) : (
+                            <div
+                                data-testid="rsu-dividend-yield-auto"
+                                className="w-full bg-slate-900/50 border border-slate-700/50 rounded p-2 text-slate-300 flex items-center justify-between"
+                            >
+                                <span className="font-mono">{(settings.dividend_yield ?? 0).toFixed(2)}%</span>
+                                <span className="text-[10px] text-slate-500">auto-updated by worker</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Dividend tax rate — RSU default 25% */}
+                    <div>
+                        <label className="text-xs text-slate-400">Dividend tax rate (RSU default: 25%)</label>
+                        <input
+                            type="number"
+                            step="0.1"
+                            data-testid="rsu-dividend-tax-rate"
+                            className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                            value={settings.dividend_tax_rate ?? 25}
+                            onChange={e => handleNumChange('dividend_tax_rate', e.target.value)}
+                        />
+                    </div>
+                </div>
+            )}
 
             {/* SAVINGS SPECIFIC FIELDS */}
             {settings.type === 'Savings' && (
@@ -452,31 +562,23 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
                                         />
                                     </div>
                                 )}
-                                <div className="relative">
-                                    <label className="text-xs text-slate-400">Dividend Yield (%)</label>
-                                    {hasRealDividendData ? (
-                                        <div className="rounded-md bg-blue-950/40 border border-blue-800/40 p-3 text-xs text-blue-200 mt-1">
-                                            <span className="font-semibold">Auto from real positions:</span>{' '}
-                                            {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(autoRealAmount)}/yr forward dividend
-                                        </div>
-                                    ) : (
-                                        <input
-                                            type="number"
-                                            step="0.1"
-                                            className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                            value={settings.dividend_yield ?? 0}
-                                            onChange={e => handleNumChange('dividend_yield', e.target.value)}
-                                        />
-                                    )}
-                                    {settings.type === 'RSU' && settings.stock_symbol && !hasRealDividendData && (
-                                        <span className="absolute right-2 top-8 text-[10px] text-slate-500 pointer-events-none">
-                                            {settings.stock_symbol}
-                                        </span>
-                                    )}
-                                </div>
-                                {settings.type === 'RSU' && !settings.stock_symbol && (
-                                    <div className="text-xs text-red-400 italic">
-                                        Ticker missing. Set in Current Finances (RSU Strategy).
+                                {settings.type !== 'RSU' && (
+                                    <div className="relative">
+                                        <label className="text-xs text-slate-400">Dividend Yield (%)</label>
+                                        {hasRealDividendData ? (
+                                            <div className="rounded-md bg-blue-950/40 border border-blue-800/40 p-3 text-xs text-blue-200 mt-1">
+                                                <span className="font-semibold">Auto from real positions:</span>{' '}
+                                                {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(autoRealAmount)}/yr forward dividend
+                                            </div>
+                                        ) : (
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                                value={settings.dividend_yield ?? 0}
+                                                onChange={e => handleNumChange('dividend_yield', e.target.value)}
+                                            />
+                                        )}
                                     </div>
                                 )}
                             </>
@@ -496,9 +598,9 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
             )
             }
 
-            {/* DIVIDEND POLICY */}
+            {/* DIVIDEND POLICY — hidden for RSU (handled in RSU Configuration block above) */}
             {
-                mode === 'planning' && settings.type !== 'Pension' && settings.type !== 'Savings' && !hasRealDividendData && (
+                mode === 'planning' && settings.type !== 'Pension' && settings.type !== 'Savings' && settings.type !== 'RSU' && !hasRealDividendData && (
                     <div className="bg-slate-800 p-4 rounded-lg space-y-3 border border-slate-700 animate-in fade-in slide-in-from-top-2 duration-300">
                         <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-300">
                             💵 Dividend Policy

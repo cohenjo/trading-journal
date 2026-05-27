@@ -204,3 +204,30 @@ Applied 4 targeted fixes to bring PR #393 from "builds + tests pass" to "ready t
 
 **Always revert tsconfig.json after `next build`.** Next 16 silently rewrites `jsx: "preserve"` → `"react-jsx"` and injects `.next/dev/types` into the include array. This must be caught and reverted BEFORE commit. Add `git checkout -- apps/frontend/tsconfig.json` to the post-build verification sequence for every Next.js upgrade sprint. If left in, it will cause unwanted diffs and break Keaton's merge gate criterion #8 without any error message.
 📌 2026-05-19: PR #464 frontend shipped (Refresh button rewire, state machine, 7 tests, 4 nits addressed) merged a9e2444
+
+## 2026-05-27 — RSU Account UI Wiring (PlanAccountDetails.tsx)
+
+**Branch:** `squad/rsu-ui-wiring` | **Tests:** 10 new pass (714+10 total)
+
+**Goal:** Wire RSU account configuration surface in `PlanAccountDetails.tsx` for "Wix RSU" and "MSFT RSU" accounts.
+
+**Changes to `apps/frontend/src/components/Plan/PlanAccountDetails.tsx`:**
+- Added `dividendYieldOverride` state (local, default false — auto mode).
+- `fetchMarketData`: defensively reads optional `dividend_yield` from extended API response with TODO for Hockney's endpoint; conditionally calls `updateSettings({ dividend_yield })` when not in override mode.
+- Price-fetch `useEffect`: now fires in **both** planning and snapshot modes (removed `mode === 'snapshot'` guard).
+- Auto-defaults `useEffect`: fires on `settings.type` change; sets `dividend_policy = 'Payout'` and `dividend_tax_rate = 25` (if unset) when type is RSU. Uses eslint-disable for intentional deps.
+- New **RSU Configuration** block (planning mode only): ticker input required (red border + error when empty), price cache status, dividend yield auto-display with Override/Revert toggle, tax rate input defaulting to 25.
+- Investment Profile section: `settings.type !== 'RSU'` guard on dividend yield block — RSU yield managed by RSU Config block only.
+- Dividend Policy section: `settings.type !== 'RSU'` added to section-level condition — entire section hidden for RSU.
+
+**Tests created:** `apps/frontend/src/components/Plan/__tests__/PlanAccountDetails.test.tsx`
+- 10 tests across: ticker validation, dividend yield auto display, policy locked for RSU, tax rate default 25.
+
+**Patterns confirmed:**
+- Ticker field name is `stock_symbol` (not `ticker`).
+- `getPrice` returns `{ price, as_of, refreshed_at, isStale }` — no `dividend_yield` yet. Defensive cast pattern: `const extendedData = data as typeof data & { dividend_yield?: number }`.
+- Hockney's extended endpoint is a future TODO; code is ready to handle it.
+- Dividend Policy section hidden (not disabled) — single source of truth is the RSU Config block.
+- `dividendYieldOverride` does NOT reset on ticker change — user opted in explicitly.
+
+**Decisions filed:** `fenster-rsu-ui.md`
