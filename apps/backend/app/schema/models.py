@@ -192,3 +192,4 @@ class MatchedTrade(SQLModel, table=True):
 # Import dividend models for alembic registration
 # Import trading models for alembic registration
 # Import insurance models for alembic registration
+# CC pipeline models registered in alembic/env.py (from app.schema.expenses import ...)
