@@ -126,3 +126,41 @@
 
 📌 **Team update (2026-05-27)**: RSU automation batch completed. All 5 agents collaborated on price_cache extension (backend), engine tax/policy enforcement (frontend), and UI configuration. 46 acceptance tests pass. Branch: squad/rsu-ui-wiring. Decisions merged to .squad/decisions.md. Next: yield-units normalization follow-up pending from Hockney.
 📌 Team update (2026-05-29T122212Z): Credit-Card Expense Analysis Pipeline architecture proposal completed by Keaton. Work items CC-1..CC-14 pending Jony sign-off on Section 8 blockers. Your assignments coming imminently.
+
+## 2026-05-29: CC-9 — Anticipatory Test Plan + Scaffold (Credit-Card Expense Pipeline)
+
+**Task:** Write the full test scenario catalogue and pytest stub scaffold for the CC pipeline before any implementation exists (CC-2/CC-5/CC-6 not yet built). 91 stubs: 90 skip, 1 xfail. Zero failures.
+
+**Files produced:**
+- `.squad/decisions/inbox/redfoot-cc-test-plan.md` — ~75-scenario catalogue across 7 sections
+- `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` — 91 stubs (90 skip + 1 xfail)
+
+**Test counts by section:**
+- Section 1 (Parsers): 36 stubs — 9 Cal + 8 PayBox + 9 Max + 10 Isracard
+- Section 2 (Categorization): 10 stubs
+- Section 3 (Dedup/Ingestion): 7 stubs (1 xfail for SHA-256 collision trade-off)
+- Section 4 (API): 18 stubs
+- Section 5 (Worker): 7 stubs
+- Section 6 (Integration): 5 stubs
+- Section 7 (Regression): 8 stubs
+
+## Learnings
+
+### Hebrew RTL Test Fixture Strategy
+- Do NOT synthesize Hebrew PDFs — use real fixture files from `reports/credit-card/`. The 30 existing files cover all 4 formats and most edge cases (FX rows, installments, multi-page, date quirks).
+- For edge cases not in real files (empty statements, corrupt PDFs), generate minimal synthetic fixtures using `reportlab` or `fpdf2` — never pdfplumber itself (circular dependency).
+- For bidi correctness assertions: check that `merchant_raw` contains expected Hebrew Unicode codepoints in source (extracted) order. Do NOT assert RTL/LTR direction markers — pdfplumber strips them.
+- Max format's `statement__*.pdf` filenames are English-looking but content is fully Hebrew RTL — always verify format by text fingerprint, not filename.
+
+### File-Watcher Test Patterns
+- Inject inbox scan as a callable accepting a directory path parameter — never use real filesystem watches in unit tests.
+- Use pytest's `tmp_path` fixture for isolated inbox directories per test.
+- Mock `shutil.move` in worker tests to assert correct destination path without touching real directories.
+- For concurrent-arrival tests (D-5): use threading + `tmp_path`, assert on DB row counts with appropriate locking.
+- Orphan detection pattern (D-7/W-4): at worker startup, SELECT all rows WHERE `status='processing'` AND `queued_at < now() - interval '5 minutes'`; re-queue them. Test by inserting a stale `processing` row before calling startup logic.
+
+### Regression-Catcher Patterns for Future Features
+- **Dual migration assertion (R-MIGR-1):** For every new DB feature, `test_regression__dual_migration_exists` should assert that BOTH `apps/backend/alembic/versions/` and `supabase/migrations/` contain a file referencing the new table/column names. Implementation agents must remove the skip and extend the assertion table when CC-1 lands.
+- **Amount unit regression (R-AMT-1/2):** Build an explicit parametrized table test: `[(₪-string, expected_Decimal)]`. Add a row per parser format per new amount field. This catches the agorot/ILS confusion that is common in Israeli broker integrations.
+- **Currency leak regression (R-FX-1/2):** After any new FX-capable format is added, insert a synthetic row with mismatched `amount_ils` vs `amount_original_currency` into the test DB and assert the summary API uses `amount_ils`. This prevents aggregation over the wrong column.
+- **General pattern:** regression tests should assert the bad old behavior FAILS, not just that the good behavior passes. Use `pytest.raises` or explicit `assert result != wrong_value` to document the specific regression being guarded against.
