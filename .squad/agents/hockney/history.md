@@ -275,3 +275,57 @@ base classes, fingerprint detector, dispatcher; all Rabin security conditions.
 - `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 3 + 5: 14 CC-5 stubs implemented)
 
 **Decisions:** None — all architecture pre-approved in `.squad/decisions.md` CC-5 entry and Rabin security review.
+
+## CC-11 Follow-up: Thread-safe timeout + Docker inbox mount (2025-Q3)
+
+### What was done
+
+**Fix #1 — SIGALRM → concurrent.futures (CC-5/CC-11 follow-up)**
+
+Kujan's CC-11 Docker worker rebuild exposed that `dispatch_pdf` used
+`signal.SIGALRM` for its 30 s parser timeout.  APScheduler runs jobs in a
+thread pool; `signal.alarm` is restricted to the main thread, so every PDF
+processed by the scheduled worker errored with "signal only works in main
+thread of the main interpreter".
+
+Replaced with `concurrent.futures.ThreadPoolExecutor(max_workers=1)` +
+`Future.result(timeout=timeout_seconds)`.  On timeout, `executor.shutdown(
+wait=False)` is called so the caller is not blocked waiting for a hung
+pdfplumber thread; the background thread is daemon-reaped on process exit.
+The existing `ParserTimeout` exception and 30 s cap are preserved — Rabin's
+CC-12 §timeout requirement is met.
+
+Added `test_dispatch_pdf_timeout_works_from_worker_thread` in
+`tests/credit_card_pipeline/test_cc2_parsers.py`.  Uses `threading.Thread` +
+a monkeypatched `threading.Event`-based hanging parser.  Asserts
+`ParserTimeout` is raised cleanly with no SIGALRM error.
+
+Commit: `12aeb4b` — `fix(expenses): replace SIGALRM with thread-safe timeout in dispatch_pdf (CC-11 follow-up)`
+
+**Fix #2 — Docker volume mount for inbox (CC-11 MEDIUM TODO #2)**
+
+Without a volume mount, the container saw an empty `reports/credit-card/`
+directory.  Added to `docker-compose.backend.yml`:
+```yaml
+volumes:
+  - ./reports/credit-card:/app/reports/credit-card
+```
+This single rw mount covers `inbox/`, `processed/`, and `errors/` (the worker
+auto-creates subdirs with `chmod 0700` on startup — confirmed in
+`expenses_inbox.py`).  Also documented `CREDIT_CARD_INBOX_DIR` and
+`CREDIT_CARD_INBOX_ENABLED` in `apps/backend/.env.example`.
+
+Commit: `462afc9` — `chore(docker): mount credit-card inbox into worker container (CC-11 follow-up)`
+
+### Test results
+- **63 passed, 48 skipped, 1 xfailed** in `tests/credit_card_pipeline/` — all green.
+- New thread-timeout test passes cleanly (< 3 s wall time).
+
+### Lessons learned
+- `ThreadPoolExecutor.__exit__` calls `shutdown(wait=True)` — if a future
+  times out and you use a `with` block, the context manager blocks on the
+  hung background thread.  Always call `shutdown(wait=False)` explicitly on
+  the timeout path and don't rely on the context manager.
+- Test fixtures that simulate hangs should use `threading.Event` rather than
+  `time.sleep(N)` so they can be released cleanly after the timeout path is
+  exercised; this avoids zombie threads in the test process.
