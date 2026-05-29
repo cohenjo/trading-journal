@@ -6,7 +6,7 @@ DevOps/Platform engineer. Owns Supabase infrastructure, Docker/Aspire setup, CI/
 
 ## Learnings
 
-### 2026-05-29: CC-11 Worker Rebuild Verification (Hockney CC-5 — Inbox Scanner)
+### 2026-05-29: CC-11 Worker Rebuild Verification — v1 (Pre-Fix)
 
 **✅ Rebuild successful — new job registered & running.**
 
@@ -26,6 +26,29 @@ DevOps/Platform engineer. Owns Supabase infrastructure, Docker/Aspire setup, CI/
 **Build observations:**
 - Deprecation warning: `tool.uv.dev-dependencies` → migrate to `dependency-groups.dev` in pyproject.toml
 - Stock refresh verification passed: 745/777 refreshed, 17 skipped, 15 failed (all expected delisted tickers)
+
+### 2026-05-29: CC-11 Worker Rebuild Verification — v2 (Post-Fix) ✅ READY FOR CC-14
+
+**Hockney's two fixes validated end-to-end.**
+
+- **Commit 12aeb4b** (SIGALRM → ThreadPoolExecutor timeout): ✅ **PDF parsing succeeded** — no more main-thread signal errors
+- **Commit 462afc9** (volume mount + env vars): ✅ **Mount live, subdirs created with 0700 perms**
+- Image SHA change: `d2e918be8d60` → `50e763bad0a1` ✅
+- Smoke test: `scanned=1 completed=1 deduped=0 errored=0` ✅
+- Database ingestion: 1 statement + 3 transactions created ✅
+
+**Friction encountered + resolved:**
+- Env vars (CREDIT_CARD_INBOX_DIR/ENABLED) not auto-wired in docker-compose
+- Fix: Added to `docker-compose.backend.yml` environment block + root `.env`
+- Lesson: ENV sourcing is automatic but vars must be explicitly declared in compose YAML
+
+**Key observations:**
+- Volume mount working RW; PDF successfully processed inbox→processed
+- Worker honors dedup (file_hash unique constraint) + handles errors cleanly
+- Household resolution auto-detected (3964 households, used first by id; TODO: add CREDIT_CARD_DEFAULT_HOUSEHOLD_ID env var)
+- No new blocking issues
+
+**Verdict:** 🟢 Worker ready for CC-14 backfill. All blockers resolved. Rebuild process stable.
 
 ---
 
