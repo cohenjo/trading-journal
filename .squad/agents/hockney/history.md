@@ -244,3 +244,34 @@ base classes, fingerprint detector, dispatcher; all Rabin security conditions.
 - `apps/backend/app/api/expenses.py` (new — 5 endpoints, ~350 lines)
 - `apps/backend/main.py` (add expenses import + router registration)
 - `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 4: replace 19 skips with 19 passing tests)
+
+---
+
+## 2026-05-29 — CC-5: Inbox Scanner Worker Job
+
+**Task:** Implement the scheduled inbox-scanner worker (CC-5): 60s APScheduler interval job that scans `reports/credit-card/inbox/`, ingests new PDFs end-to-end (parse → categorize → DB persist), and enforces all Rabin security conditions.
+
+**Learnings:**
+
+- **Two-phase DB transaction pattern for reliable ingestion:** Phase 1 commits the `ExpenseInbox` row with `status='processing'` immediately (survives Phase 2 failure). Phase 2 does `dispatch_pdf()` + builds statement/transactions + commits atomically. On Phase 2 failure: `db.rollback()`, then re-query the inbox row by `inbox_id` (same session has rolled back but the row survived Phase 1), increment `retry_count`, set `status='errored'`, commit separately. Always re-query after rollback — don't reuse in-memory ORM objects across a rollback boundary.
+
+- **Pre-commit stash interference:** The pre-commit hook framework (`pre-commit`) stashes unstaged changes before running hooks. When ruff finds and fixes issues in the staged files, the commit fails with the original staged content. The fix: `git add` again after pre-commit has auto-fixed the files, then re-commit. The re-commit passes immediately.
+
+- **`shutil.move` over `Path.rename` for cross-device safety:** `Path.rename` raises `OSError` when source and destination are on different filesystems (e.g., Docker volume mount vs. temp dir). `shutil.move` falls back to copy+delete transparently. Always use `shutil.move` for inbox → processed/errors moves.
+
+- **`threading.Lock(blocking=False)` for APScheduler tick guard:** `_scan_lock.acquire(blocking=False)` returns `False` immediately if the lock is held, without blocking. Combined with `try/finally: _scan_lock.release()` this ensures a slow scan tick doesn't queue up duplicate runs on the next tick.
+
+- **Monkeypatch module-level `Path` constants in tests:** `monkeypatch.setattr(expenses_inbox, "INBOX_DIR", tmp_path / "inbox")` works cleanly because Python module globals are mutable. Also reset `_DEFAULT_HOUSEHOLD_ID` to `None` between tests since it caches across calls (`monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)`).
+
+- **SQLite test session factory injection:** Worker functions that call `Session(engine)` can't be tested with the test's in-memory SQLite session. Solution: `session_factory` parameter with `@contextmanager` protocol — `scan_inbox_once(session_factory=sf, household_id=TEST_HOUSEHOLD_ID)` where `sf` is a contextmanager that yields the test session.
+
+- **`seeded_session` needed only for tests that trigger `CategoryResolver`:** Tests that only exercise error paths (fake PDFs, orphaned row reset) don't need category seed data and can use the plain `session` fixture. Tests that exercise the success path need `seeded_session` to avoid `CategoryResolver` failing on empty categories table.
+
+- **D-3 hash collision test is `xfail` — never modify it:** `test_dedup_hash_collision_design_tradeoff` is intentionally `@pytest.mark.xfail(strict=False)` to document an accepted design trade-off. Leave it untouched when implementing CC-5 — it's a design note, not a bug.
+
+**Files changed:**
+- `apps/backend/app/worker/expenses_inbox.py` (new — 350 lines, full worker implementation)
+- `apps/backend/app/worker/registry.py` (add expenses_inbox_scan interval job, gated on env var)
+- `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 3 + 5: 14 CC-5 stubs implemented)
+
+**Decisions:** None — all architecture pre-approved in `.squad/decisions.md` CC-5 entry and Rabin security review.
