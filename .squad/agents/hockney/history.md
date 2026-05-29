@@ -209,3 +209,38 @@ base classes, fingerprint detector, dispatcher; all Rabin security conditions.
 - `apps/backend/uv.lock` (regenerated)
 
 **PR:** https://github.com/cohenjo/trading-journal/pull/483
+
+---
+
+## 2026-06-XX — CC-6: Expense Pipeline REST API
+
+**Task:** Implement 5 REST API endpoints for the credit-card expense pipeline and replace 19 `pytest.skip()` stubs with passing tests.
+
+**Learnings:**
+
+- **Auth dep pattern for CC endpoints:** Use `user_id: UUID = Depends(get_current_user_id)` on every endpoint. Also register the router with `dependencies=auth_dep` in `main.py` — belt-and-suspenders (Rabin §4.1). The `get_current_user_id` dep chains through `get_current_user` which raises HTTP 401 on missing/invalid JWT.
+
+- **Household scoping is explicit, not implicit:** Call `_require_household(db, user_id)` (raises 403 if not member) then filter every query with `WHERE household_id == household_id`. Do NOT rely on RLS alone (Rabin §4.2).
+
+- **Decimal → float serialization:** The global `ENCODERS_BY_TYPE[Decimal] = float` in `decimal_encoder.py` handles Pydantic model serialization. Still convert explicitly with `float(txn.amount_ils)` in response model constructors for clarity and to avoid edge-case surprises in raw `db.execute()` results.
+
+- **Cross-DB YYYY-MM month grouping:** `func.substr(cast(col, String), 1, 7)` works in both SQLite (stores datetimes as `'2026-01-15 00:00:00'`) and PostgreSQL (casts DATE/TIMESTAMP to `'2026-01-15'`). Avoids dialect-specific `date_trunc()` / `to_char()`.
+
+- **Rate-limit gap — no slowapi in codebase:** Discovered when implementing `POST /resolve`. There is no rate-limit middleware anywhere in the project. Documented as `# TODO(CC-13)` comment in the endpoint (Rabin §4.3). Do NOT add slowapi as an undiscussed new dependency — track in CC-13 hardening pass.
+
+- **Resolve endpoint atomicity:** Wrap all DB writes (UPSERT mapping + update target txn + bulk-update matching txns) in a `try/except` with explicit `db.rollback()` on failure, `db.commit()` only at the end. The ORM session auto-begins a transaction; explicit rollback avoids dirty state leaking.
+
+- **UPSERT pattern for SQLite compatibility:** Python check-then-insert-or-update pattern (not PostgreSQL `ON CONFLICT DO UPDATE`). Filter on `(merchant_normalized, household_id, source='user')` to find the existing mapping.
+
+- **Mapping poisoning guard (Rabin §5.2):** `created_by = str(user_id)` must be set on BOTH insert AND update branches of the UPSERT. Using the caller's actual UUID (not a sentinel or None) lets future audits trace which user created/modified each mapping.
+
+- **Back-apply sets `resolution_source='mapping'`:** Directly-confirmed transactions get `resolution_source='user'`; back-applied matching transactions get `resolution_source='mapping'` to distinguish "user explicitly chose this" from "learned from a mapping rule".
+
+- **Test `_make_txn` helper needs explicit `id=uuid4()` and `statement_id`:** SQLite doesn't run PostgreSQL server-side defaults (`gen_random_uuid()`). Always supply `id` and `statement_id` when inserting ORM objects in SQLite tests.
+
+- **`seeded_session` slug_map keys:** The `seeded_session` fixture (cc-pipeline conftest) yields `(session, slug_map)` where `slug_map` maps category slug → UUID. Categories include `'groceries'`, `'restaurants'`, `'transfers'` (is_transfer=True), `'fuel'`, etc. Use slugs as dict keys to get category IDs for test transactions.
+
+**Files changed:**
+- `apps/backend/app/api/expenses.py` (new — 5 endpoints, ~350 lines)
+- `apps/backend/main.py` (add expenses import + router registration)
+- `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 4: replace 19 skips with 19 passing tests)
