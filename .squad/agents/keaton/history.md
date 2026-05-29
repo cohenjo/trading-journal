@@ -88,3 +88,92 @@ See `.squad/decisions/inbox/keaton-flex-backfill-strategy.md` for full 3-tier an
 ---
 
 📌 **Team update (2026-05-27)**: RSU automation batch completed. All 5 agents collaborated on price_cache extension (backend), engine tax/policy enforcement (frontend), and UI configuration. 46 acceptance tests pass. Branch: squad/rsu-ui-wiring. Decisions merged to .squad/decisions.md. Next: yield-units normalization follow-up pending from Hockney.
+
+### 2026-05-29 — Credit-Card Expense Analysis Pipeline Architecture
+
+**Requested by:** Jony Vesterman Cohen
+**Work:** Full architecture survey + proposal for household credit-card PDF ingestion, categorization, and expense analysis UI.
+
+**PDF Format Survey — confirmed formats (all Hebrew RTL):**
+
+| Format | Issuer | Cardholder | Card | Pages | Sector column? |
+|--------|--------|------------|------|-------|----------------|
+| Cal General (`דף פירוט דיגיטלי כאל*.pdf`) | Cal Credit Cards | Jony | 9356 (Business Gold MC) | 2 | ✅ ףנע field |
+| Cal PayBox (`639156527*.pdf`) | Cal (PayBox Visa variant) | Rita | 4654 (Platinum Visa PayBox) | 2 | ✅ same as Cal General |
+| Max (`statement__*.pdf`) | Max Financial Services | Rita | 1494 (MC) | 1 | ❌ must infer from merchant |
+| Isracard (`Unknown-N.pdf`) | Isracard Corporate | Jony | 3557 (Corporate Gold MC) | 3 | ✅ ףנע field (domestic section) |
+
+**Key PDF learnings:**
+- pdfplumber 0.11.9 (already installed) extracts Hebrew text successfully from all formats. No fallback parser needed at this stage.
+- RTL text extraction: pdfplumber uses visual/positional order. Words appear roughly right-to-left. Use word-level `extract_words()` with `x0` positions to reconstruct column order reliably.
+- **Cal and Isracard PDFs include an issuer-provided sector field** (`ףנע`) — this is a free categorization signal we can use as Tier 1 in the categorization engine with high confidence (~0.85).
+- Max PDFs have NO sector field → must rely entirely on rules + merchant mappings.
+- Cal date format: `DD/MM/YYYY`. Max dates have a Hebrew-year suffix artifact (e.g., `05/04/267`) — strip trailing non-numeric chars.
+- Isracard splits into two sections: foreign purchases (with FX rate, fee, original currency) and domestic transactions.
+- Cal installment format: `N - מ M םולשת` = "payment N of M" — store separately from regular transactions.
+- All statements are for the household of Jony + Rita Vesterman Cohen. Two bank account numbers are referenced: `04-136-0000146368` (Jony's Cal) and `10-944-0001415557` (Rita's Cal/Max).
+- The "Unknown" naming of Isracard files is from email download — not a special format.
+
+**Architecture decisions made:**
+1. **Amount storage:** `NUMERIC(12,2)` in ILS (not agorot integer) — consistent with project conventions, sufficient for household scale.
+2. **Dedup:** SHA-256 of raw file bytes stored as `CHAR(64)`.
+3. **Inbox folder:** `reports/credit-card/inbox/` → `processed/` or `errors/` — local folder pattern (not Supabase Storage, pending Jony confirmation).
+4. **Worker job:** Polled interval, 60 seconds, matching existing APScheduler pattern.
+5. **Categorization:** 3-tier: issuer_sector → deterministic YAML rules → learned mappings → unresolved queue.
+6. **Category taxonomy:** 28 leaf categories across 10 top-level slugs.
+7. **Worker redeploy gate:** CC-5 (worker job) WILL trigger the mandatory rebuild check per Keaton charter.
+
+**Outstanding decisions needed from Jony:** 9 open questions in Section 8 of the proposal. Most critical: Q1 (cardholder mapping confirmation), Q4 (inbox folder vs Supabase Storage), Q5/Q6 (issue + branch strategy).
+
+**Work items:** 14 items across Hockney (parser+API+worker), McManus (taxonomy+plan sketch), Fenster (UI), Redfoot (tests), Kujan (Docker/worker rebuild), Rabin (security review). Critical path: CC-1 (DB) → CC-2+CC-4 (parser+engine) → CC-5+CC-6 (worker+API) → CC-7+CC-8 (UI).
+
+**Decision file:** `.squad/decisions/inbox/keaton-credit-card-architecture.md`
+**Skill:** `.squad/skills/hebrew-pdf-statement-parsing/SKILL.md`
+
+### 2026-05-29: Credit-Card Expense Analysis Pipeline — Architecture Proposal
+
+**Requested by:** Jony Vesterman Cohen (Coordinator)
+
+**Work:** Comprehensive architecture kickoff for credit-card expense analysis pipeline. Completed 4-format PDF survey (Cal General, Cal PayBox, Max, Isracard), all Hebrew RTL text extraction validated. Designed 5-table data model, multi-stage backend pipeline (parser → ingestion worker → categorization engine), API contract (5 routes), frontend UI (resolution queue + monthly expenses chart), and 14-item work decomposition with parallelization strategy.
+
+**Key Decisions:**
+- Store original FX + rate per transaction (no schema simplification)
+- Category taxonomy: 12 core categories + "Transfers" (handling TBD pending Jony input)
+- Inbox location: `reports/credit-card/inbox/` (local folder)
+- Historical backfill: 30 sample PDFs after worker goes live
+- Constraint budget: Agents max 2 clarifying questions per item; beyond that, make reasonable decisions + note assumptions in PR
+
+**Risk Register:** 7 items identified with mitigations:
+1. Hebrew RTL column misalignment — use positional extraction + x-coordinate sorting
+2. Category miscategorization at scale — resolution queue + issuer_sector signal
+3. New PDF format surprise — fingerprint-based detection + errors/ folder
+4. PII in PDFs — never log raw text, local storage, Rabin security review (CC-12)
+5. Worker redeploy gate ⚠️ — CC-5 modifies app/worker/; Kujan (CC-11) verifies post-rebuild
+6. Date parsing errors (Max suffix "267") — regex strip trailing non-digits
+7. Installment double-counting — store installment_total_amount_ils separately; monthly summary uses amount_ils only
+
+**Open Questions (Blockers Section 8):** 9 items require Jony sign-off before CC-1 (migrations) begins:
+1. Cardholder mapping (4 known cards — any additions?)
+2. Category taxonomy (add/remove/rename?)
+3. Multi-currency storage (FX rate + original currency confirmed)
+4. Inbox folder location (`reports/credit-card/inbox/` or Supabase Storage bucket?)
+5. Issue tracking (single epic + sub-issues or one issue listing all?)
+6. Branch strategy (per-PR or single feature branch?)
+7. PayBox transfers handling (categorize as "Transfers" or underlying expense?)
+8. Historical backfill timing (immediate after worker or defer?)
+9. Cardholder names (free-text from PDF or FK to household_members table?)
+
+**Work Items:** 14-item fan-out ready:
+- Sprint A (parallel): CC-1 (DB migrations, Hockney), CC-3 (category YAML, McManus)
+- Sprint B: CC-2 (PDF parsers, Hockney), CC-4 (categorization engine, Hockney), CC-6 (API, Hockney), CC-12 (security review, Rabin)
+- Sprint C: CC-5 (inbox worker, Hockney), CC-7 + CC-8 (UI, Fenster)
+- Sprint D: CC-9 + CC-10 (tests, Redfoot), CC-11 (worker rebuild, Kujan), CC-14 (backfill, Hockney)
+
+**Deliverables:**
+- `.squad/decisions/inbox/keaton-credit-card-architecture.md` (merged to decisions.md)
+- `.squad/log/2026-05-29T122212Z-credit-card-architecture-kickoff.md` (session log)
+- `.squad/orchestration-log/2026-05-29T122212Z-keaton.md` (orchestration record)
+
+**Status:** Proposal complete. Awaiting Jony sign-off on Section 8 blockers before implementation begins.
+
+**Related Decision:**  `.squad/decisions.md` § "2026-05-29: Credit-Card Expense Analysis Pipeline — Architecture Proposal"

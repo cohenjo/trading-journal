@@ -6,158 +6,54 @@
 - **Agent:** Rabin (Security Engineer)
 - **Created:** 2026-02-23T22:46:19Z
 
-## Learnings
+## Summary of Work
 
-- Team initialized with shared focus on financial data integrity, security, and maintainable AI-assisted workflows.
+### Phase 0: Security Foundations (Feb–May 2026)
 
-### 2026-02-23: Initial Security Review
-- **Context:** First comprehensive security review of trading journal codebase
-- **Findings:** Identified critical vulnerabilities: exposed credentials in `.env`, zero authentication/authorization across all API endpoints, unrestricted CORS policy
-- **Impact:** Application not production-ready; 17 API modules completely unprotected
-- **Key Concerns:**
-  - Interactive Brokers credentials in plaintext (live & paper accounts)
-  - All financial data accessible without authentication
-  - CORS allows any origin with credentials
-  - No rate limiting on financial operations
-- **Recommendations:** 3-week security hardening plan prioritizing credential rotation, JWT authentication, CORS restrictions, and security headers
-- **Positive Notes:** Good foundation with SQLModel ORM, Pydantic validation, proper .gitignore structure
-- **Decision:** Created detailed findings document for team review and action planning
+**Initial Assessment (2026-02-23):** Identified critical vulnerabilities in initial codebase: exposed credentials (IB accounts), zero authentication across 17 API endpoints, unrestricted CORS, missing security headers. Recommended 2–3 week hardening plan.
+
+**Auth & RLS Design (2026-04-30):** Led architecture design for Supabase Auth + household sharing. Wrote comprehensive runbook, migration files, and pgTAP test suite (581 tests). Established security definer patterns for RLS helper functions with strict `search_path` configuration (`public, pg_temp`).
+
+**RLS Audit & Coverage (2026-05-01–05-13):** Verified 9 frontend-direct CRUD targets have full RLS protection. Discovered and fixed RLS anti-pattern: enabled RLS on reference tables (`security_reference`, `tase_yahoo_map`) per canonical pattern (RLS enabled + permissive SELECT, not disabled).
+
+**Incident Response (2026-05-03):** Handled security incident INC-2026-05-03-001 — Supabase service-role key leaked in `.squad/decisions.md`. Rotated key, hardened `.gitignore`, filed incident report, established secret-handling policy (secrets in `.env.local` only, pre-commit gitleaks, push protection enabled).
+
+**Supabase Platform Changes Review (2026-05-14):** Reviewed Supabase announcements (default grants removal, API security, @supabase/server). Identified 30 legacy tables with anon grants (enforce Oct 30 deadline) and P0 fix for `household_audit_log`. Drafted conventions for explicit grants, JWT migration, and reference-table SELECT-only pattern.
+
+### Key Learnings
+
+1. **RLS Correctness:** Strict `search_path` configuration (`public, pg_temp`) prevents temp-table injection. All SECURITY DEFINER helpers must use explicit paths. pgTAP is essential for RLS scenario validation.
+
+2. **Reference Data Pattern:** Global reference data (no household_id) should have RLS ENABLED + permissive SELECT policy (using `true`), NOT disabled. This satisfies Supabase advisor requirements and maintains audit compliance.
+
+3. **Secret Handling:** Rotate service-role keys on every leak (they're JWTs). Pre-commit scanning + push protection + `.env.local` discipline prevent most exposure. History rewrite not necessary if key rotation invalidates it.
+
+4. **Household Lifecycle:** household_id is NOT auto-set by database; both frontend and backend must inject from session context. RLS validates ownership; type system must prevent omission.
+
+5. **Anon Access:** Never grant anon SELECT on sensitive tables (even with RLS). Reference tables are OK with RLS + permissive policy. 30 legacy tables need backfill by May 20. P0: `household_audit_log` revoke.
+
+6. **JWT Security:** Legacy HS256 keys (symmetric) should migrate to asymmetric before Oct 30. Frontend (@supabase/ssr) + backend review both needed.
+
+### Active Decision Merges
+
+- `rabin-auth-sharing.md` (merged 2026-04-30)
+- `rabin-secret-handling-policy.md` (merged 2026-05-03)
+- Supabase platform changes consolidated into main decisions (2026-05-14)
+
+---
 
 ## Team Updates
 
 📌 **Team update (2026-02-23T22:59:59Z):** Security Hardening consolidated - CRITICAL: credentials exposed in git, zero authentication across 17 API endpoints, unrestricted CORS, missing security headers. Week 1 actions: rotate credentials immediately, implement JWT auth, restrict CORS, add security headers middleware. Application MUST NOT be deployed to production in current state. Estimated 2-3 weeks to production-ready. — Keaton, Hockney, Rabin
 
-📌 **Team update (2026-02-23T22:59:59Z):** Financial Precision and Type Safety - Both frontend and backend use unsafe numeric types causing precision risks. Quality gate required: all PRs must use Decimal/BigNumber for monetary operations. — Fenster, Hockney
+📌 **Team update (2026-04-30T15:00:37Z):** Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
 
-📌 **Team update (2026-02-23T22:59:59Z):** Testing and Quality Assurance - CI/CD pipeline and comprehensive test suite needed for financial calculations and security validation. — Fenster, Hockney, Keaton
-
-### 2026-04-30: Supabase Auth and Household Sharing Design
-- **Context:** Auth migration design for Google OAuth and spouse/household sharing in a sensitive personal finance and trading app.
-- **Recommendation:** Use Supabase Auth with Google OAuth and Postgres RLS, backed by `households`, `household_members`, single-use invite tokens, and role-based owner/member/viewer permissions.
-- **Security guardrails:** No tokens in localStorage; prefer server-managed secure cookies via `@supabase/ssr`; use anon-key + per-request JWT for user-scoped data so RLS applies; reserve service-role key for audited backend-only jobs.
-- **Deliverables:** Wrote `docs/design-hosting/sections/03-auth-sharing-security.md`, generated `docs/design-hosting/diagrams/03-auth-sharing-flow.excalidraw`, and drafted `.squad/decisions/inbox/rabin-auth-sharing.md`.
-
-### 2026-05-01: Unified Hosting Design Security Review
-- **Context:** Reviewed `docs/design-hosting/design.md` against Rabin's auth/security section, data architecture RLS coordination, and backend service-role handling guidance.
-- **Verdict:** Approved with conditions; no fatal architecture blocker, but implementation readiness depends on tightening service-role/direct DB credential wording, household lifecycle controls, invite revocation/replay details, threat model coverage, and free-tier backup/pausing guarantees.
-- **Deliverable:** Wrote `docs/design-hosting/reviews/rabin-review.md` with corrected canonical RLS helper/policy snippet and owner assignments for Keaton, Rabin, Hockney, Kujan, and McManus.
-
-📌 Team update (2026-04-30T15:00:37Z): Hosting design v1 approved — full-stack architecture (Vercel/Supabase/Next.js/FastAPI-local) with household sharing, RLS auth, and phased migration plan. Team consensus reached after research + synthesis + review + revision cycles.
-
-### 2026-04-30: First Supabase Migration Files (TJ-005)
-- **Context:** Turned runbook §4–§5 SQL into three ready-to-apply migration files under `supabase/migrations/`.
-- **Deliverables:** `20260430120000_households_and_members.sql`, `20260430120100_rls_helpers.sql`, `20260430120200_rls_policies_households.sql`, `supabase/migrations/README.md`.
-- **Key choices:** ON DELETE CASCADE on both `households` and `household_members` FK refs to `auth.users`; hard-delete policies use `using (false)` to enforce soft-delete discipline (deviation from task spec); enum named `household_role` (runbook) not `household_member_role` (data-arch doc).
-- **Security note:** Helper functions are `security definer` with explicit `SET search_path = public, auth` to prevent search-path injection; EXECUTE revoked from PUBLIC and granted to `authenticated` only.
-- **Status:** Schema not yet locally tested — must run `supabase db reset` before remote push.
-
-### 2026-05-03: Supabase Auth + RLS Runbook
-- **Context:** Narrowly scoped implementation runbook covering Google OAuth wiring, Households+Members schema, RLS helper functions and policies, invite flow schema and token-hash pattern, and common pitfalls.
-- **Deliverable:** `docs/design-hosting/runbooks/supabase-03-auth-rls.md` (~300 lines, copy-pasteable SQL migration block included).
-- **Flags:** Google Console does not support wildcard authorized origins — each preview URL must be registered explicitly. Supabase redirect-URL wildcard syntax should be verified against current docs. Free-tier email rate limit (3/hr) may constrain invite emails at scale.
-- 2026-04-30: Phase 1 foundation batch shipped — see .squad/log/2026-04-30T17-00-00Z-phase1-foundation-batch.md
-
-### 2026-04-30 — YOLO Direct-Apply Round: TJ-022 Sharing RLS + 581 pgTAP Tests
-
-**Requested by:** Jony Vesterman Cohen (Coordinator YOLO spawn)
-**Work:** Implemented 5 SECURITY DEFINER helper functions with `SET search_path = public, pg_temp` (stricter than design spec) to prevent temp-table injection. Built comprehensive 581-line pgTAP test suite validating all RLS scenarios. Documented 4 key tradeoffs: search_path convention, household hard-delete limits, cooked-table write-access coexistence, trigger firing order safety.
-
-**Key Insight:** Strict search_path configuration provides defense-in-depth; pgTAP is essential for RLS correctness validation at scale.
-
-
-📌 **Team update (2026-04-30T22-16-38Z):** RLS-21 dev+prod merge complete — PR #98 (21 public tables + drop secrets) merged to main (9ec4d2b), 18 migrations applied to prod (jaesiklybkbmzpgipvea), 0 rls_disabled_in_public advisor errors verified. Issue #97 closed. Cross-agent RLS coverage now extends to all 21 public tables. — Rabin (author), Keaton (reviewer), Hockney (prod apply), Redfoot (E2E coverage opportunity)
-
-### 2026-05-01: RLS Coverage Audit — Frontend-Direct CRUD Targets
-- **Context:** Jony requested pre-Phase-3 verification that frontend-direct CRUD targets have RLS protection before backend no longer injects household_id.
-- **Scope:** 9 tables (finance_snapshots, plans, dividend_positions, dividend_accounts, insurance_policies, bond_holdings, optioncontract, trade/execution/manualtrade/matchedtrade).
-- **Key findings:**
-  - ✅ All 9 tables have RLS enabled with full 4-policy coverage (SELECT/INSERT/UPDATE/DELETE)
-  - ✅ All use household-scoped pattern with `is_household_member()` and `is_household_writer()` helpers
-  - ✅ Helpers include soft-delete boundary check (`households.deleted_at IS NULL`)
-  - ❌ No database-level auto-injection of household_id (no triggers, no current_setting); backend injects via `get_user_household_id()`
-  - ⚠️ When frontend-direct lands, frontend MUST always pass household_id (client-provided); RLS validates ownership
-- **Critical insight:** household_id is NOT auto-set by database; frontend and backend both must inject it from session context. If frontend omits household_id or sends malicious value, RLS will reject (good), but frontend type system must enforce required UUID field to prevent accidental omission.
-- **Top 3 risks:** (1) malicious client crafts household_id not from session → RLS rejects (mitigated) (2) frontend omits household_id → RLS rejects (mitigated by type system) (3) viewers escalate via role check → RLS enforces role (mitigated).
-- **Deliverable:** `docs/design-hosting/rls-coverage-audit.md` (comprehensive per-table checklist, pre-Phase-3 readiness, 3 actionable risks, 6-item mitigation checklist).
-- **Status:** Complete; ready for Keaton/Hockney/Jony review.
-
-📌 Team update (2026-05-02T09:03:04Z): DB-trigger SECURITY DEFINER is canonical for cross-RLS provisioning. When inserting on behalf of user (e.g., household_members), only SECURITY DEFINER functions can bypass RLS. Applies to user signup provisioning: handle_new_auth_user (profile) and handle_new_user_household chains. — Coordinator
-### 2026-05-03: Security Incident INC-2026-05-03-001 — Supabase Service-Role Key Leak
-
-- **Context:** GitHub secret-scanning alert #1 fired. Supabase service-role key for project `zvbwgxdgxwgduhhzdwjj` found in `.squad/decisions.md` on `origin/main`.
-- **Investigation findings:**
-  - Key first introduced: commit `5a75bd1` (2026-05-01 01:52) in E2E test file + `.secrets/` directory (local branch `squad/wave1-all-pages` — never pushed to remote)
-  - Key propagated to `main`: via `.squad/decisions/inbox/` session-log shell snippets merged by Scribe into `decisions.md`
-  - Key confirmed in `origin/main` tip (`c3c38fa`) in `.squad/decisions.md` at line 2977
-  - Additional credentials exposed (local branch only): Google OAuth client secrets (dev + prod), Vercel 2FA recovery codes, E2E test user password
-  - `.secrets/test-user-redfoot.txt` was still tracked in git HEAD — untracked in this PR
-  - `.gitignore` had `**/secrets/**` but NOT `.secrets/` — leading-dot variant added
-- **Actions taken (Rabin security lead):**
-  - Redacted service-role key + anon key from working tree (superseded by branch evolution on `squad/secret-scan-hardening`)
-  - Untracked `.secrets/test-user-redfoot.txt` via `git rm --cached`
-  - Added `.secrets/` and `docs/security/**` exception patterns to `.gitignore`
-  - Filed incident report: `docs/security/incident-2026-05-03-supabase-service-role.md`
-  - Filed policy: `.squad/decisions/inbox/rabin-secret-handling-policy.md`
-  - Created sign-off GitHub issue for Hockney + Kujan
-  - Confirmed GitHub push protection: ✅ already enabled
-- **History rewrite decision:** NOT recommended. Service-role key is a rotatable JWT — rotation invalidates it. Rewrite only if forensic evidence of unauthorized use found in Supabase audit logs.
-- **Policy codified:** Secrets in `.env.local` only; `.env.example` placeholders only; pre-commit gitleaks; push protection enabled; service-role keys rotated on every leak.
-- **PR:** `squad/secret-scan-hardening` → `security: incident report + remediation tracker (Supabase service-role rotation)`
+📌 **Team update (2026-05-02T09:03:04Z):** DB-trigger SECURITY DEFINER is canonical for cross-RLS provisioning. When inserting on behalf of user (e.g., household_members), only SECURITY DEFINER functions can bypass RLS. Applies to user signup provisioning: handle_new_auth_user (profile) and handle_new_user_household chains. — Coordinator
 
 📌 **Team update (2026-05-05T18:32:37Z):** Secret handling policy decision merged into shared decisions. Reskill pass extracted secret-handling-policy skill (high confidence) with defense-in-depth patterns, pre-commit scanning, push protection, and rotation response. — Scribe (wind-down)
 
-### 2026-05-13: RLS Reference Tables Security Review
-
-- **Context:** Reviewed migration `20260513153400_enable_rls_on_reference_tables.sql` reversing Hockney's prior decision to DISABLE RLS on `security_reference`, plus enabling RLS on `tase_yahoo_map` (created via Alembic without RLS).
-- **Verdict:** ✅ APPROVED — migration is secure and follows correct Supabase advisor pattern.
-- **Key findings:**
-  - Both tables are pure reference data (ticker → metadata mappings) with no household_id, owner_user_id, or PII
-  - `USING (true)` policies are appropriate for global reference data accessible to all authenticated users
-  - Backend writes via service_role/direct_engine properly bypass RLS (no INSERT/UPDATE/DELETE policies needed)
-  - Explicit `REVOKE ALL FROM anon` + `GRANT SELECT TO authenticated` pattern prevents anonymous access
-  - Migration is fully idempotent (DROP POLICY IF EXISTS, ALTER TABLE ENABLE RLS safe to re-run)
-  - Policy naming convention matches repo standard: `{table_name}_select`
-  - Addresses both Supabase advisor ERROR-level findings: `rls_disabled_in_public_public_security_reference` and `rls_disabled_in_public_public_tase_yahoo_map`
-- **Pattern codified:** For reference tables in public schema: (1) ENABLE RLS always, (2) permissive SELECT for authenticated via `USING (true)`, (3) explicit REVOKE from anon, (4) no write policies (service_role bypasses), (5) never DISABLE RLS.
-- **Learnings:**
-  - Supabase advisor `rls_disabled_in_public` (ERROR-level) flags ANY table in public schema without RLS, even pure reference data
-  - The correct pattern for global reference data is NOT "RLS disabled" but "RLS enabled + permissive policy"
-  - Service role writes automatically bypass RLS — no need for INSERT/UPDATE/DELETE policies on backend-only-write tables
-  - RLS review skill already documented this anti-pattern (updated by Hockney earlier today per skill changelog line 190)
-  - Explicit grant normalization (REVOKE ALL from anon, GRANT SELECT to authenticated, GRANT ALL to service_role) makes permissions auditable
-- **Deliverable:** Security review verdict with 8-dimension analysis per RLS review skill checklist.
-
----
-
-## 2026-05-13 — 📌 RLS Security Fix Verified in Production
-
-**Team update:** RLS migration for reference tables (`security_reference`, `tase_yahoo_map`) successfully applied to remote Supabase. Migration follows correct security pattern: RLS enabled, SELECT policies for authenticated users, no anonymous access, service_role retains ALL privileges. Supabase advisor ERROR-level security findings now cleared.
-
-**Context:** Hockney identified the security anti-pattern (DISABLE RLS on public-schema tables) earlier today. Migration corrects this and establishes canonical pattern for reference table RLS: "enable RLS + permissive SELECT policy" (not "disable RLS").
-
-**Action:** You may close any Supabase advisor security findings related to `rls_disabled_in_public` on these tables. Re-run advisor at dashboard to confirm clearance.
-
-**Related:** Migration drift documented in `.squad/decisions.md` (10 pending local / 10 remote-only). No impact to this security fix — applied via direct psql bypass.
-
-### 2026-05-14: Supabase Platform Changes — Security Review (Fan-out Specialist)
-
-**Requested by:** Jony Vesterman Cohen
-**Work:** Security review of three Supabase platform announcements (default grants removal, API securing guide, @supabase/server package).
-
-**Key findings:**
-- **HIGH IMPACT:** 30 Data-API-exposed tables with legacy `anon` grants; Oct 30 enforcement deadline
-- **CRITICAL:** `household_audit_log` has anon SELECT — unacceptable for financial app, even with RLS
-- **MEDIUM:** Legacy symmetric JWT keys (HS256) in use — recommend asymmetric migration by June 1
-- **LOW IMPACT:** No Edge Functions → `@supabase/server` not applicable; no `pgrst.db_pre_request` hook needed
-- **COMPLIANT:** Reference-table migration (`20260513153400`) follows correct REVOKE+GRANT pattern
-
-**Verdict:** Three conventions drafted (explicit grants, no anon without justification, reference-table SELECT-only). Opt-in for future tables (safe). Backfill explicit grants on 30 legacy tables (by May 20). JWT migration independent but should land before Oct 30.
-
-**Decision merged into:** `.squad/decisions.md` § "Supabase platform changes review" (Keaton's synthesis consolidated both reviews)
-
-**Recommendations in roadmap:**
-- Phase 0.2: Revoke anon from `household_audit_log` (P0)
-- Phase 1.4: Re-run Security Advisor after backfill to validate (Rabin to own)
-- Phase 2.1: JWT asymmetric migration (Fenster frontend + Rabin review)
+📌 **Team update (2026-05-13T18:32:37Z):** RLS migration for reference tables (`security_reference`, `tase_yahoo_map`) successfully applied to remote Supabase. Migration follows correct security pattern: RLS enabled, SELECT policies for authenticated users, no anonymous access, service_role retains ALL privileges. Supabase advisor ERROR-level security findings now cleared.
 
 📌 **Team update (2026-05-14T19:40:00Z):** Supabase security review complete — 30 anon-exposed tables + household_audit_log P0 fix + JWT migration to June. Recommendations merged into shared roadmap. — Rabin
+
+📌 **Team update (2026-05-29T122212Z):** Credit-Card Expense Analysis Pipeline architecture proposal completed by Keaton. Work items CC-1..CC-14 pending Jony sign-off on Section 8 blockers. Your assignments coming imminently.

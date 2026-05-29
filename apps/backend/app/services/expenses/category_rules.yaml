@@ -1,0 +1,633 @@
+# Credit-Card Expense Category Taxonomy
+# Owned by McManus (Data/Finance Dev). This file is the single source of truth
+# for category metadata and deterministic classification rules.
+#
+# The seed migration (20260529122501_seed_expense_categories.sql) loads top-level
+# + subcategories into the `expense_categories` table. Rules in this file are
+# loaded by the categorization engine (CC-4) — they are NOT stored in the DB.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# CONVENTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+# slug         stable kebab-case English key used in code, UI, and API.
+# name         English display label.
+# name_he      Hebrew display label.
+# is_transfer  true  → category is a cash movement between people (not consumption);
+#              excluded from household expense totals.
+# display_order integer sort key within siblings (0-indexed per level).
+#
+# rules        list of {pattern, weight?} entries.
+#              pattern   Python `re` regex matched CASE-INSENSITIVELY against
+#                        merchant_normalized (the cleaned/uppercased merchant string
+#                        extracted from the PDF).
+#              weight    optional float 0–1; higher = preferred when multiple
+#                        categories match. Default = 0.5.
+#              First match (by display_order of subcategory before parent, then
+#              highest weight) wins.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# ⚠️  RTL EXTRACTION GOTCHA (critical for Hebrew pattern authoring)
+# ─────────────────────────────────────────────────────────────────────────────
+# pdfplumber extracts Cal / Isracard Hebrew PDFs character-by-character in the
+# visual (left-to-right on page) order. For RTL-rendered Hebrew, this means:
+#   • Each Hebrew WORD has its characters REVERSED relative to the logical Unicode.
+#     Example:  שופרסל (Shufersal) → extracted as לסרפוש
+#               טיב טעם (Tiv Ta'am) → extracted as ביט / םעט
+#               פנגו (Pango)        → extracted as וגנפ
+#               בזק  (Bezeq)        → extracted as קזב
+#               ביטוח (insurance)   → extracted as חוטיב
+#               סופר-פארם           → extracted as מראפ-רפוס
+#   • English words are NOT reversed (but Isracard inserts spaces: A LIEXPRESS).
+#   • Word ORDER within a multi-word merchant is also reversed on extraction.
+# Patterns below match the EXTRACTED (reversed) form, not the display form.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 1
+
+categories:
+
+  # ── 1. GROCERIES ───────────────────────────────────────────────────────────
+  - slug: groceries
+    name: Groceries
+    name_he: מזון וסופרמרקט
+    icon: shopping-cart
+    color: "#4CAF50"
+    display_order: 1
+    rules:
+      # Shufersal (שופרסל) — Israel's largest supermarket chain.
+      # Extracted forms: לסרפוש (reversed שופרסל) with branch suffixes like ליד, ינושאר ןוינק
+      - pattern: "לסרפוש"
+        weight: 0.9
+      # Tiv Ta'am (טיב טעם) — premium grocery chain
+      - pattern: "ביט\\s*םעט"
+        weight: 0.9
+      # FYM — small market / convenience store seen on Jony's card
+      - pattern: "\\bFYM\\b"
+        weight: 0.8
+      # Etz Hasadeh (עץ השדה) — organic farm delivery seen on Jony's card
+      # Extracted: הדשה ץע (reversed)
+      - pattern: "הדשה\\s*ץע"
+        weight: 0.8
+      # Generic Hebrew supermarket / market fallback
+      - pattern: "(תלוכמ|קוש\\s*לכאמ|ירקי)"
+        weight: 0.3
+    subcategories: []
+
+  # ── 2. RESTAURANTS ─────────────────────────────────────────────────────────
+  - slug: restaurants
+    name: Restaurants & Food Delivery
+    name_he: מסעדות ומשלוחים
+    icon: utensils
+    color: "#FF9800"
+    display_order: 2
+    rules:
+      # Wolt — dominant food delivery app in Israel
+      - pattern: "\\bwolt\\b"
+        weight: 0.95
+      # Schwartz Herzl / Shawarma Herzl 2 — fast-food shawarma chain.
+      # Extracted: המראווש (reversed שווארמה = shawarma)
+      - pattern: "המראווש"
+        weight: 0.85
+      # Domino's Pizza (דומינוס פיצה). Extracted: סונימוד + הציפ
+      - pattern: "סונימוד|domino"
+        weight: 0.85
+      # Nina DEAR (restaurant in Rishon). Hebrew name הנינ = reversed נינה (Nina)
+      - pattern: "DEAR|הנינ\\s*DEAR|nina.*dear"
+        weight: 0.85
+      # Naimi Bakery / Gourmet deli (from Isracard, sector תוינדעמ = gourmet)
+      # Extracted: ןמאנ הפאמ דיינ (reversed נייד מאפה נאמן = Naimi Loyal Bakery)
+      - pattern: "הפאמ\\s*ןמאנ|naimi.*bak|דיינ.*הפאמ"
+        weight: 0.8
+      # FCB Fan Zone — seen in Spain trip charges, food at event
+      - pattern: "fcb\\s*fan|fan\\s*zone"
+        weight: 0.7
+      # Generic café / restaurant fallback
+      - pattern: "(cafe|coffee|restaurant|bistro|rest\\b)"
+        weight: 0.3
+    subcategories:
+      - slug: restaurants-delivery
+        name: Food Delivery
+        name_he: משלוחים
+        display_order: 1
+        rules:
+          - pattern: "\\bwolt\\b"
+            weight: 0.95
+          - pattern: "uber\\s*eats|bolt\\s*food|10bis|יסיבוט"
+            weight: 0.8
+
+      - slug: restaurants-fast-food
+        name: Fast Food
+        name_he: מזון מהיר
+        display_order: 2
+        rules:
+          # Shawarma / fast-food Hebrew (המראווש = reversed שווארמה)
+          - pattern: "המראווש"
+            weight: 0.9
+          # Domino's
+          - pattern: "סונימוד|domino"
+            weight: 0.9
+          - pattern: "mcdonald|burger.king|kfc|subway"
+            weight: 0.85
+
+      - slug: restaurants-dine-in
+        name: Dine-In Restaurants
+        name_he: מסעדות ישיבה
+        display_order: 3
+        rules:
+          # Nina DEAR restaurant
+          - pattern: "DEAR|הנינ.*DEAR|nina"
+            weight: 0.85
+          # Naimi Bakery / deli
+          - pattern: "הפאמ\\s*ןמאנ|דיינ.*הפאמ"
+            weight: 0.8
+          # Generic restaurant cues
+          - pattern: "restaurant|bistro|הדעסמ"
+            weight: 0.4
+
+  # ── 3. HEALTH ──────────────────────────────────────────────────────────────
+  - slug: health
+    name: Health
+    name_he: בריאות
+    icon: heart
+    color: "#E91E63"
+    display_order: 3
+    rules:
+      # Super-Pharm (סופר-פארם). Extracted: מראפ-רפוס (reversed)
+      - pattern: "מראפ.רפוס|super.?pharm"
+        weight: 0.95
+      # Contact rehab & sports centre seen on Jony's card (קונטקט → reversed טקטנוק)
+      - pattern: "טקטנוק|contact.*sport|contact.*rehab"
+        weight: 0.85
+      # Kupat Holim health funds (מכבי → reversed יבכמ, כללית → reversed תיללכ)
+      - pattern: "יבכמ|תיללכ|תדחואמ|יתומאל"
+        weight: 0.8
+      # Generic pharmacy/clinic fallback
+      - pattern: "(pharmacy|clinic|medical|הפרמ|אפור)"
+        weight: 0.3
+    subcategories:
+      - slug: health-pharmacy
+        name: Pharmacy
+        name_he: בית מרקחת
+        display_order: 1
+        rules:
+          # Super-Pharm (סופר-פארם → reversed מראפ-רפוס)
+          - pattern: "מראפ.רפוס|super.?pharm"
+            weight: 0.95
+          - pattern: "pharmacy|new.?pharm|תפרמ\\b"
+            weight: 0.8
+
+      - slug: health-medical
+        name: Medical & Clinics
+        name_he: רפואה ומרפאות
+        display_order: 2
+        rules:
+          # Kupat Holim funds — reversed forms
+          - pattern: "יבכמ|תיללכ|תדחואמ|יתומאל"
+            weight: 0.9
+          - pattern: "clinic|maccabi|clalit|leumit|meuhedet"
+            weight: 0.8
+
+      - slug: health-fitness
+        name: Fitness & Sports
+        name_he: כושר וספורט
+        display_order: 3
+        rules:
+          # Contact rehab & sports centre (קונטקט → reversed טקטנוק)
+          - pattern: "טקטנוק"
+            weight: 0.9
+          # Naimi Park fitness (from Isracard, sector sport/leisure)
+          # Extracted: ענמת קראפ דיינ (reversed text)
+          - pattern: "קראפ\\s*דיינ|naimi.*park"
+            weight: 0.85
+          - pattern: "holmes.place|gym|fitness|crossfit|yoga|sport.center"
+            weight: 0.7
+
+  # ── 4. UTILITIES ───────────────────────────────────────────────────────────
+  - slug: utilities
+    name: Utilities & Communications
+    name_he: שירותים ותקשורת
+    icon: bolt
+    color: "#607D8B"
+    display_order: 4
+    rules:
+      # Bezeq (בזק) — Israel's main telecom. Extracted: קזב (reversed)
+      # Bezeq Energy branding also seen: ENERGY קזב
+      - pattern: "קזב|bezeq"
+        weight: 0.9
+      # HOT — cable TV + internet provider (standing order ₪84.90/month on Jony's Isracard)
+      - pattern: "\\bhot\\b"
+        weight: 0.85
+      # HOT MOBILE — mobile phone (seen on Jony's Cal card, multiple times)
+      - pattern: "hot\\s*mobile"
+        weight: 0.9
+      # Partner telecom (פרטנר → reversed רנטרפ)
+      - pattern: "רנטרפ|partner|012"
+        weight: 0.8
+      # Generic telecom fallback
+      - pattern: "(cellcom|רמוכלס|pelephone|ןופאלפ|golan|ןלוג)"
+        weight: 0.7
+    subcategories:
+      - slug: utilities-internet-tv
+        name: Internet & Cable TV
+        name_he: אינטרנט וטלוויזיה
+        display_order: 1
+        rules:
+          # HOT cable/internet (monthly standing order, Jony's Isracard card)
+          - pattern: "\\bhot\\b(?!\\s*mobile)"
+            weight: 0.9
+          # Bezeq internet
+          - pattern: "קזב|bezeq"
+            weight: 0.85
+          - pattern: "yes\\b|partner.*internet"
+            weight: 0.7
+
+      - slug: utilities-phone
+        name: Mobile Phone
+        name_he: טלפון נייד
+        display_order: 2
+        rules:
+          # HOT MOBILE — standing order and one-time charges both seen
+          - pattern: "hot\\s*mobile"
+            weight: 0.95
+          # Other Israeli mobile operators
+          - pattern: "(cellcom|רמוכלס|pelephone|ןופאלפ|partner|רנטרפ|golan|ןלוג|019|רמי.לוי.מובייל)"
+            weight: 0.8
+
+      - slug: utilities-streaming
+        name: Streaming Services
+        name_he: סטרימינג ומנויים
+        display_order: 3
+        rules:
+          # HBO Max — seen on Jony's Isracard as HELP.HBOMAX.COM (₪84.90/month)
+          # Isracard spaces the name: H ELP.HBOMAX.COM
+          - pattern: "h\\s*elp\\.hbomax|hbomax|hbo"
+            weight: 0.95
+          - pattern: "netflix|spotify|apple\\.com/bill|youtube.*premium|disney|paramount"
+            weight: 0.9
+
+  # ── 5. TRAVEL ──────────────────────────────────────────────────────────────
+  - slug: travel
+    name: Travel
+    name_he: נסיעות ותיירות
+    icon: plane
+    color: "#03A9F4"
+    display_order: 5
+    rules:
+      # Wizz Air — seen on Jony's Isracard (₪6,387 flight charge, W IZZ AIRJJ1Z5C)
+      # Isracard inserts spaces in English: W IZZ AIR
+      - pattern: "w\\s*izz\\s*air|wizz"
+        weight: 0.95
+      # Europa Park Hotel — seen on Jony's Isracard (€2085 Germany trip)
+      # Isracard: E UROPAPARK HOTELBE
+      - pattern: "e\\s*uropapark|europapark"
+        weight: 0.9
+      # El Al airline (לאל → reversed לאל, or simply el.al)
+      - pattern: "\\bel\\s*al\\b|לאל\\b"
+        weight: 0.9
+      # Pango parking app (פנגו → reversed וגנפ). Monthly standing order seen.
+      - pattern: "וגנפ|pango"
+        weight: 0.85
+      # Zdal parking lot (חניון זדל). Extracted: לדז ןוינח
+      - pattern: "לדז|ןוינח"
+        weight: 0.7
+      # Nike Israel parking (seen as תוריית sector, small amount ₪9.80)
+      - pattern: "לארשי\\s*סקייאנ"
+        weight: 0.5
+    subcategories:
+      - slug: travel-flights
+        name: Flights
+        name_he: טיסות
+        display_order: 1
+        rules:
+          # Wizz Air (W IZZ AIR on Isracard, WIZZ AIR on others)
+          - pattern: "w\\s*izz\\s*air|wizz|wizzair"
+            weight: 0.95
+          - pattern: "\\bel\\s*al\\b|ryanair|easyjet|luft|turkish|israir|ארקיע"
+            weight: 0.85
+
+      - slug: travel-hotels
+        name: Hotels & Accommodation
+        name_he: מלונות ולינה
+        display_order: 2
+        rules:
+          # Europa Park Hotel Germany (seen April charge)
+          - pattern: "e\\s*uropapark|europapark"
+            weight: 0.95
+          - pattern: "hotel|מלון|airbnb|booking\\.com|hilton|marriott|leonardo|sheraton"
+            weight: 0.8
+
+      - slug: travel-parking
+        name: Parking
+        name_he: חניון ופנגו
+        display_order: 3
+        rules:
+          # Pango (פנגו → reversed וגנפ). Monthly subscription, seen multiple statements.
+          - pattern: "וגנפ|pango"
+            weight: 0.95
+          # Zdal parking lot brand
+          - pattern: "לדז|ןוינח"
+            weight: 0.85
+
+      - slug: travel-transit
+        name: Public Transit & Licensing
+        name_he: תחבורה ציבורית ורישוי
+        display_order: 4
+        rules:
+          # Ministry of Transport — license renewal (₪1,770 seen on Jony's card)
+          # Extracted: הרובחתה דרשמ (reversed משרד התחבורה)
+          - pattern: "הרובחתה\\s*דרשמ"
+            weight: 0.9
+          # Israeli train / bus
+          - pattern: "לארשי\\s*תבכר|רכבת|אגד|רב.קו|metrodan|hopon"
+            weight: 0.8
+
+  # ── 6. SHOPPING ────────────────────────────────────────────────────────────
+  - slug: shopping
+    name: Shopping
+    name_he: קניות
+    icon: shopping-bag
+    color: "#9C27B0"
+    display_order: 6
+    rules:
+      # Urbamica Gamma (אורבניקה-גמא) — clothing store seen on Jony's Cal card
+      # Extracted: אמג-הקינברוא (reversed)
+      - pattern: "הקינברוא|urbamica"
+        weight: 0.9
+      # Gamma/BNZK electronics (גמא בע"מ). Extracted: אמג
+      - pattern: "אמג|\\bksp\\b|bug|באג"
+        weight: 0.85
+      # AliExpress — seen on Jony's Isracard. Isracard spaces: A LIEXPRESS
+      - pattern: "a\\s*liexpress|aliexpress"
+        weight: 0.9
+      # Sephora — seen Spain trip charge (SEPHORA COSMETICOS ESP)
+      - pattern: "sephora"
+        weight: 0.9
+      # Nespresso (נספרסו → reversed וסרפסנ). Seen on Jony's Cal card.
+      - pattern: "וסרפסנ|nespresso"
+        weight: 0.85
+      # Microsoft Store — seen on Jony's Isracard (₪200 twice)
+      - pattern: "microsoft"
+        weight: 0.85
+      # Amazon / online general
+      - pattern: "amazon|ebay|eBay"
+        weight: 0.7
+    subcategories:
+      - slug: shopping-clothing
+        name: Clothing & Fashion
+        name_he: ביגוד ואופנה
+        display_order: 1
+        rules:
+          # Urbamica (clothing) — seen on Jony's card
+          - pattern: "הקינברוא|urbamica"
+            weight: 0.95
+          # Fox, Castro, Zara, H&M etc.
+          - pattern: "\\bfox\\b|castro|zara|h&m|renuar|polgat|gap\\b|kids.*place"
+            weight: 0.8
+          # Sephora (beauty/fashion boundary — placed under clothing, beauty subcat preferred)
+          - pattern: "sephora"
+            weight: 0.5
+
+      - slug: shopping-electronics
+        name: Electronics & Tech
+        name_he: אלקטרוניקה וטכנולוגיה
+        display_order: 2
+        rules:
+          # Gamma/BNZK electronics
+          - pattern: "אמג|\\bksp\\b|bug|באג|electra|אלקטרה"
+            weight: 0.9
+          # Microsoft Store
+          - pattern: "microsoft"
+            weight: 0.9
+          # Apple Store
+          - pattern: "apple\\s*store|apple\\.com(?!/bill)"
+            weight: 0.85
+          # Allterco Robotics Bulgaria — seen on Jony's Cal card (IoT device)
+          - pattern: "allterco|robotics"
+            weight: 0.8
+
+      - slug: shopping-online
+        name: Online Shopping
+        name_he: קניות אונליין
+        display_order: 3
+        rules:
+          # AliExpress (Isracard format: A LIEXPRESS)
+          - pattern: "a\\s*liexpress|aliexpress"
+            weight: 0.95
+          - pattern: "amazon|ebay|shopify|paypal\\*"
+            weight: 0.8
+          # Nespresso online
+          - pattern: "וסרפסנ|nespresso"
+            weight: 0.75
+
+      - slug: shopping-beauty
+        name: Beauty & Personal Care
+        name_he: יופי וטיפוח
+        display_order: 4
+        rules:
+          # Sephora — seen in Spain trip
+          - pattern: "sephora"
+            weight: 0.95
+          - pattern: "beauty|cosmet|טיפוח|parfum"
+            weight: 0.7
+
+  # ── 7. KIDS & EDUCATION ────────────────────────────────────────────────────
+  - slug: kids-education
+    name: Kids & Education
+    name_he: ילדים וחינוך
+    icon: graduation-cap
+    color: "#00BCD4"
+    display_order: 7
+    rules:
+      # Matific — math education platform for kids. Seen on Rita's Max card.
+      - pattern: "matific"
+        weight: 0.95
+      # Educative.io — developer education. Seen on Rita's Max card (₪529).
+      - pattern: "educative"
+        weight: 0.9
+      # Talented Youth programme (התכנית לנוער מוכשר). Seen on Jony's Cal card.
+      # Extracted: רשכומ רעונל תינכתה (reversed)
+      - pattern: "רשכומ\\s*רעונל|youth.*program|talented.*youth"
+        weight: 0.85
+      # Generic education cues
+      - pattern: "(tutor|class|lesson|learning|school|kindergarten)"
+        weight: 0.3
+    subcategories:
+      - slug: kids-online-learning
+        name: Online Learning
+        name_he: למידה מקוונת
+        display_order: 1
+        rules:
+          - pattern: "matific"
+            weight: 0.95
+          - pattern: "educative|coursera|udemy|duolingo|khan"
+            weight: 0.85
+
+      - slug: kids-activities
+        name: Activities & Programs
+        name_he: חוגים ותוכניות
+        display_order: 2
+        rules:
+          # Talented Youth programme
+          - pattern: "רשכומ\\s*רעונל"
+            weight: 0.9
+          - pattern: "חוג|תוכנית|jumpark|kids.*gym|sport.*kids"
+            weight: 0.7
+
+  # ── 8. FINANCIAL ───────────────────────────────────────────────────────────
+  - slug: financial
+    name: Financial & Insurance
+    name_he: פיננסי וביטוח
+    icon: dollar-sign
+    color: "#795548"
+    display_order: 8
+    rules:
+      # Income Tax Authority (מס הכנסה נציבות). Extracted: הסנכה סמ תוביצנ (reversed).
+      - pattern: "הסנכה\\s*סמ|income\\s*tax|תוביצנ"
+        weight: 0.85
+      # Municipality — Rishon LeZion city seen on Jony's card (₪207 answer service)
+      # Extracted: תייריע (reversed עיריית = municipality)
+      - pattern: "תייריע|municipality"
+        weight: 0.8
+      # Google One subscription (₪349 seen on Jony's Cal)
+      - pattern: "google\\*google|google.*one"
+        weight: 0.85
+      # Apple subscription charges
+      - pattern: "apple\\.com/bill|apple.*subscription"
+        weight: 0.8
+      # Klemobil insurance agency (כלמוביל → reversed ליבומלכ). Recurring installments.
+      - pattern: "ליבומלכ"
+        weight: 0.85
+      # Generic insurance sector marker (ביטוח → reversed חוטיב)
+      - pattern: "חוטיב"
+        weight: 0.6
+      # Bank fee generic
+      - pattern: "(הלמע|bank.*fee|card.*fee)"
+        weight: 0.5
+    subcategories:
+      - slug: financial-insurance
+        name: Insurance
+        name_he: ביטוח
+        display_order: 1
+        rules:
+          # Klemobil insurance agency — recurring 5-installment policies
+          - pattern: "ליבומלכ"
+            weight: 0.95
+          # Alon insurance (ביטוח אילון → reversed ןולייא חוטיב)
+          - pattern: "ןולייא\\s*חוטיב|חוטיב\\s*ןולייא"
+            weight: 0.9
+          # Mandatory vehicle insurance (רכב חובה → reversed הבוח בכר)
+          - pattern: "הבוח\\s*בכר|יאלקח\\s*חוטיב|ירטנמלא\\s*חוטיב"
+            weight: 0.9
+          # Generic insurance
+          - pattern: "חוטיב|insurance|harel|הראל|migdal|לדגמ|menorah|הרונמ|clal|ללכ|phoenix|סינקפ"
+            weight: 0.6
+
+      - slug: financial-government
+        name: Government & Municipal
+        name_he: ממשלה ועירייה
+        display_order: 2
+        rules:
+          # Income tax authority
+          - pattern: "הסנכה\\s*סמ|תוביצנ"
+            weight: 0.9
+          # Municipality
+          - pattern: "תייריע|arnona|ארנונה"
+            weight: 0.85
+          # Ministry of Transport (already in travel.transit but can cross-match)
+          - pattern: "הרובחתה\\s*דרשמ"
+            weight: 0.5
+
+      - slug: financial-fees
+        name: Bank & Card Fees
+        name_he: עמלות בנק וכרטיס
+        display_order: 3
+        rules:
+          - pattern: "(הלמע|bank.*charge|card.*fee|annual.*fee)"
+            weight: 0.8
+
+  # ── 9. FUEL ────────────────────────────────────────────────────────────────
+  - slug: fuel
+    name: Fuel
+    name_he: דלק
+    icon: gas-pump
+    color: "#F44336"
+    display_order: 9
+    rules:
+      # Naimi fuel station — seen on Jony's Isracard (₪20 and ₪286 charges)
+      # Extracted: הקימ קלד תנחת דיינ (reversed ניד תחנת דלק מיקה)
+      # "קלד" = reversed "דלק" (fuel) — reliable marker for fuel stations in extracted text
+      - pattern: "קלד\\s*תנחת|דיינ.*קלד"
+        weight: 0.9
+      # Dor Alon (דור אלון → reversed ןולא רוד)
+      - pattern: "ןולא\\s*רוד|dor.alon"
+        weight: 0.9
+      # Paz (פז → reversed זפ)
+      - pattern: "\\bזפ\\b|\\bpaz\\b"
+        weight: 0.9
+      # Sonol (סונול → reversed לונוס)
+      - pattern: "לונוס|sonol"
+        weight: 0.9
+      # Delek (דלק → reversed קלד) — general fuel marker
+      - pattern: "\\bקלד\\b|\\bdelek\\b|gas\\s*station|fuel"
+        weight: 0.7
+    subcategories: []
+
+  # ── 10. TRANSFERS ──────────────────────────────────────────────────────────
+  - slug: transfers
+    name: Transfers
+    name_he: העברות כסף
+    icon: arrow-right-arrow-left
+    color: "#9E9E9E"
+    display_order: 10
+    is_transfer: true   # excluded from household expense totals
+    rules:
+      # PayBox — Rita's dedicated PayBox Visa card (4654). All charges on this
+      # card are PayBox money transfers. Merchant always "PAYBOX" in normalized form.
+      - pattern: "\\bpaybox\\b|פייבוקס"
+        weight: 0.99
+      # Bit payment app transfers
+      - pattern: "\\bbit\\b(?!.*טיב\\s*םעט)"
+        weight: 0.9
+      # Generic transfer cue (הרבעה = transfer in Hebrew → reversed הרבעה, stays same)
+      - pattern: "הרבעה\\s*ל|transfer\\s*to"
+        weight: 0.7
+    subcategories:
+      - slug: transfers-paybox
+        name: PayBox / Bit Transfers
+        name_he: פייבוקס / ביט
+        display_order: 1
+        is_transfer: true
+        rules:
+          - pattern: "\\bpaybox\\b|פייבוקס"
+            weight: 0.99
+          - pattern: "\\bbit\\b"
+            weight: 0.9
+
+      - slug: transfers-family
+        name: Family Transfers
+        name_he: העברות משפחתיות
+        display_order: 2
+        is_transfer: true
+        rules:
+          # Daniella Azav — recurring monthly PayBox recipient on Rita's card
+          - pattern: "daniella\\s*azav|azav"
+            weight: 0.95
+          # Lihil Rubin — recurring treatment/childcare payments on Rita's card
+          - pattern: "rubin|ןיבור"
+            weight: 0.9
+          # Zev (Vesterman-Cohen family) — child/household transfers
+          - pattern: "\\bzev\\b|באז\\b"
+            weight: 0.85
+          # Generic family-name cues in PayBox descriptions
+          - pattern: "(הרבעה.*רובע|transfer.*for)"
+            weight: 0.5
+
+  # ── 11. OTHER ──────────────────────────────────────────────────────────────
+  - slug: other
+    name: Other / Uncategorized
+    name_he: אחר / לא מסווג
+    icon: question
+    color: "#BDBDBD"
+    display_order: 99
+    rules: []   # default catch-all; populated by user resolution in the UI
+    subcategories: []

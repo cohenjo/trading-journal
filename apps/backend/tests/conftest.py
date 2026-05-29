@@ -34,6 +34,13 @@ from app.schema import (  # noqa: F401
     plan_models,
     trading_models,
 )
+from app.schema.expenses import (  # noqa: F401 — registers CC pipeline tables in SQLModel.metadata
+    CreditCardStatement,
+    CreditCardTransaction,
+    ExpenseCategory,
+    ExpenseInbox,
+    MerchantCategoryMapping,
+)
 from app.schema.household_models import Household, HouseholdMember
 
 

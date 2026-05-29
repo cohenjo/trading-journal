@@ -18,6 +18,14 @@ services:
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-trading-journal-backend-worker-local-docker}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://127.0.0.1:4317}
       WORKER_HEARTBEAT_FILE: /app/worker_heartbeat
+      CREDIT_CARD_INBOX_DIR: ${CREDIT_CARD_INBOX_DIR:-/app/reports/credit-card/inbox}
+      CREDIT_CARD_INBOX_ENABLED: ${CREDIT_CARD_INBOX_ENABLED:-true}
+      CREDIT_CARD_DEFAULT_HOUSEHOLD_ID: ${CREDIT_CARD_DEFAULT_HOUSEHOLD_ID:-}
+    volumes:
+      # Mount credit-card inbox so the worker can read PDFs and write to
+      # processed/ and errors/.  Host path is relative to repo root.
+      # Override the container-side path via CREDIT_CARD_INBOX_DIR if needed.
+      - ./reports/credit-card:/app/reports/credit-card
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-m", "app.worker.healthcheck"]

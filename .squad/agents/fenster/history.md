@@ -81,3 +81,60 @@ Applied 4 targeted fixes to bring PR #393 from "builds + tests pass" to "ready t
 ---
 
 📌 **Team update (2026-05-27)**: RSU automation batch completed. All 5 agents collaborated on price_cache extension (backend), engine tax/policy enforcement (frontend), and UI configuration. 46 acceptance tests pass. Branch: squad/rsu-ui-wiring. Decisions merged to .squad/decisions.md. Next: yield-units normalization follow-up pending from Hockney.
+📌 Team update (2026-05-29T122212Z): Credit-Card Expense Analysis Pipeline architecture proposal completed by Keaton. Work items CC-1..CC-14 pending Jony sign-off on Section 8 blockers. Your assignments coming imminently.
+
+## 2026-05-29 — CC-7 + CC-8: Credit-Card Expenses UI (`632cd51`, branch `squad/credit-cards`)
+
+**Route:** `/finances/expenses` (Next.js App Router, `force-dynamic`)
+**Nav:** Added "💳 Credit Card Expenses" link under new "Expenses" section in `MainLayout.tsx`
+**Tests:** 31 new (8 MonthlyOverview, 8 UnresolvedQueue, 15 CategoryPicker) — all pass
+**Build:** `npm run build` exit 0, route appears in build manifest
+
+### Components shipped
+
+| File | Description |
+|------|-------------|
+| `page.tsx` | Tab container (Monthly / By Category / Unresolved / Statements) |
+| `MonthlyOverview.tsx` | `@nivo/bar` stacked chart; date-range pills (3/6/12m); transfers toggle default OFF |
+| `CategoryPie.tsx` | `@nivo/pie` donut; month picker; collapsible side-panel; inline drill-down table |
+| `UnresolvedQueue.tsx` | Resolution table: inline CategoryPicker, apply-to-all ON default, bulk modal, optimistic remove, sonner toasts |
+| `CategoryPicker.tsx` | Searchable hierarchical dropdown; English + Hebrew filter; Escape closes; subcategory expand |
+| `StatementsList.tsx` | Bonus tab: statements table with ⚠ icon+text for parse_warnings |
+
+### @nivo/bar + @nivo/pie patterns learned
+
+- `ResponsiveBar` takes `data: Record<string, unknown>[]` with `indexBy` as x-axis key and `keys` as the series names. Colors are passed via `colors={(bar) => colorMap[bar.id]}`.
+- `ResponsivePie` `data` shape: `{ id, label, value, color }[]`. Colors via `colors={(d) => d.data.color}`.
+- Both components need ResizeObserver — mock them entirely in vitest with a `vi.mock('@nivo/bar', ...)` shim returning a `<div>` with data-testid + click handlers. This is cleaner than trying to polyfill ResizeObserver in jsdom.
+- Theme for dark mode: pass `theme={{ axis: { ticks: { text: { fill: '#94a3b8' } } }, grid: { line: { stroke: '#334155' } } }}`.
+- `@nivo/bar` and `@nivo/pie` installed with `--legacy-peer-deps` (React 19 peer compat issue — same pattern as other @nivo packages in this repo).
+
+### Hebrew RTL approach
+
+- Page wrapper: `dir="ltr"` (layout stays LTR for charts + tables).
+- Individual merchant / category cells: `dir="auto"` — browser auto-detects bidi direction from first strong character. Works correctly for both Hebrew and ASCII merchant names.
+- `toLocaleDateString('he-IL')` for date display; `toLocaleString('he-IL')` for currency amounts.
+- `formatMonthHe()` helper uses `Date.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })` for the month picker labels.
+
+### CategoryPicker design decisions
+
+- **Hardcoded tree** from `EXPENSE_CATEGORIES` in `types/expenses.ts` — mirrors McManus's YAML exactly (slugs, Hebrew names, colors, subcategory nesting).
+- Search filters by `name` OR `name_he` at both parent and subcategory level; parent auto-expands when a subcategory matches.
+- `aria-selected` on each `role="option"` item; trigger button has `aria-haspopup="listbox"` + `aria-expanded`.
+- Escape closes via `onKeyDown` on the wrapper div (bubbles up from any focused child).
+- `disabled` prop disables the trigger and suppresses open — used when category picker is in a confirming state.
+
+### Backend gaps discovered (for Hockney)
+
+1. **No `GET /api/expenses/categories` endpoint.** The frontend hardcodes the category tree from McManus's YAML. Tracked as `TODO(CC-9)` in `src/lib/expenses/api.ts`. Hockney should add this endpoint so the UI stays in sync when categories are added. The tree in `types/expenses.ts` is the temporary shim.
+2. **No `suggested_category` field on `UnresolvedTransactionItem`.** The `TODO(v1.5)` is documented in the backend Pydantic model; the frontend column renders blank for now.
+3. **Rate-limit on `POST /api/expenses/resolve` not yet implemented** (Rabin §4.3 — tracked as `TODO(CC-13)` in the backend). Frontend has no special handling needed here.
+
+### Decimal precision
+
+- All client-side aggregation (pivot for bar chart, pie totals) uses `decimal.js` — no native float arithmetic on ILS amounts.
+- `amount_ils` from API is `number` (float64 JSON); accumulated via `new Decimal(row.amount_ils).plus(...)` before `.toNumber()` for the chart. Precision loss is only at the final render step, which is acceptable for display purposes.
+
+### Decisions filed
+
+None needed — no decisions that cross team boundaries. Category tree gap documented as TODO(CC-9) in code comments.

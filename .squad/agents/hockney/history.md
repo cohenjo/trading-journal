@@ -1,3 +1,31 @@
+## 2026-05-29 — CC-14 Backfill (Credit-Card Expenses Pipeline)
+
+**Task:** Historical backfill of 30 credit-card PDFs (Cal/CalPayBox/Max/Isracard) into the expenses pipeline. Confirm all files ingested, run verification queries, document edge cases.
+
+**Learnings:**
+
+- **`expense_inbox_file_hash_unique` blocks duplicate-status rows.** When the dedup path tried to INSERT a new `expense_inbox` row with `status='duplicate'` and the same `file_hash`, it violated the unique constraint — crashing the scanner and blocking the next file. Fix: skip the DB insert entirely for duplicates; just move the file to `processed/` and return `"duplicate"`. The original `completed` row is the authoritative record.
+
+- **`expense_categories` must be seeded before `category_id` populates.** The rule engine correctly resolves 43% of transactions to `resolution_status='auto'` but cannot write the FK because the table is empty. This is a prerequisite (McManus/Keaton), not a pipeline defect.
+
+- **CalPayBox and Cal/5712 statement period dates return `date.min` (0001-01-01).** Individual `txn_date` values are fine — only the statement-header date extraction fails for supplementary-cardholder Cal PDFs and all PayBox layout variants. Non-blocking but should be filed with McManus.
+
+- **Transfers use `resolution_status='transfer'`, not an `is_transfer` column.** All 40 transfer rows are CalPayBox. The rule engine tags them correctly.
+
+- **Hebrew merchants are stored reversed (visual RTL order from pdfplumber).** `merchant_raw` and `merchant_normalized` carry the same reversed string. This is expected per McManus's RTL note — display layer must reverse for rendering.
+
+- **Docker source code is not volume-mounted.** Patching Python source on the host has no effect on the running container. Fixes take effect only after `docker compose build`. Manual file moves were used to unblock the stalled scanner in this session.
+
+**Files changed:**
+- `apps/backend/app/worker/expenses_inbox.py` (fix duplicate-hash UniqueViolation crash in dedup path)
+
+**Deliverables:**
+- `.squad/decisions/inbox/hockney-cc14-backfill.md`
+
+**Outcome:** 30/30 PDFs ingested, 0 errors, 407 transactions, 4 issuers, all cardholders correct.
+
+---
+
 ## 2026-05-27 — RSU Pricing Pipeline
 
 **Task:** End-to-end RSU pricing pipeline: nightly price + dividend_yield cached for MSFT/WIX, exposed via API, hydrated into plan/snapshot JSON blobs.
@@ -85,3 +113,247 @@
 ---
 
 📌 **Team update (2026-05-27)**: RSU automation batch completed. All 5 agents collaborated on price_cache extension (backend), engine tax/policy enforcement (frontend), and UI configuration. 46 acceptance tests pass. Branch: squad/rsu-ui-wiring. Decisions merged to .squad/decisions.md. Next: yield-units normalization follow-up pending from Hockney.
+
+---
+
+## 2026-05-27 — RSU Local Migration Attempt
+
+**Task:** Run merged RSU Alembic migrations against local dev Postgres after PR #480.
+
+**Learnings:**
+
+- **Main synced to PR #480 merge commit `8c9a117`.** The head commit is `RSU automation: live price/yield, 25% dividend tax, payout to income pool (#480)`.
+- **Migration chain is blocked before DB contact.** `f2a3b4c5d6e7_normalize_price_cache_yield_to_percent.py` is present and correctly uses `WHERE dividend_yield IS NOT NULL AND dividend_yield > 0 AND dividend_yield < 1`, but its `down_revision = "e5f6a7b8c9d0"` file is missing from `main`.
+- **No rows were converted.** Per safety rules, I stopped before `uv run alembic current` / `upgrade` because the Alembic revision chain is broken. Final DB head is therefore unverified, and pre/post backfill counts were not collected.
+- **Invocation pattern remains:** run from `apps/backend/` with `uv run alembic ...` once the missing `e5f6a7b8c9d0_add_dividend_yield_to_price_cache.py` migration is restored to `main`.
+- **Gotcha:** unrelated local worktree changes were preserved in a stash named `pre-rsu-migration-sync-2026-05-27T23-37-09+03-00` so `main` could be fast-forwarded safely.
+📌 Team update (2026-05-29T122212Z): Credit-Card Expense Analysis Pipeline architecture proposal completed by Keaton. Work items CC-1..CC-14 pending Jony sign-off on Section 8 blockers. Your assignments coming imminently.
+
+---
+
+## 2026-06-06 — CC-4 Categorization Engine
+
+**Task:** Implement 3-tier categorization engine resolving `category_id + subcategory_id` for each parsed CC transaction. Unblock Redfoot's 10 Section 2 test stubs (C-1 through C-10) in `test_plan_scaffold.py`.
+
+**Learnings:**
+
+- **Resolution order deviates from task spec (user mapping beats YAML rule).** The spec said Tier 1 → Tier 2 (rules) → Tier 3 (mappings). But Redfoot's C-4 explicitly requires user mappings to win over YAML rules. Correct order: transfer pre-check → issuer sector → user-confirmed DB mappings (`source='user'`) → YAML rules → inferred DB mappings → unresolved.
+
+- **Hebrew RTL extraction gotcha (critical for sector dict and rule patterns).** pdfplumber extracts Hebrew PDF characters in visual left-to-right order. Each Hebrew word has characters reversed: `ביטוח` (insurance) → extracted as `חוטיב`. The `_SECTOR_TO_SLUG` dict keys and YAML patterns must be written in the **extracted (reversed)** form.
+
+- **Sector lookup is substring-based, not exact.** `sector_raw` may be multi-word (e.g., `'ניפו חוטיב'`). Lookup iterates `_SECTOR_TO_SLUG` checking `sector_key.lower() in sector_raw.lower()`. Shorter keys like `'חוטיב'` (insurance) match longer sector strings containing that word.
+
+- **`_pick_best_match`: subcategory rules must beat parent rules on equal weight.** The sort key `(-weight, slug_key)` with `slug_key = "category/subcategory"` causes parent rule `"transfers/"` to beat subcategory rule `"transfers/transfers-paybox"` alphabetically (slash < letter). Fix: add a middle sort term `0 if has_subcategory else 1` so subcategory (more specific) wins on weight tie. This was a silent bug — C-5 PAYBOX test failed with `subcategory_id=None` until fixed.
+
+- **SQLModel `Optional[List]` (bare, no type arg) has no SQLAlchemy type mapping.** `parse_warnings: Optional[List]` in `expenses.py` raises `TypeError: Could not resolve type 'List'`. Must be `sa_column=Column(JSON, nullable=True)`. Lesson: always pass a concrete type arg to `List` when SQLModel needs to infer the column type, or use an explicit `sa_column`.
+
+- **SQLModel `Field(nullable=False, sa_column=Column(...))` raises RuntimeError.** `nullable=` in `Field()` conflicts with `sa_column=`. The `nullable` constraint must live only inside `Column()`. Remove it from `Field()` entirely.
+
+- **`gen_random_uuid()` is PostgreSQL-only — SQLite tests need explicit `id=uuid4()`.** The `MerchantCategoryMapping` schema uses `server_default=text("gen_random_uuid()")` for its PK. SQLite in-memory tests must provide an explicit `id` when inserting, otherwise the INSERT fails with `unknown function: gen_random_uuid()`.
+
+- **Module-level category cache (`_CATEGORY_SLUG_CACHE`).** Tests MUST call `_invalidate_category_cache()` before seeding the in-memory DB — and again in fixture teardown. The `seeded_session` fixture handles both. Without teardown invalidation, stale UUIDs from a prior test's engine leak into the next test.
+
+- **Conftest `from __future__ import annotations` must be at file top.** Placing it mid-file inside a section block causes `SyntaxError`. When extending an existing test file that already has `from __future__ import annotations`, don't add it again.
+
+- **`tests/__init__.py` breaks existing tests that `from conftest import ...`.** Adding `tests/__init__.py` to enable `tests.credit_card_pipeline.helpers` imports changes how pytest resolves `conftest` as a module. Existing files using `from conftest import TEST_HOUSEHOLD_ID` stop working. Solution: use relative imports (`from .helpers import ...`) inside the package's own conftest, and define helper classes inline in test files rather than cross-importing.
+
+- **YAML default weight is 0.5, not 1.0.** The task CC-4 description said "default 1.0" but McManus's YAML header comment says `Default = 0.5`. Used 0.5 as `_DEFAULT_RULE_WEIGHT`.
+
+- **`entertainment` category does NOT exist in McManus's YAML.** Redfoot's C-2 expected `category.slug == 'entertainment'` for NETFLIX. McManus put Netflix under `utilities-streaming` (subcategory of `utilities`). Tests must expect `utilities` + `utilities-streaming`.
+
+- **`resolution_source='issuer_sector'` (not `'sector'`).** Matches both decisions.md and Redfoot's test plan C-1.
+
+- **Rabin §5.2 audit requirement.** `match_count += 1` and `last_used_at = datetime.utcnow()` must be set every time a Tier-3 mapping is applied. The DB commit happens inside `_query_mapping()`.
+
+**Files changed:**
+- `apps/backend/app/services/expenses/categorize.py` (new — full 3-tier engine)
+- `apps/backend/app/services/expenses/__init__.py` (re-exports CategoryResolver, CategoryAssignment)
+- `apps/backend/app/schema/expenses.py` (fix parse_warnings JSON column, remove nullable conflict)
+- `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 2: 10 skips → passing tests)
+- `apps/backend/tests/credit_card_pipeline/conftest.py` (new — seeded_session fixture)
+- `apps/backend/tests/credit_card_pipeline/helpers.py` (new — _SyntheticTxn, seed_expense_categories)
+- `apps/backend/tests/conftest.py` (import expenses schema to register tables in SQLModel.metadata)
+
+**Commit:** `bf899da` on `squad/credit-cards`
+
+---
+
+## 2026-06-01 — CC-2: Credit-Card PDF Parsers
+
+**Task:** Implement 4 PDF parsers (Cal, CalPayBox, Max, Isracard) using pdfplumber;
+base classes, fingerprint detector, dispatcher; all Rabin security conditions.
+
+**Learnings:**
+
+- **pdfplumber extracts Hebrew in VISUAL (character-reversed) order.** Do NOT
+  reverse or re-order Hebrew codepoints. Store `merchant_raw` and `sector_raw`
+  verbatim. The category engine's sector lookup works on visual-order strings.
+  Reversing them will silently break category resolution.
+
+- **Cal column order is LTR extracted:** `charge_ils | txn_amount | card_shown | [installment] | sector | merchant | date`.
+  The installment marker `N - מ M םולשת` has total FIRST (N), num SECOND (M)
+  in visual order — opposite of logical reading order.
+
+- **Fixture trap: `_CAL_FIXTURES["fx_row"]` = `04-26-2.pdf` is CalPayBox, not Cal FX.**
+  Real Cal FX row is in `05-26.pdf`. `_CAL_FIXTURES["installment"]` = `05-26-3.pdf`
+  has no installment rows — use `01-26.pdf` or `02-26.pdf` instead.
+
+- **Max date artefact**: pdfplumber occasionally yields 3-digit year `05/04/267`.
+  Fix: take first 2 digits of year field → `26` → `2026`. Pattern: `DD/MM/YY[Y]`.
+
+- **Max date–merchant concatenation**: date is often directly appended to merchant
+  with no space separator: `UPAPP05/04/267`. Use `_DATE_RE = re.compile(r'(\d{2}/\d{2}/\d{2,3})$')`.
+
+- **Isracard split-letter artefact**: pdfplumber inserts a space after the first letter
+  of all-caps Latin words in the foreign section: `E UROPAPARK` → fix with
+  `_fix_split_latin_merchant()` using `re.sub(r'(?<![A-Z])([A-Z]) ([A-Z])', r'\1\2', s)`
+  applied twice.
+
+- **Isracard refund FX rows omit the commission column.** Normal FX rows have
+  `charge | 0.00 | rate | ...`; refund rows have `charge | rate | ...` (no commission).
+  Detect by checking if charge is negative.
+
+- **SIGALRM timeout works on macOS/Linux but NOT on Windows.** If porting to Windows,
+  replace with a threading.Timer approach.
+
+- **pdfplumber==0.11.9 pin**: changes to pyproject.toml pin require Docker image
+  rebuild when CC-5 worker ships. Flag in PR.
+
+- **Sector/merchant split strategy**: sort known sector tokens by descending length
+  and use `str.find()` not regex — more reliable for Hebrew substring matching
+  since re anchoring interacts poorly with bidirectional text.
+
+**Files changed:**
+- `apps/backend/app/services/expenses/parsers/__init__.py` (new)
+- `apps/backend/app/services/expenses/parsers/base.py` (new)
+- `apps/backend/app/services/expenses/parsers/fingerprint.py` (new)
+- `apps/backend/app/services/expenses/parsers/cal.py` (new)
+- `apps/backend/app/services/expenses/parsers/cal_paybox.py` (new)
+- `apps/backend/app/services/expenses/parsers/max.py` (new)
+- `apps/backend/app/services/expenses/parsers/isracard.py` (new)
+- `apps/backend/app/services/expenses/parsers/dispatcher.py` (new)
+- `apps/backend/tests/credit_card_pipeline/test_cc2_parsers.py` (new — 19 tests)
+- `apps/backend/pyproject.toml` (pin pdfplumber==0.11.9)
+- `apps/backend/uv.lock` (regenerated)
+
+**PR:** https://github.com/cohenjo/trading-journal/pull/483
+
+---
+
+## 2026-06-XX — CC-6: Expense Pipeline REST API
+
+**Task:** Implement 5 REST API endpoints for the credit-card expense pipeline and replace 19 `pytest.skip()` stubs with passing tests.
+
+**Learnings:**
+
+- **Auth dep pattern for CC endpoints:** Use `user_id: UUID = Depends(get_current_user_id)` on every endpoint. Also register the router with `dependencies=auth_dep` in `main.py` — belt-and-suspenders (Rabin §4.1). The `get_current_user_id` dep chains through `get_current_user` which raises HTTP 401 on missing/invalid JWT.
+
+- **Household scoping is explicit, not implicit:** Call `_require_household(db, user_id)` (raises 403 if not member) then filter every query with `WHERE household_id == household_id`. Do NOT rely on RLS alone (Rabin §4.2).
+
+- **Decimal → float serialization:** The global `ENCODERS_BY_TYPE[Decimal] = float` in `decimal_encoder.py` handles Pydantic model serialization. Still convert explicitly with `float(txn.amount_ils)` in response model constructors for clarity and to avoid edge-case surprises in raw `db.execute()` results.
+
+- **Cross-DB YYYY-MM month grouping:** `func.substr(cast(col, String), 1, 7)` works in both SQLite (stores datetimes as `'2026-01-15 00:00:00'`) and PostgreSQL (casts DATE/TIMESTAMP to `'2026-01-15'`). Avoids dialect-specific `date_trunc()` / `to_char()`.
+
+- **Rate-limit gap — no slowapi in codebase:** Discovered when implementing `POST /resolve`. There is no rate-limit middleware anywhere in the project. Documented as `# TODO(CC-13)` comment in the endpoint (Rabin §4.3). Do NOT add slowapi as an undiscussed new dependency — track in CC-13 hardening pass.
+
+- **Resolve endpoint atomicity:** Wrap all DB writes (UPSERT mapping + update target txn + bulk-update matching txns) in a `try/except` with explicit `db.rollback()` on failure, `db.commit()` only at the end. The ORM session auto-begins a transaction; explicit rollback avoids dirty state leaking.
+
+- **UPSERT pattern for SQLite compatibility:** Python check-then-insert-or-update pattern (not PostgreSQL `ON CONFLICT DO UPDATE`). Filter on `(merchant_normalized, household_id, source='user')` to find the existing mapping.
+
+- **Mapping poisoning guard (Rabin §5.2):** `created_by = str(user_id)` must be set on BOTH insert AND update branches of the UPSERT. Using the caller's actual UUID (not a sentinel or None) lets future audits trace which user created/modified each mapping.
+
+- **Back-apply sets `resolution_source='mapping'`:** Directly-confirmed transactions get `resolution_source='user'`; back-applied matching transactions get `resolution_source='mapping'` to distinguish "user explicitly chose this" from "learned from a mapping rule".
+
+- **Test `_make_txn` helper needs explicit `id=uuid4()` and `statement_id`:** SQLite doesn't run PostgreSQL server-side defaults (`gen_random_uuid()`). Always supply `id` and `statement_id` when inserting ORM objects in SQLite tests.
+
+- **`seeded_session` slug_map keys:** The `seeded_session` fixture (cc-pipeline conftest) yields `(session, slug_map)` where `slug_map` maps category slug → UUID. Categories include `'groceries'`, `'restaurants'`, `'transfers'` (is_transfer=True), `'fuel'`, etc. Use slugs as dict keys to get category IDs for test transactions.
+
+**Files changed:**
+- `apps/backend/app/api/expenses.py` (new — 5 endpoints, ~350 lines)
+- `apps/backend/main.py` (add expenses import + router registration)
+- `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 4: replace 19 skips with 19 passing tests)
+
+---
+
+## 2026-05-29 — CC-5: Inbox Scanner Worker Job
+
+**Task:** Implement the scheduled inbox-scanner worker (CC-5): 60s APScheduler interval job that scans `reports/credit-card/inbox/`, ingests new PDFs end-to-end (parse → categorize → DB persist), and enforces all Rabin security conditions.
+
+**Learnings:**
+
+- **Two-phase DB transaction pattern for reliable ingestion:** Phase 1 commits the `ExpenseInbox` row with `status='processing'` immediately (survives Phase 2 failure). Phase 2 does `dispatch_pdf()` + builds statement/transactions + commits atomically. On Phase 2 failure: `db.rollback()`, then re-query the inbox row by `inbox_id` (same session has rolled back but the row survived Phase 1), increment `retry_count`, set `status='errored'`, commit separately. Always re-query after rollback — don't reuse in-memory ORM objects across a rollback boundary.
+
+- **Pre-commit stash interference:** The pre-commit hook framework (`pre-commit`) stashes unstaged changes before running hooks. When ruff finds and fixes issues in the staged files, the commit fails with the original staged content. The fix: `git add` again after pre-commit has auto-fixed the files, then re-commit. The re-commit passes immediately.
+
+- **`shutil.move` over `Path.rename` for cross-device safety:** `Path.rename` raises `OSError` when source and destination are on different filesystems (e.g., Docker volume mount vs. temp dir). `shutil.move` falls back to copy+delete transparently. Always use `shutil.move` for inbox → processed/errors moves.
+
+- **`threading.Lock(blocking=False)` for APScheduler tick guard:** `_scan_lock.acquire(blocking=False)` returns `False` immediately if the lock is held, without blocking. Combined with `try/finally: _scan_lock.release()` this ensures a slow scan tick doesn't queue up duplicate runs on the next tick.
+
+- **Monkeypatch module-level `Path` constants in tests:** `monkeypatch.setattr(expenses_inbox, "INBOX_DIR", tmp_path / "inbox")` works cleanly because Python module globals are mutable. Also reset `_DEFAULT_HOUSEHOLD_ID` to `None` between tests since it caches across calls (`monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)`).
+
+- **SQLite test session factory injection:** Worker functions that call `Session(engine)` can't be tested with the test's in-memory SQLite session. Solution: `session_factory` parameter with `@contextmanager` protocol — `scan_inbox_once(session_factory=sf, household_id=TEST_HOUSEHOLD_ID)` where `sf` is a contextmanager that yields the test session.
+
+- **`seeded_session` needed only for tests that trigger `CategoryResolver`:** Tests that only exercise error paths (fake PDFs, orphaned row reset) don't need category seed data and can use the plain `session` fixture. Tests that exercise the success path need `seeded_session` to avoid `CategoryResolver` failing on empty categories table.
+
+- **D-3 hash collision test is `xfail` — never modify it:** `test_dedup_hash_collision_design_tradeoff` is intentionally `@pytest.mark.xfail(strict=False)` to document an accepted design trade-off. Leave it untouched when implementing CC-5 — it's a design note, not a bug.
+
+**Files changed:**
+- `apps/backend/app/worker/expenses_inbox.py` (new — 350 lines, full worker implementation)
+- `apps/backend/app/worker/registry.py` (add expenses_inbox_scan interval job, gated on env var)
+- `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 3 + 5: 14 CC-5 stubs implemented)
+
+**Decisions:** None — all architecture pre-approved in `.squad/decisions.md` CC-5 entry and Rabin security review.
+
+## CC-11 Follow-up: Thread-safe timeout + Docker inbox mount (2025-Q3)
+
+### What was done
+
+**Fix #1 — SIGALRM → concurrent.futures (CC-5/CC-11 follow-up)**
+
+Kujan's CC-11 Docker worker rebuild exposed that `dispatch_pdf` used
+`signal.SIGALRM` for its 30 s parser timeout.  APScheduler runs jobs in a
+thread pool; `signal.alarm` is restricted to the main thread, so every PDF
+processed by the scheduled worker errored with "signal only works in main
+thread of the main interpreter".
+
+Replaced with `concurrent.futures.ThreadPoolExecutor(max_workers=1)` +
+`Future.result(timeout=timeout_seconds)`.  On timeout, `executor.shutdown(
+wait=False)` is called so the caller is not blocked waiting for a hung
+pdfplumber thread; the background thread is daemon-reaped on process exit.
+The existing `ParserTimeout` exception and 30 s cap are preserved — Rabin's
+CC-12 §timeout requirement is met.
+
+Added `test_dispatch_pdf_timeout_works_from_worker_thread` in
+`tests/credit_card_pipeline/test_cc2_parsers.py`.  Uses `threading.Thread` +
+a monkeypatched `threading.Event`-based hanging parser.  Asserts
+`ParserTimeout` is raised cleanly with no SIGALRM error.
+
+Commit: `12aeb4b` — `fix(expenses): replace SIGALRM with thread-safe timeout in dispatch_pdf (CC-11 follow-up)`
+
+**Fix #2 — Docker volume mount for inbox (CC-11 MEDIUM TODO #2)**
+
+Without a volume mount, the container saw an empty `reports/credit-card/`
+directory.  Added to `docker-compose.backend.yml`:
+```yaml
+volumes:
+  - ./reports/credit-card:/app/reports/credit-card
+```
+This single rw mount covers `inbox/`, `processed/`, and `errors/` (the worker
+auto-creates subdirs with `chmod 0700` on startup — confirmed in
+`expenses_inbox.py`).  Also documented `CREDIT_CARD_INBOX_DIR` and
+`CREDIT_CARD_INBOX_ENABLED` in `apps/backend/.env.example`.
+
+Commit: `462afc9` — `chore(docker): mount credit-card inbox into worker container (CC-11 follow-up)`
+
+### Test results
+- **63 passed, 48 skipped, 1 xfailed** in `tests/credit_card_pipeline/` — all green.
+- New thread-timeout test passes cleanly (< 3 s wall time).
+
+### Lessons learned
+- `ThreadPoolExecutor.__exit__` calls `shutdown(wait=True)` — if a future
+  times out and you use a `with` block, the context manager blocks on the
+  hung background thread.  Always call `shutdown(wait=False)` explicitly on
+  the timeout path and don't rely on the context manager.
+- Test fixtures that simulate hangs should use `threading.Event` rather than
+  `time.sleep(N)` so they can be released cleanly after the timeout path is
+  exercised; this avoids zombie threads in the test process.
