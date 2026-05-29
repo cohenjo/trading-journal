@@ -28,6 +28,16 @@ export interface AuthCookieFixtures {
   authenticatedUser: { page: Page; email: string; userId: string; accessToken: string };
 }
 
+/** Worker-scoped session data (created once per Playwright worker, not per test). */
+interface WorkerSession {
+  email: string;
+  userId: string;
+  cookieName: string;
+  cookieValue: string;
+  cookieExpires: number;
+  accessToken: string;
+}
+
 const PASSWORD = 'E2eTestPass!1';
 
 function base64UrlEncode(input: string): string {
@@ -72,47 +82,66 @@ function projectRefFromUrl(url: string): string {
   return url.replace('https://', '').split('.')[0];
 }
 
-export const test = base.extend<AuthCookieFixtures>({
-  authenticatedUser: async ({ page }, use) => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !anonKey) {
-      throw new Error('NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY must be set');
-    }
+export const test = base.extend<AuthCookieFixtures, { _workerSession: WorkerSession }>({
+  // ── Worker-scoped: create ONE user per Playwright worker ──────────────────
+  // This dramatically reduces Supabase auth API calls (1 per worker instead of
+  // 1 per test), which prevents hitting rate limits when running many tests.
+  _workerSession: [
+    async ({}, use) => {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !anonKey) {
+        throw new Error('NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY must be set');
+      }
 
-    const email = makeE2eEmail();
-    const { id: userId } = await createE2eUser(email, PASSWORD);
+      const email = makeE2eEmail();
+      const { id: userId } = await createE2eUser(email, PASSWORD);
 
-    // 1. Get tokens via direct REST call (no cookie storage in Node).
-    const session = await passwordGrant(supabaseUrl, anonKey, email, PASSWORD);
-    if (!session.expires_at) {
-      session.expires_at = Math.floor(Date.now() / 1000) + (session.expires_in ?? 3600);
-    }
+      const session = await passwordGrant(supabaseUrl, anonKey, email, PASSWORD);
+      if (!session.expires_at) {
+        session.expires_at = Math.floor(Date.now() / 1000) + (session.expires_in ?? 3600);
+      }
 
-    // 2. Build the cookie @supabase/ssr expects.
-    const ref = projectRefFromUrl(supabaseUrl);
-    const cookieName = `sb-${ref}-auth-token`;
-    const cookieValue = 'base64-' + base64UrlEncode(JSON.stringify(session));
+      const ref = projectRefFromUrl(supabaseUrl);
+      const cookieName = `sb-${ref}-auth-token`;
+      const cookieValue = 'base64-' + base64UrlEncode(JSON.stringify(session));
 
-    // 3. Inject the cookie before any navigation. Use port-explicit URL so
-    //    Playwright sets the cookie on localhost:3000.
+      await use({
+        email,
+        userId,
+        cookieName,
+        cookieValue,
+        cookieExpires: session.expires_at,
+        accessToken: session.access_token,
+      });
+
+      await deleteE2eUser(userId).catch(() => {
+        /* best-effort */
+      });
+    },
+    { scope: 'worker' },
+  ],
+
+  // ── Test-scoped: inject the shared cookie into a fresh page ───────────────
+  authenticatedUser: async ({ page, _workerSession }, use) => {
     await page.context().addCookies([
       {
-        name: cookieName,
-        value: cookieValue,
+        name: _workerSession.cookieName,
+        value: _workerSession.cookieValue,
         domain: 'localhost',
         path: '/',
         httpOnly: false,
         secure: false,
         sameSite: 'Lax',
-        expires: session.expires_at,
+        expires: _workerSession.cookieExpires,
       },
     ]);
 
-    await use({ page, email, userId, accessToken: session.access_token });
-
-    await deleteE2eUser(userId).catch(() => {
-      /* best-effort */
+    await use({
+      page,
+      email: _workerSession.email,
+      userId: _workerSession.userId,
+      accessToken: _workerSession.accessToken,
     });
   },
 });

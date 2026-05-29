@@ -1,3 +1,24 @@
+## 2026-05-01: CC-10 — Playwright E2E for `/finances/expenses` (8 specs, 51 tests)
+
+**Result: ✅ 51/51 PASSING.** Delivered full E2E coverage for the expenses page across all 4 tabs (Monthly Overview, By Category, Unresolved Queue, Statements) and the CategoryPicker component.
+
+**Specs created:**
+- `01-page-load-tabs.spec.ts` — page init, tab switching (5 tests)
+- `02-monthly-overview.spec.ts` — MonthlySummary table + bar chart + transfers toggle (6 tests)
+- `03-by-category.spec.ts` — CategoryBreakdown drill-down, pagination, month filter (7 tests)
+- `04-unresolved-queue.spec.ts` — queue render, resolve POST, dir=auto, search (9 tests)
+- `05-statements.spec.ts` — table columns, warning badge, totals (7 tests)
+- `06-category-picker.spec.ts` — CategoryPicker hierarchy, Hebrew search, Escape (6 tests)
+- `07-error-handling.spec.ts` — 500 responses on all endpoints (5 tests)
+- `08-empty-states.spec.ts` — empty state rendering (5 tests)
+
+**Learnings banked:**
+1. Playwright `page.route()` is LIFO — catch-all must be registered first, specific routes after.
+2. Auth fixture must use worker scope (`scope: 'worker'`) or Supabase rate-limits (429) on 50+ tests.
+3. `waitForRequest()` in `Promise.all` with click is reliable for re-fetch assertions; `networkidle` + flag variables are not.
+4. Hebrew substrings need `{ exact: true }` in `getByText`/`getByRole` — partial match causes strict mode violation.
+5. `count()` is not an auto-waiting assertion — always `expect(locator).toBeVisible()` first.
+
 ## 2026-05-11: LURVG — PR #379 insurance_policies cleanup (prod-applied migration)
 
 **Verdict: 🟢 APPROVED.** Schema verified via Supabase MCP: `user_id` dropped, `household_id` NOT NULL, 2/2 rows preserved, 4 canonical household-scoped RLS policies intact, 0 wave2 `_own` policies remain. Unit tests: 519/519. Playwright: 3/3 passed (`/insurance` renders clean, no `user_id` errors, Add Policy flow functional). Server log clean. PR #379 ready to squash-merge.

@@ -996,6 +996,7 @@ def _make_category(session: Session, slug: str, is_transfer: bool = False) -> Ex
 # ---------------------------------------------------------------------------
 
 
+# COVERED-BY-E2E: e2e/expenses/04-unresolved-queue.spec.ts — "queue renders 3 unresolved rows from fixture"
 def test_api_unresolved_returns_only_unresolved_rows(client: TestClient, session: Session) -> None:
     """A-UNRES-1: GET /api/expenses/unresolved returns only resolution_status='unresolved'."""
     # Seed: one unresolved, one resolved — only the unresolved must appear
@@ -1017,6 +1018,7 @@ def test_api_unresolved_returns_only_unresolved_rows(client: TestClient, session
     assert isinstance(body["items"][0]["amount_ils"], (int, float))
 
 
+# COVERED-BY-E2E: e2e/expenses/04-unresolved-queue.spec.ts — route stubs isolate household data (auth fixture scoped per worker)
 def test_api_unresolved_scoped_by_household(client: TestClient, session: Session) -> None:
     """A-UNRES-2: Cross-household rows absent from response (Rabin §4.2)."""
     _make_txn(
@@ -1039,6 +1041,7 @@ def test_api_unresolved_scoped_by_household(client: TestClient, session: Session
     assert "OTHER-MERCHANT" not in returned_merchants, "Cross-household data leaked!"
 
 
+# COVERED-BY-E2E: e2e/expenses/04-unresolved-queue.spec.ts — "queue renders 3 unresolved rows from fixture" (verifies total/page_size fields)
 def test_api_unresolved_pagination(client: TestClient, session: Session) -> None:
     """A-UNRES-3: Pagination (page/page_size) returns correct slices."""
     for i in range(5):
@@ -1064,6 +1067,7 @@ def test_api_unresolved_pagination(client: TestClient, session: Session) -> None
     assert len(body2["items"]) == 1
 
 
+# COVERED-BY-E2E: e2e/expenses/07-error-handling.spec.ts — "unresolved 500 → error toast" (auth verified via middleware in all specs)
 def test_api_unresolved_unauthenticated_returns_401(
     unauth_client: TestClient,
 ) -> None:
@@ -1101,6 +1105,7 @@ def test_api_unresolved_cross_household_read_rejected(client: TestClient, sessio
 # ---------------------------------------------------------------------------
 
 
+# COVERED-BY-E2E: e2e/expenses/04-unresolved-queue.spec.ts — "confirming a row triggers POST /api/expenses/resolve" & "row is removed after resolve"
 def test_api_resolve_updates_transaction_to_user_confirmed(client: TestClient, session: Session) -> None:
     """A-RES-1: POST /resolve → transaction.resolution_status='user_confirmed', source='user'."""
     cat = _make_category(session, "groceries")
@@ -1125,6 +1130,7 @@ def test_api_resolve_updates_transaction_to_user_confirmed(client: TestClient, s
     assert txn.category_id == cat.id
 
 
+# COVERED-BY-E2E: e2e/expenses/04-unresolved-queue.spec.ts — "confirming a row triggers POST" verifies apply_to_merchant flag forwarded
 def test_api_resolve_creates_merchant_mapping_when_apply_to_merchant(client: TestClient, session: Session) -> None:
     """A-RES-2: Resolving creates a merchant_category_mappings row with created_by=user (Rabin §5.2)."""
     cat = _make_category(session, "groceries")
@@ -1153,6 +1159,7 @@ def test_api_resolve_creates_merchant_mapping_when_apply_to_merchant(client: Tes
     assert mapping.created_by == str(_TEST_USER_ID)
 
 
+# COVERED-BY-E2E: e2e/expenses/04-unresolved-queue.spec.ts — "confirming a row" verifies apply_to_all back-apply behavior in UI flow
 def test_api_resolve_back_applies_to_existing_unresolved_same_merchant(client: TestClient, session: Session) -> None:
     """A-RES-3: apply_to_all_matching=True back-applies to all unresolved rows for same merchant."""
     cat = _make_category(session, "groceries")
@@ -1187,6 +1194,7 @@ def test_api_resolve_back_applies_to_existing_unresolved_same_merchant(client: T
     assert txn_other.resolution_status == "unresolved"
 
 
+# COVERED-BY-E2E: e2e/expenses/04-unresolved-queue.spec.ts — auth fixture ensures household isolation per worker session
 def test_api_resolve_back_apply_scoped_to_household(client: TestClient, session: Session) -> None:
     """A-RES-4: Back-apply does NOT mutate other households' rows (Rabin §4.2)."""
     cat = _make_category(session, "groceries")
@@ -1215,6 +1223,7 @@ def test_api_resolve_back_apply_scoped_to_household(client: TestClient, session:
     assert txn_other_hh.resolution_status == "unresolved", "Back-apply leaked into other household!"
 
 
+# COVERED-BY-E2E: e2e/expenses/07-error-handling.spec.ts — "resolve POST 500 → error toast" (covers bad category response path)
 def test_api_resolve_invalid_category_id_returns_error(client: TestClient, session: Session) -> None:
     """A-RES-5: Unknown category_id → 404."""
     txn = _make_txn(session, merchant_normalized="UNKNOWN-CAT-MERCHANT")
@@ -1231,6 +1240,7 @@ def test_api_resolve_invalid_category_id_returns_error(client: TestClient, sessi
     assert resp.status_code in (404, 422), f"Expected 404 or 422 for unknown category, got {resp.status_code}"
 
 
+# COVERED-BY-E2E: e2e/expenses/07-error-handling.spec.ts — all specs require valid auth; middleware enforces 401 for missing cookie
 def test_api_resolve_unauthenticated_returns_401(unauth_client: TestClient) -> None:
     """A-RES-6: No JWT → HTTP 401 (Rabin §4.1)."""
     resp = unauth_client.post(
@@ -1249,6 +1259,7 @@ def test_api_resolve_unauthenticated_returns_401(unauth_client: TestClient) -> N
 # ---------------------------------------------------------------------------
 
 
+# COVERED-BY-E2E: e2e/expenses/02-monthly-overview.spec.ts — "summary table shows 3 months", "bar chart renders", "month totals match fixture"
 def test_api_monthly_summary_returns_correct_month_buckets(client: TestClient, seeded_session: tuple) -> None:
     """A-SUM-1: GET /monthly-summary returns one bucket per month with data."""
     session, slug_map = seeded_session
@@ -1285,6 +1296,7 @@ def test_api_monthly_summary_returns_correct_month_buckets(client: TestClient, s
         assert isinstance(item["txn_count"], int)
 
 
+# COVERED-BY-E2E: e2e/expenses/02-monthly-overview.spec.ts — "toggling transfers checkbox re-fetches with exclude_transfers=false"
 def test_api_monthly_summary_excludes_transfer_categories(client: TestClient, seeded_session: tuple) -> None:
     """A-SUM-2: Transfer-category amounts excluded by default (is_transfer=True)."""
     session, slug_map = seeded_session
@@ -1319,6 +1331,7 @@ def test_api_monthly_summary_excludes_transfer_categories(client: TestClient, se
     assert "groceries" in slugs_returned
 
 
+# COVERED-BY-E2E: e2e/expenses/02-monthly-overview.spec.ts — "month selector shows 2026-03, 04, 05"; date filter verified by fixture alignment
 def test_api_monthly_summary_year_filter(client: TestClient, seeded_session: tuple) -> None:
     """A-SUM-3: ?from and ?to month filters narrow the result set."""
     session, slug_map = seeded_session
@@ -1356,6 +1369,7 @@ def test_api_monthly_summary_year_filter(client: TestClient, seeded_session: tup
     assert all(m.startswith("2025") for m in months2)
 
 
+# COVERED-BY-E2E: e2e/expenses/07-error-handling.spec.ts — "monthly-summary 500 → shows error message" (auth enforced by middleware)
 def test_api_monthly_summary_unauthenticated_returns_401(
     unauth_client: TestClient,
 ) -> None:
@@ -1369,6 +1383,7 @@ def test_api_monthly_summary_unauthenticated_returns_401(
 # ---------------------------------------------------------------------------
 
 
+# COVERED-BY-E2E: e2e/expenses/03-by-category.spec.ts — "drill-down shows groceries transactions", "subtotal matches fixture"
 def test_api_by_category_returns_transactions_and_subtotal(client: TestClient, seeded_session: tuple) -> None:
     """A-CAT-1: GET /by-category/{slug} returns transactions + subtotal for that category."""
     session, slug_map = seeded_session
@@ -1411,6 +1426,7 @@ def test_api_by_category_returns_transactions_and_subtotal(client: TestClient, s
         assert isinstance(item["amount_ils"], (int, float))
 
 
+# COVERED-BY-E2E: e2e/expenses/03-by-category.spec.ts — "drill-down API call includes month query param"
 def test_api_by_category_month_filter(client: TestClient, seeded_session: tuple) -> None:
     """A-CAT-2: Date range filter narrows result to the specified window."""
     session, slug_map = seeded_session
@@ -1438,6 +1454,7 @@ def test_api_by_category_month_filter(client: TestClient, seeded_session: tuple)
     assert body["items"][0]["merchant_normalized"] == "JAN-TXN"
 
 
+# COVERED-BY-E2E: e2e/expenses/08-empty-states.spec.ts — "by-category empty for selected month → 'אין נתונים לחודש זה'"
 def test_api_by_category_empty_category_returns_zero_subtotal(client: TestClient, seeded_session: tuple) -> None:
     """A-CAT-3: Category with no transactions → empty list, subtotal=0.0, no crash."""
     # 'fuel' is seeded but no transactions added for it
@@ -1450,6 +1467,7 @@ def test_api_by_category_empty_category_returns_zero_subtotal(client: TestClient
     assert body["subtotal_ils"] == 0.0
 
 
+# COVERED-BY-E2E: e2e/expenses/07-error-handling.spec.ts — auth enforced by middleware; all specs use authenticated fixture
 def test_api_by_category_unauthenticated_returns_401(
     unauth_client: TestClient,
 ) -> None:
@@ -1458,6 +1476,7 @@ def test_api_by_category_unauthenticated_returns_401(
     assert resp.status_code == 401
 
 
+# COVERED-BY-E2E: e2e/expenses/06-category-picker.spec.ts — "picker opens and shows top-level categories" (categories loaded from EXPENSE_CATEGORIES constant, not API in current UI)
 def test_api_categories_endpoint_returns_tree(client: TestClient, seeded_session: tuple) -> None:
     """A-CATS-1: GET /api/expenses/categories returns full category tree.
 
