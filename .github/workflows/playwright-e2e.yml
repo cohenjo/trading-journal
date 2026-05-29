@@ -82,10 +82,10 @@ jobs:
           fi
           echo "✅ All required E2E secrets present."
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: apps/frontend/package-lock.json
 
@@ -165,10 +165,10 @@ jobs:
           fi
           echo "✅ All required E2E secrets present."
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: apps/frontend/package-lock.json
 
@@ -212,33 +212,64 @@ jobs:
           path: apps/frontend/test-results/
           retention-days: 7
 
-      - name: Create GitHub issue on nightly failure
+      - name: Create GitHub issue on nightly failure (deduped)
         uses: actions/github-script@v9
         if: failure()
         with:
           script: |
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const today = new Date().toISOString().slice(0, 10);
-            await github.rest.issues.create({
+
+            // Search for existing open issues with the nightly-failure title prefix.
+            const { data: openIssues } = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `🔴 E2E nightly suite failed — ${today}`,
-              body: [
-                '## Nightly E2E Suite Failure',
-                '',
-                `The nightly Playwright full suite failed on **${today}**.`,
-                '',
-                `**Run:** ${runUrl}`,
-                '',
-                '### Next steps',
-                '1. Check the Playwright report artifact in the run above.',
-                '2. Identify flaky tests vs genuine regressions.',
-                '3. Tag this issue with the affected tier (`@smoke`, `@auth`, `@flow`).',
-                '',
-                '/cc @cohenjo',
-              ].join('\n'),
-              labels: ['e2e-testing', 'bug'],
+              state: 'open',
+              labels: 'e2e-testing',
+              per_page: 50,
             });
+
+            const dupes = openIssues
+              .filter(i => i.title.startsWith('🔴 E2E nightly suite failed'))
+              .sort((a, b) => b.number - a.number);
+
+            if (dupes.length > 0) {
+              // Append a comment on the most recent open issue instead of filing a new one.
+              const existing = dupes[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: [
+                  `Nightly run for **${today}** also failed — see ${runUrl}`,
+                  '',
+                  `last-failure: ${today}`,
+                ].join('\n'),
+              });
+              console.log(`Appended comment to existing issue #${existing.number}`);
+            } else {
+              // No open issue found — create a fresh one.
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔴 E2E nightly suite failed — ${today}`,
+                body: [
+                  '## Nightly E2E Suite Failure',
+                  '',
+                  `The nightly Playwright full suite failed on **${today}**.`,
+                  '',
+                  `**Run:** ${runUrl}`,
+                  '',
+                  '### Next steps',
+                  '1. Check the Playwright report artifact in the run above.',
+                  '2. Identify flaky tests vs genuine regressions.',
+                  '3. Tag this issue with the affected tier (`@smoke`, `@auth`, `@flow`).',
+                  '',
+                  '/cc @cohenjo',
+                ].join('\n'),
+                labels: ['e2e-testing', 'bug'],
+              });
+            }
 
   # ──────────────────────────────────────────────────────────────────────────
   # e2e-dispatch: Manual on-demand run with configurable suite + URL
@@ -271,10 +302,10 @@ jobs:
           fi
           echo "✅ All required E2E secrets present."
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: apps/frontend/package-lock.json
 
