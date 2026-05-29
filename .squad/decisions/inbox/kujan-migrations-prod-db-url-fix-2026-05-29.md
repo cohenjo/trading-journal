@@ -14,12 +14,11 @@ Because those failures blocked production migration applies, the credit-card exp
 
 ## Decision
 
-Keep the preferred Supabase CLI linked-project path when `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD` are present. Add `SUPABASE_PROD_DB_URL` as the emergency fallback path for production migrations when the Management API secrets are unavailable.
+Keep the preferred Supabase CLI linked-project path when `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD` are present. Add `SUPABASE_PROD_DB_URL` as the emergency fallback path when the Management API secrets are unavailable.
 
-The fallback uses Supabase CLI `--db-url` for both pending migration visibility and apply:
+The first DB-URL implementation tried Supabase CLI `--db-url`, but the production project still has known migration-history drift from the 2026-05-13 audit. `supabase db push --db-url` correctly connected, then failed because production tracks remote-only migration versions that do not exist locally.
 
-- `supabase migration list --db-url "$SUPABASE_PROD_DB_URL"`
-- `supabase db push --db-url "$SUPABASE_PROD_DB_URL" --yes`
+Given that prior Kujan decision says to use targeted direct `psql` applies until drift is reconciled, the fallback now uses direct `psql` for the idempotent credit-card expense pipeline migrations and verifies the five required production tables exist afterward.
 
 The workflow must not print the connection string; it masks the secret before using it.
 
