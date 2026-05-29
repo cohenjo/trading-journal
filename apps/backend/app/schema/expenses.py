@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy import Column, Numeric, text
+from sqlalchemy import Column, JSON, Numeric, text
 from sqlmodel import Field, SQLModel
 
 
@@ -107,10 +107,13 @@ class CreditCardStatement(SQLModel, table=True):
         ),
     )
     txn_count: Optional[int] = Field(default=None)
-    parse_warnings: Optional[List] = Field(
+    parse_warnings: Optional[List[str]] = Field(
         default=None,
-        sa_column_kwargs={"server_default": text("'[]'::jsonb")},
-        description="Array of parser warning strings.",
+        sa_column=Column(
+            JSON,
+            nullable=True,
+            comment="Array of parser warning strings.",
+        ),
     )
     ingested_at: datetime = Field(
         default=None,
@@ -151,7 +154,6 @@ class CreditCardTransaction(SQLModel, table=True):
         description="Cleaned merchant: uppercase, stripped punctuation and Ltd suffixes.",
     )
     amount_ils: Decimal = Field(
-        nullable=False,
         sa_column=Column(
             Numeric(12, 2),
             nullable=False,
