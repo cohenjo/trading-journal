@@ -129,7 +129,7 @@ class CategoryAssignment:
     category_id:       UUID of the matched top-level ExpenseCategory, or None.
     subcategory_id:    UUID of the matched subcategory, or None.
     resolution_status: 'auto' | 'transfer' | 'unresolved'
-    resolution_source: 'issuer_sector' | 'rule' | 'mapping' | None
+    resolution_source: 'sector' | 'rule' | 'mapping' | None
     is_transfer:       True when the category is a cash-transfer (PayBox etc.)
                        Transfers are excluded from household expense totals.
     """
@@ -446,7 +446,7 @@ class CategoryResolver:
                     category_id=cat_id,
                     subcategory_id=None,
                     resolution_status="auto",
-                    resolution_source="issuer_sector",
+                    resolution_source="sector",
                     is_transfer=False,
                 )
         return None

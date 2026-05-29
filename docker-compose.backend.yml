@@ -20,6 +20,7 @@ services:
       WORKER_HEARTBEAT_FILE: /app/worker_heartbeat
       CREDIT_CARD_INBOX_DIR: ${CREDIT_CARD_INBOX_DIR:-/app/reports/credit-card/inbox}
       CREDIT_CARD_INBOX_ENABLED: ${CREDIT_CARD_INBOX_ENABLED:-true}
+      CREDIT_CARD_DEFAULT_HOUSEHOLD_ID: ${CREDIT_CARD_DEFAULT_HOUSEHOLD_ID:-}
     volumes:
       # Mount credit-card inbox so the worker can read PDFs and write to
       # processed/ and errors/.  Host path is relative to repo root.

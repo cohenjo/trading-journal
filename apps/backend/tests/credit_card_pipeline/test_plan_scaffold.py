@@ -427,7 +427,7 @@ def test_categorization_sector_present_resolves_issuer_sector(
     seeded_session: tuple,
 ) -> None:
     """C-1: issuer_sector_raw='ניפו חוטיב' (contains חוטיב = insurance) →
-    category='financial-insurance', resolution_source='issuer_sector'.
+    category='financial-insurance', resolution_source='sector'.
 
     The YAML comment: ביטוח (insurance) is extracted by pdfplumber as חוטיב
     (character-reversed). The sector lookup matches on substring containment.
@@ -444,7 +444,7 @@ def test_categorization_sector_present_resolves_issuer_sector(
     result = resolver.resolve(txn, session, hh_id)
 
     assert result.resolution_status == "auto"
-    assert result.resolution_source == "issuer_sector"
+    assert result.resolution_source == "sector"
     assert result.category_id == slug_map["financial-insurance"]
     assert result.is_transfer is False
 
