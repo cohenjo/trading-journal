@@ -26,7 +26,7 @@ dependencies = [
     "opentelemetry-instrumentation-logging",
     "schwab-py",
     "github-copilot-sdk>=0.1.25",
-    "pdfplumber>=0.11.9",
+    "pdfplumber==0.11.9",
     "pypdf>=6.11.0",
     "python-multipart>=0.0.29",
     "cachetools>=7.1.2",

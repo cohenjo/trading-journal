@@ -75,12 +75,8 @@ _ISRACARD_FIXTURES = {
 
 
 def test_cal_parser_happy_path() -> None:
-    """P-CAL-1: Parse 02-26.pdf; N rows; dates correct; sum within ±0.01 of header total.
-
-    See scenario P-CAL-1 in redfoot-cc-test-plan.md.
-    Unblock: remove skip when CC-2 (parsers) ships.
-    """
-    pytest.skip("CC-2 not yet implemented")
+    """P-CAL-1: Covered by tests/credit_card_pipeline/test_cc2_parsers.py::test_cal_parser_happy_path."""
+    pytest.skip("Covered in test_cc2_parsers.py")
 
 
 def test_cal_parser_hebrew_rtl_merchant() -> None:
