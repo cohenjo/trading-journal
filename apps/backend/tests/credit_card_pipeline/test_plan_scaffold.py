@@ -18,14 +18,30 @@ Run check (should be ALL skip/xfail, zero failures):
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import Optional
+from uuid import UUID, uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlmodel import Session
 
-from app.schema.expenses import MerchantCategoryMapping
+from pathlib import Path
+
+
+from app.schema.expenses import (
+    CreditCardTransaction,
+    ExpenseCategory,
+    MerchantCategoryMapping,
+)
 from app.services.expenses.categorize import (
     CategoryResolver,
 )
+
+# Repo root — used to resolve fixture PDF paths from the project root.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_TEST_HOUSEHOLD_ID = UUID("00000000-0000-0000-0000-000000000101")
 
 
 # ---------------------------------------------------------------------------
@@ -670,21 +686,74 @@ def test_categorization_regex_rule_match_with_subcategory(
 # ===========================================================================
 
 
-def test_dedup_same_file_dropped_twice() -> None:
+def test_dedup_same_file_dropped_twice(seeded_session, monkeypatch, tmp_path) -> None:
     """D-1: Inserting same file hash twice → second row status='duplicate', statements count unchanged.
 
     See scenario D-1 in redfoot-cc-test-plan.md.
-    Unblock: remove skip when CC-5 (worker) ships.
     """
-    pytest.skip("CC-5 not yet implemented")
+    session, _slug_map = seeded_session
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    src = _REPO_ROOT / _CAL_FIXTURES["happy_path"]
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def sf():
+        yield session
+
+    # First pass — completed.
+    copy(src, inbox / "statement_a.pdf")
+    result_1 = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+    assert result_1["completed"] == 1
+
+    stmt_count = len(session.exec(select(CreditCardStatement)).all())
+    inbox_rows = session.exec(select(ExpenseInbox)).all()
+    assert len(inbox_rows) == 1
+    assert inbox_rows[0].status == "completed"
+
+    # Second pass — same bytes, different name.
+    copy(src, inbox / "statement_b.pdf")
+    result_2 = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+    assert result_2["deduped"] == 1
+
+    # Statement count must not grow.
+    assert len(session.exec(select(CreditCardStatement)).all()) == stmt_count
+
+    dup_row = session.exec(select(ExpenseInbox).where(ExpenseInbox.status == "duplicate")).first()
+    assert dup_row is not None
 
 
-def test_dedup_file_renamed_still_duplicate() -> None:
+def test_dedup_file_renamed_still_duplicate(seeded_session, monkeypatch, tmp_path) -> None:
     """D-2: Same bytes, different file_name → hash matches existing row → status='duplicate'.
 
     See scenario D-2 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    session, _slug_map = seeded_session
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    src = _REPO_ROOT / _CAL_FIXTURES["happy_path"]
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def sf():
+        yield session
+
+    # First pass.
+    copy(src, inbox / "original_name.pdf")
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    # Second pass — same bytes, different name (simulates "renamed" duplicate).
+    copy(src, inbox / "completely_different_name.pdf")
+    result = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+    assert result["deduped"] == 1
+
+    dup = session.exec(select(ExpenseInbox).where(ExpenseInbox.status == "duplicate")).first()
+    assert dup is not None
+    assert dup.file_path == "completely_different_name.pdf"
 
 
 @pytest.mark.xfail(
@@ -705,12 +774,32 @@ def test_dedup_hash_collision_design_tradeoff() -> None:
     raise AssertionError("Intentional xfail: SHA-256 collision not mitigated by design")
 
 
-def test_dedup_partial_write_stays_error_and_retried() -> None:
-    """D-4: Truncated file bytes → ParseError → status='error', retry_count=1.
+def test_dedup_partial_write_stays_error_and_retried(session, monkeypatch, tmp_path) -> None:
+    """D-4: Truncated file bytes → ParseError → status='errored', retry_count=1.
 
     See scenario D-4 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+
+    # Write a minimal (invalid) PDF that passes size checks but fails fingerprinting.
+    fake_pdf = inbox / "truncated.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    @contextmanager
+    def sf():
+        yield session
+
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    row = session.exec(select(ExpenseInbox)).first()
+    assert row is not None
+    assert row.status == "errored"
+    assert row.retry_count == 1
+    assert row.error_message is not None
 
 
 def test_dedup_concurrent_five_files_no_double_processing() -> None:
@@ -738,161 +827,536 @@ def test_dedup_worker_restart_resumes_orphaned_processing_rows() -> None:
 
 
 # ===========================================================================
-# SECTION 4 — API tests
+# SECTION 4 — API tests  [CC-6 implemented — stubs replaced with real assertions]
 # ===========================================================================
+#
+# Fixture note: ``client`` (authenticated TestClient) and ``unauth_client``
+# (no auth override) are defined in tests/conftest.py.  Both depend on
+# ``session``, which shares the same in-memory SQLite engine as all fixtures
+# that also depend on ``session``.  Data seeded via ``session`` is immediately
+# visible to API calls made via ``client``.
+#
+# TEST_USER_ID / TEST_HOUSEHOLD_ID come from tests/conftest.py:
+#   TEST_USER_ID    = UUID("00000000-0000-0000-0000-000000000001")
+#   TEST_HOUSEHOLD_ID = UUID("00000000-0000-0000-0000-000000000101")
+# The ``client`` fixture stubs auth to return TEST_USER_ID, and the household
+# is pre-seeded in the engine fixture.
+
+# Constants mirrored from tests/conftest.py (avoid cross-importing conftest)
+_TEST_USER_ID = UUID("00000000-0000-0000-0000-000000000001")
+_TEST_HOUSEHOLD_ID = UUID("00000000-0000-0000-0000-000000000101")
+_OTHER_HOUSEHOLD_ID = UUID("00000000-0000-0000-0000-000000000202")
+
+# Stable statement UUID used across tests that need a statement reference
+_STMT_ID = UUID("aaaaaaaa-0000-0000-0000-000000000001")
 
 
-def test_api_unresolved_returns_only_unresolved_rows() -> None:
-    """A-UNRES-1: GET /api/expenses/unresolved returns only resolution_status='unresolved'.
+def _make_txn(
+    session: Session,
+    *,
+    merchant_normalized: str = "SHUFERSAL",
+    resolution_status: str = "unresolved",
+    household_id: UUID = _TEST_HOUSEHOLD_ID,
+    category_id: Optional[UUID] = None,
+    txn_date: Optional[datetime] = None,
+    amount_ils: float = 100.0,
+) -> CreditCardTransaction:
+    """Insert a minimal CreditCardTransaction into the test DB and return it."""
+    txn = CreditCardTransaction(
+        id=uuid4(),
+        statement_id=_STMT_ID,
+        txn_date=txn_date or datetime(2026, 1, 15),
+        merchant_raw=merchant_normalized,
+        merchant_normalized=merchant_normalized,
+        amount_ils=Decimal(str(amount_ils)),
+        resolution_status=resolution_status,
+        household_id=household_id,
+        category_id=category_id,
+    )
+    session.add(txn)
+    session.commit()
+    return txn
 
-    See scenario A-UNRES-1 in redfoot-cc-test-plan.md.
-    Unblock: remove skip when CC-6 (API endpoints) ships.
+
+def _make_category(session: Session, slug: str, is_transfer: bool = False) -> ExpenseCategory:
+    """Insert a minimal ExpenseCategory and return it."""
+    cat = ExpenseCategory(
+        id=uuid4(),
+        slug=slug,
+        name=slug.replace("-", " ").title(),
+        name_he=slug,
+        is_transfer=is_transfer,
+    )
+    session.add(cat)
+    session.commit()
+    return cat
+
+
+# ---------------------------------------------------------------------------
+# A-UNRES-1 through A-UNRES-5
+# ---------------------------------------------------------------------------
+
+
+def test_api_unresolved_returns_only_unresolved_rows(client: TestClient, session: Session) -> None:
+    """A-UNRES-1: GET /api/expenses/unresolved returns only resolution_status='unresolved'."""
+    # Seed: one unresolved, one resolved — only the unresolved must appear
+    _make_txn(session, merchant_normalized="SHUFERSAL", resolution_status="unresolved")
+    _make_txn(
+        session,
+        merchant_normalized="NETFLIX",
+        resolution_status="user_confirmed",
+    )
+
+    resp = client.get("/api/expenses/unresolved")
+    assert resp.status_code == 200, resp.text
+
+    body = resp.json()
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert body["items"][0]["merchant_normalized"] == "SHUFERSAL"
+    # amount_ils must be a number (float), not a string (Decimal serialization check)
+    assert isinstance(body["items"][0]["amount_ils"], (int, float))
+
+
+def test_api_unresolved_scoped_by_household(client: TestClient, session: Session) -> None:
+    """A-UNRES-2: Cross-household rows absent from response (Rabin §4.2)."""
+    _make_txn(
+        session,
+        merchant_normalized="MY-MERCHANT",
+        household_id=_TEST_HOUSEHOLD_ID,
+    )
+    _make_txn(
+        session,
+        merchant_normalized="OTHER-MERCHANT",
+        household_id=_OTHER_HOUSEHOLD_ID,
+    )
+
+    resp = client.get("/api/expenses/unresolved")
+    assert resp.status_code == 200
+
+    body = resp.json()
+    returned_merchants = [item["merchant_normalized"] for item in body["items"]]
+    assert "MY-MERCHANT" in returned_merchants
+    assert "OTHER-MERCHANT" not in returned_merchants, "Cross-household data leaked!"
+
+
+def test_api_unresolved_pagination(client: TestClient, session: Session) -> None:
+    """A-UNRES-3: Pagination (page/page_size) returns correct slices."""
+    for i in range(5):
+        _make_txn(
+            session,
+            merchant_normalized=f"MERCHANT-{i:02d}",
+            txn_date=datetime(2026, 1, i + 1),
+        )
+
+    # Page 1, size 2
+    resp = client.get("/api/expenses/unresolved?page=1&page_size=2")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 5
+    assert len(body["items"]) == 2
+    assert body["page"] == 1
+    assert body["page_size"] == 2
+
+    # Page 3 with size 2 should return 1 item (items 5)
+    resp2 = client.get("/api/expenses/unresolved?page=3&page_size=2")
+    assert resp2.status_code == 200
+    body2 = resp2.json()
+    assert len(body2["items"]) == 1
+
+
+def test_api_unresolved_unauthenticated_returns_401(
+    unauth_client: TestClient,
+) -> None:
+    """A-UNRES-4: No JWT → HTTP 401 (Rabin §4.1)."""
+    resp = unauth_client.get("/api/expenses/unresolved")
+    assert resp.status_code == 401
+
+
+def test_api_unresolved_cross_household_read_rejected(client: TestClient, session: Session) -> None:
+    """A-UNRES-5: Authenticated caller can only see their own household's data.
+
+    Authenticated as TEST_HOUSEHOLD_ID — rows for OTHER_HOUSEHOLD must be absent.
     """
-    pytest.skip("CC-6 not yet implemented")
+    _make_txn(
+        session,
+        merchant_normalized="MINE",
+        household_id=_TEST_HOUSEHOLD_ID,
+    )
+    _make_txn(
+        session,
+        merchant_normalized="THEIRS",
+        household_id=_OTHER_HOUSEHOLD_ID,
+    )
+
+    resp = client.get("/api/expenses/unresolved")
+    assert resp.status_code == 200
+    body = resp.json()
+    merchants = [item["merchant_normalized"] for item in body["items"]]
+    assert "THEIRS" not in merchants, "RLS bypass: other household data visible"
+    assert "MINE" in merchants
 
 
-def test_api_unresolved_scoped_by_household() -> None:
-    """A-UNRES-2: Cross-household rows absent from response.
-
-    See scenario A-UNRES-2 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+# ---------------------------------------------------------------------------
+# A-RES-1 through A-RES-6
+# ---------------------------------------------------------------------------
 
 
-def test_api_unresolved_pagination() -> None:
-    """A-UNRES-3: limit/offset pagination returns correct pages.
+def test_api_resolve_updates_transaction_to_user_confirmed(client: TestClient, session: Session) -> None:
+    """A-RES-1: POST /resolve → transaction.resolution_status='user_confirmed', source='user'."""
+    cat = _make_category(session, "groceries")
+    txn = _make_txn(session, merchant_normalized="SHUFERSAL")
 
-    See scenario A-UNRES-3 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    resp = client.post(
+        "/api/expenses/resolve",
+        json={
+            "transaction_id": str(txn.id),
+            "category_id": str(cat.id),
+            "apply_to_all_matching": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated_count"] == 1
 
-
-def test_api_unresolved_unauthenticated_returns_401() -> None:
-    """A-UNRES-4: No auth → HTTP 401.
-
-    See scenario A-UNRES-4 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
-
-
-def test_api_unresolved_cross_household_read_rejected() -> None:
-    """A-UNRES-5: Authenticated but wrong household_id → empty result or 403, no data leak.
-
-    See scenario A-UNRES-5 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
-
-
-def test_api_resolve_updates_transaction_to_user_confirmed() -> None:
-    """A-RES-1: POST /api/expenses/resolve → resolution_status='user_confirmed', source='user'.
-
-    See scenario A-RES-1 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    # Verify DB state
+    session.refresh(txn)
+    assert txn.resolution_status == "user_confirmed"
+    assert txn.resolution_source == "user"
+    assert txn.category_id == cat.id
 
 
-def test_api_resolve_creates_merchant_mapping_when_apply_to_merchant() -> None:
-    """A-RES-2: apply_to_merchant=True + new merchant → merchant_category_mappings row created.
+def test_api_resolve_creates_merchant_mapping_when_apply_to_merchant(client: TestClient, session: Session) -> None:
+    """A-RES-2: Resolving creates a merchant_category_mappings row with created_by=user (Rabin §5.2)."""
+    cat = _make_category(session, "groceries")
+    txn = _make_txn(session, merchant_normalized="MEGA-SUPERMARKET")
 
-    See scenario A-RES-2 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    resp = client.post(
+        "/api/expenses/resolve",
+        json={
+            "transaction_id": str(txn.id),
+            "category_id": str(cat.id),
+            "apply_to_all_matching": False,
+        },
+    )
+    assert resp.status_code == 200
+    mapping_id = UUID(resp.json()["mapping_id"])
 
+    # Verify mapping in DB
+    from sqlmodel import select as sm_select
 
-def test_api_resolve_back_applies_to_existing_unresolved_same_merchant() -> None:
-    """A-RES-3: apply_to_merchant=True → back-applies to all unresolved rows with same merchant_normalized.
-
-    See scenario A-RES-3 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
-
-
-def test_api_resolve_back_apply_scoped_to_household() -> None:
-    """A-RES-4: Back-apply does not mutate other households' rows.
-
-    See scenario A-RES-4 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
-
-
-def test_api_resolve_invalid_category_id_returns_error() -> None:
-    """A-RES-5: Unknown category_id UUID → 422 or 404 error response.
-
-    See scenario A-RES-5 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    mapping = session.exec(sm_select(MerchantCategoryMapping).where(MerchantCategoryMapping.id == mapping_id)).first()
+    assert mapping is not None
+    assert mapping.merchant_normalized == "MEGA-SUPERMARKET"
+    assert mapping.category_id == cat.id
+    assert mapping.source == "user"
+    # Rabin §5.2: created_by must equal actual caller, not None/sentinel
+    assert mapping.created_by == str(_TEST_USER_ID)
 
 
-def test_api_resolve_unauthenticated_returns_401() -> None:
-    """A-RES-6: No auth → HTTP 401.
+def test_api_resolve_back_applies_to_existing_unresolved_same_merchant(client: TestClient, session: Session) -> None:
+    """A-RES-3: apply_to_all_matching=True back-applies to all unresolved rows for same merchant."""
+    cat = _make_category(session, "groceries")
 
-    See scenario A-RES-6 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    txn1 = _make_txn(session, merchant_normalized="SHUFERSAL-BRANCH")
+    # Two more unresolved for the same merchant
+    txn2 = _make_txn(session, merchant_normalized="SHUFERSAL-BRANCH")
+    txn3 = _make_txn(session, merchant_normalized="SHUFERSAL-BRANCH")
+    # One with a different merchant — must NOT be touched
+    txn_other = _make_txn(session, merchant_normalized="RAMI-LEVY")
 
+    resp = client.post(
+        "/api/expenses/resolve",
+        json={
+            "transaction_id": str(txn1.id),
+            "category_id": str(cat.id),
+            "apply_to_all_matching": True,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["updated_count"] == 3  # txn1 + txn2 + txn3
 
-def test_api_monthly_summary_returns_correct_month_buckets() -> None:
-    """A-SUM-1: GET /api/expenses/monthly-summary returns one bucket per month with data.
+    session.refresh(txn2)
+    session.refresh(txn3)
+    session.refresh(txn_other)
 
-    See scenario A-SUM-1 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
-
-
-def test_api_monthly_summary_excludes_transfer_categories() -> None:
-    """A-SUM-2: Transfer-category amounts excluded from monthly totals.
-
-    See scenario A-SUM-2 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
-
-
-def test_api_monthly_summary_year_filter() -> None:
-    """A-SUM-3: year=2026 and year=2025 return different data.
-
-    See scenario A-SUM-3 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
-
-
-def test_api_monthly_summary_unauthenticated_returns_401() -> None:
-    """A-SUM-4: No auth → HTTP 401.
-
-    See scenario A-SUM-4 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    assert txn2.resolution_status == "user_confirmed"
+    assert txn2.resolution_source == "mapping"  # back-applied via learned mapping
+    assert txn3.resolution_status == "user_confirmed"
+    # Other merchant must be untouched
+    assert txn_other.resolution_status == "unresolved"
 
 
-def test_api_by_category_returns_transactions_and_subtotal() -> None:
-    """A-CAT-1: GET /api/expenses/by-category returns transactions list + subtotal for slug.
+def test_api_resolve_back_apply_scoped_to_household(client: TestClient, session: Session) -> None:
+    """A-RES-4: Back-apply does NOT mutate other households' rows (Rabin §4.2)."""
+    cat = _make_category(session, "groceries")
+    txn_mine = _make_txn(
+        session,
+        merchant_normalized="JOINT-MERCHANT",
+        household_id=_TEST_HOUSEHOLD_ID,
+    )
+    txn_other_hh = _make_txn(
+        session,
+        merchant_normalized="JOINT-MERCHANT",
+        household_id=_OTHER_HOUSEHOLD_ID,
+    )
 
-    See scenario A-CAT-1 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    resp = client.post(
+        "/api/expenses/resolve",
+        json={
+            "transaction_id": str(txn_mine.id),
+            "category_id": str(cat.id),
+            "apply_to_all_matching": True,
+        },
+    )
+    assert resp.status_code == 200
+
+    session.refresh(txn_other_hh)
+    assert txn_other_hh.resolution_status == "unresolved", "Back-apply leaked into other household!"
 
 
-def test_api_by_category_month_filter() -> None:
-    """A-CAT-2: month filter narrows result to that month only.
+def test_api_resolve_invalid_category_id_returns_error(client: TestClient, session: Session) -> None:
+    """A-RES-5: Unknown category_id → 404."""
+    txn = _make_txn(session, merchant_normalized="UNKNOWN-CAT-MERCHANT")
+    fake_category_id = uuid4()
 
-    See scenario A-CAT-2 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    resp = client.post(
+        "/api/expenses/resolve",
+        json={
+            "transaction_id": str(txn.id),
+            "category_id": str(fake_category_id),
+            "apply_to_all_matching": False,
+        },
+    )
+    assert resp.status_code in (404, 422), f"Expected 404 or 422 for unknown category, got {resp.status_code}"
 
 
-def test_api_by_category_empty_category_returns_zero_subtotal() -> None:
-    """A-CAT-3: Category with no transactions → empty list, subtotal = 0.0, no crash.
+def test_api_resolve_unauthenticated_returns_401(unauth_client: TestClient) -> None:
+    """A-RES-6: No JWT → HTTP 401 (Rabin §4.1)."""
+    resp = unauth_client.post(
+        "/api/expenses/resolve",
+        json={
+            "transaction_id": str(uuid4()),
+            "category_id": str(uuid4()),
+            "apply_to_all_matching": False,
+        },
+    )
+    assert resp.status_code == 401
 
-    See scenario A-CAT-3 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+
+# ---------------------------------------------------------------------------
+# A-SUM-1 through A-SUM-4
+# ---------------------------------------------------------------------------
 
 
-def test_api_by_category_unauthenticated_returns_401() -> None:
-    """A-CAT-4: No auth → HTTP 401.
+def test_api_monthly_summary_returns_correct_month_buckets(client: TestClient, seeded_session: tuple) -> None:
+    """A-SUM-1: GET /monthly-summary returns one bucket per month with data."""
+    session, slug_map = seeded_session
 
-    See scenario A-CAT-4 in redfoot-cc-test-plan.md.
-    """
-    pytest.skip("CC-6 not yet implemented")
+    groceries_id = slug_map["groceries"]
+    # Seed transactions across two distinct months
+    _make_txn(
+        session,
+        merchant_normalized="SHUFERSAL",
+        txn_date=datetime(2026, 1, 10),
+        amount_ils=200.0,
+        category_id=groceries_id,
+        resolution_status="user_confirmed",
+    )
+    _make_txn(
+        session,
+        merchant_normalized="RAMI-LEVY",
+        txn_date=datetime(2026, 2, 5),
+        amount_ils=150.0,
+        category_id=groceries_id,
+        resolution_status="user_confirmed",
+    )
+
+    resp = client.get("/api/expenses/monthly-summary")
+    assert resp.status_code == 200, resp.text
+
+    items = resp.json()
+    months = [item["month"] for item in items]
+    assert "2026-01" in months
+    assert "2026-02" in months
+    # Both must have amount_ils as a number
+    for item in items:
+        assert isinstance(item["amount_ils"], (int, float))
+        assert isinstance(item["txn_count"], int)
+
+
+def test_api_monthly_summary_excludes_transfer_categories(client: TestClient, seeded_session: tuple) -> None:
+    """A-SUM-2: Transfer-category amounts excluded by default (is_transfer=True)."""
+    session, slug_map = seeded_session
+
+    groceries_id = slug_map["groceries"]
+    transfers_id = slug_map["transfers"]
+
+    _make_txn(
+        session,
+        merchant_normalized="SHUFERSAL",
+        txn_date=datetime(2026, 1, 10),
+        amount_ils=300.0,
+        category_id=groceries_id,
+        resolution_status="user_confirmed",
+    )
+    _make_txn(
+        session,
+        merchant_normalized="PAYBOX",
+        txn_date=datetime(2026, 1, 12),
+        amount_ils=1000.0,
+        category_id=transfers_id,
+        resolution_status="transfer",
+    )
+
+    resp = client.get("/api/expenses/monthly-summary?exclude_transfers=true")
+    assert resp.status_code == 200
+
+    items = resp.json()
+    slugs_returned = [item["category_slug"] for item in items]
+    assert "transfers" not in slugs_returned, "Transfers category should be excluded when exclude_transfers=true"
+    # Groceries must still appear
+    assert "groceries" in slugs_returned
+
+
+def test_api_monthly_summary_year_filter(client: TestClient, seeded_session: tuple) -> None:
+    """A-SUM-3: ?from and ?to month filters narrow the result set."""
+    session, slug_map = seeded_session
+
+    groceries_id = slug_map["groceries"]
+    _make_txn(
+        session,
+        merchant_normalized="2025-TXN",
+        txn_date=datetime(2025, 12, 1),
+        amount_ils=50.0,
+        category_id=groceries_id,
+        resolution_status="user_confirmed",
+    )
+    _make_txn(
+        session,
+        merchant_normalized="2026-TXN",
+        txn_date=datetime(2026, 3, 1),
+        amount_ils=75.0,
+        category_id=groceries_id,
+        resolution_status="user_confirmed",
+    )
+
+    # Filter to 2026 only
+    resp = client.get("/api/expenses/monthly-summary?from=2026-01&to=2026-12")
+    assert resp.status_code == 200
+    items = resp.json()
+    months = [item["month"] for item in items]
+    assert all(m.startswith("2026") for m in months), "Filter failed: 2025 month leaked into 2026-only query"
+
+    # Filter to 2025 only
+    resp2 = client.get("/api/expenses/monthly-summary?from=2025-01&to=2025-12")
+    assert resp2.status_code == 200
+    items2 = resp2.json()
+    months2 = [item["month"] for item in items2]
+    assert all(m.startswith("2025") for m in months2)
+
+
+def test_api_monthly_summary_unauthenticated_returns_401(
+    unauth_client: TestClient,
+) -> None:
+    """A-SUM-4: No JWT → HTTP 401 (Rabin §4.1)."""
+    resp = unauth_client.get("/api/expenses/monthly-summary")
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# A-CAT-1 through A-CAT-4
+# ---------------------------------------------------------------------------
+
+
+def test_api_by_category_returns_transactions_and_subtotal(client: TestClient, seeded_session: tuple) -> None:
+    """A-CAT-1: GET /by-category/{slug} returns transactions + subtotal for that category."""
+    session, slug_map = seeded_session
+
+    groceries_id = slug_map["groceries"]
+    restaurants_id = slug_map["restaurants"]
+
+    _make_txn(
+        session,
+        merchant_normalized="SHUFERSAL",
+        category_id=groceries_id,
+        amount_ils=200.0,
+        resolution_status="user_confirmed",
+    )
+    _make_txn(
+        session,
+        merchant_normalized="RAMI-LEVY",
+        category_id=groceries_id,
+        amount_ils=300.0,
+        resolution_status="user_confirmed",
+    )
+    _make_txn(
+        session,
+        merchant_normalized="CAFE-GREG",
+        category_id=restaurants_id,
+        amount_ils=50.0,
+        resolution_status="user_confirmed",
+    )
+
+    resp = client.get("/api/expenses/by-category/groceries")
+    assert resp.status_code == 200, resp.text
+
+    body = resp.json()
+    assert body["category_slug"] == "groceries"
+    assert body["total"] == 2
+    assert len(body["items"]) == 2
+    assert abs(body["subtotal_ils"] - 500.0) < 0.01
+    # amounts must be numbers
+    for item in body["items"]:
+        assert isinstance(item["amount_ils"], (int, float))
+
+
+def test_api_by_category_month_filter(client: TestClient, seeded_session: tuple) -> None:
+    """A-CAT-2: Date range filter narrows result to the specified window."""
+    session, slug_map = seeded_session
+
+    groceries_id = slug_map["groceries"]
+    _make_txn(
+        session,
+        merchant_normalized="JAN-TXN",
+        txn_date=datetime(2026, 1, 15),
+        category_id=groceries_id,
+        resolution_status="user_confirmed",
+    )
+    _make_txn(
+        session,
+        merchant_normalized="MAR-TXN",
+        txn_date=datetime(2026, 3, 15),
+        category_id=groceries_id,
+        resolution_status="user_confirmed",
+    )
+
+    resp = client.get("/api/expenses/by-category/groceries?from=2026-01-01&to=2026-01-31")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["items"][0]["merchant_normalized"] == "JAN-TXN"
+
+
+def test_api_by_category_empty_category_returns_zero_subtotal(client: TestClient, seeded_session: tuple) -> None:
+    """A-CAT-3: Category with no transactions → empty list, subtotal=0.0, no crash."""
+    # 'fuel' is seeded but no transactions added for it
+    resp = client.get("/api/expenses/by-category/fuel")
+    assert resp.status_code == 200
+
+    body = resp.json()
+    assert body["total"] == 0
+    assert body["items"] == []
+    assert body["subtotal_ils"] == 0.0
+
+
+def test_api_by_category_unauthenticated_returns_401(
+    unauth_client: TestClient,
+) -> None:
+    """A-CAT-4: No JWT → HTTP 401 (Rabin §4.1)."""
+    resp = unauth_client.get("/api/expenses/by-category/groceries")
+    assert resp.status_code == 401
 
 
 # ===========================================================================
