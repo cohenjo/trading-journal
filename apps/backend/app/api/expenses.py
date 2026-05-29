@@ -31,9 +31,10 @@ for Pydantic model fields; we also convert explicitly in model constructors.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -58,6 +59,10 @@ logger = logging.getLogger(__name__)
 # Known security gap — tracked for CC-13 hardening pass.
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
+
+# Cache for category tree — 5 minute TTL
+_categories_cache: Dict[str, object] = {"data": None, "timestamp": 0.0}
+_CATEGORIES_CACHE_TTL_SECONDS = 300
 
 _MAX_PAGE_SIZE = 200
 
@@ -179,9 +184,113 @@ class StatementsResponse(BaseModel):
     page_size: int
 
 
+class ExpenseCategoryNode(BaseModel):
+    """Single category node (parent or child) in the category tree."""
+
+    id: UUID
+    slug: str
+    name: str
+    name_he: str
+    icon: Optional[str] = None
+    color: Optional[str] = None
+    display_order: int
+    is_transfer: bool
+
+
+class ExpenseCategoryWithSubcategories(ExpenseCategoryNode):
+    """Top-level category with its subcategories."""
+
+    subcategories: List[ExpenseCategoryNode] = []
+
+
+class CategoriesResponse(BaseModel):
+    """Response for GET /api/expenses/categories — full hierarchical tree."""
+
+    categories: List[ExpenseCategoryWithSubcategories]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+def _get_categories_tree(db: Session) -> CategoriesResponse:
+    """Build hierarchical category tree from database.
+
+    Single query: fetch all categories ordered by display_order, slug.
+    Build tree in Python: parents first (parent_id IS NULL), then attach children.
+    Results are cached for 5 minutes.
+    """
+    # Check cache
+    now = time.time()
+    if _categories_cache["data"] is not None and (now - _categories_cache["timestamp"]) < _CATEGORIES_CACHE_TTL_SECONDS:
+        return _categories_cache["data"]  # type: ignore[return-value]
+
+    # Fetch all categories ordered by display_order, slug
+    categories = db.exec(select(ExpenseCategory).order_by(ExpenseCategory.display_order, ExpenseCategory.slug)).all()
+
+    # Build tree: parents (parent_id IS NULL) first
+    parents_by_id: Dict[UUID, ExpenseCategoryWithSubcategories] = {}
+    children_by_parent_id: Dict[UUID, List[ExpenseCategoryNode]] = {}
+
+    for cat in categories:
+        if cat.parent_id is None:
+            # Top-level category
+            parents_by_id[cat.id] = ExpenseCategoryWithSubcategories(
+                id=cat.id,
+                slug=cat.slug,
+                name=cat.name,
+                name_he=cat.name_he,
+                icon=cat.icon,
+                color=cat.color,
+                display_order=cat.display_order,
+                is_transfer=cat.is_transfer,
+                subcategories=[],
+            )
+        else:
+            # Subcategory — collect by parent_id
+            if cat.parent_id not in children_by_parent_id:
+                children_by_parent_id[cat.parent_id] = []
+            children_by_parent_id[cat.parent_id].append(
+                ExpenseCategoryNode(
+                    id=cat.id,
+                    slug=cat.slug,
+                    name=cat.name,
+                    name_he=cat.name_he,
+                    icon=cat.icon,
+                    color=cat.color,
+                    display_order=cat.display_order,
+                    is_transfer=cat.is_transfer,
+                )
+            )
+
+    # Attach subcategories to parents
+    for parent_id, parent in parents_by_id.items():
+        if parent_id in children_by_parent_id:
+            parent.subcategories = children_by_parent_id[parent_id]
+
+    # Build response
+    response = CategoriesResponse(categories=list(parents_by_id.values()))
+
+    # Cache it
+    _categories_cache["data"] = response
+    _categories_cache["timestamp"] = now
+
+    return response
+
+
+@router.get("/categories", response_model=CategoriesResponse)
+def get_categories(
+    user_id: UUID = Depends(get_current_user_id),
+    db: Session = Depends(get_session),
+) -> CategoriesResponse:
+    """Return the full hierarchical expense category tree.
+
+    This is GLOBAL data (no household filter) — all users see the same taxonomy.
+    Auth required (consistent with other CC-6 endpoints).
+    Results are cached for 5 minutes to avoid repeated database queries.
+    """
+    return _get_categories_tree(db)
 
 
 @router.get("/unresolved", response_model=UnresolvedResponse)

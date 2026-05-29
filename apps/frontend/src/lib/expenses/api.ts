@@ -9,6 +9,7 @@
 import { apiFetch } from "@/lib/api-client";
 import type {
   ByCategoryResponse,
+  ExpenseCategory,
   MonthlySummaryRow,
   ResolveRequest,
   ResolveResponse,
@@ -17,6 +18,35 @@ import type {
 } from "@/types/expenses";
 
 const DEBUG = process.env.NEXT_PUBLIC_DEBUG_EXPENSES === "true";
+
+// ── GET /api/expenses/categories ─────────────────────────────────────────────
+// Hardcoded fallback (graceful degradation if backend unavailable)
+const HARDCODED_FALLBACK_CATEGORIES: ExpenseCategory[] = [
+  {
+    id: "cat-groceries",
+    slug: "groceries",
+    name: "Groceries",
+    name_he: "מזון וסופרמרקט",
+    color: "#4CAF50",
+    icon: "shopping-cart",
+    is_transfer: false,
+    subcategories: [],
+  },
+  // Add more categories as needed — this is a fallback only
+];
+
+export async function getCategories(): Promise<ExpenseCategory[]> {
+  try {
+    const res = await apiFetch("/api/expenses/categories");
+    if (!res.ok) throw new Error(`getCategories failed: ${res.status}`);
+    const data = await res.json();
+    if (DEBUG) console.debug("[expenses] getCategories returned", data.categories.length, "top-level categories");
+    return data.categories;
+  } catch (error) {
+    console.warn("[expenses] getCategories fallback:", error);
+    return HARDCODED_FALLBACK_CATEGORIES;
+  }
+}
 
 // ── GET /api/expenses/unresolved ─────────────────────────────────────────────
 
@@ -123,8 +153,3 @@ export async function resolveTransaction(body: ResolveRequest): Promise<ResolveR
   if (!res.ok) throw new Error(`resolveTransaction failed: ${res.status}`);
   return res.json();
 }
-
-// ── Category tree ──────────────────────────────────────────────────────────────
-// TODO(CC-9): Replace with GET /api/expenses/categories once Hockney ships the endpoint.
-// For now, re-export the hardcoded tree from types.
-export { EXPENSE_CATEGORIES } from "@/types/expenses";

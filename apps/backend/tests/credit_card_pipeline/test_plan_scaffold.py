@@ -1458,6 +1458,48 @@ def test_api_by_category_unauthenticated_returns_401(
     assert resp.status_code == 401
 
 
+def test_api_categories_endpoint_returns_tree(client: TestClient, seeded_session: tuple) -> None:
+    """A-CATS-1: GET /api/expenses/categories returns full category tree.
+
+    Verifies:
+    - Endpoint returns 200 OK
+    - Response has 'categories' array
+    - At least one top-level category is present
+    - At least one category has subcategories populated
+    - Each category has required fields (id, slug, name, name_he, is_transfer)
+    """
+    resp = client.get("/api/expenses/categories")
+    assert resp.status_code == 200
+
+    body = resp.json()
+    assert "categories" in body
+    assert isinstance(body["categories"], list)
+    assert len(body["categories"]) > 0, "At least one top-level category should exist"
+
+    categories = body["categories"]
+    # Verify at least one parent category
+    parent = categories[0]
+    assert "id" in parent
+    assert "slug" in parent
+    assert "name" in parent
+    assert "name_he" in parent
+    assert "is_transfer" in parent
+    assert "subcategories" in parent
+
+    # Verify at least one category has subcategories
+    has_subcategories = any(cat.get("subcategories") and len(cat["subcategories"]) > 0 for cat in categories)
+    assert has_subcategories, "At least one category should have subcategories"
+
+    # Verify a subcategory has the correct shape
+    for cat in categories:
+        for subcat in cat.get("subcategories", []):
+            assert "id" in subcat
+            assert "slug" in subcat
+            assert "name" in subcat
+            assert "name_he" in subcat
+            assert "is_transfer" in subcat
+
+
 # ===========================================================================
 # SECTION 5 — Worker tests
 # ===========================================================================
