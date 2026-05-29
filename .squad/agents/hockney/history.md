@@ -85,3 +85,18 @@
 ---
 
 📌 **Team update (2026-05-27)**: RSU automation batch completed. All 5 agents collaborated on price_cache extension (backend), engine tax/policy enforcement (frontend), and UI configuration. 46 acceptance tests pass. Branch: squad/rsu-ui-wiring. Decisions merged to .squad/decisions.md. Next: yield-units normalization follow-up pending from Hockney.
+
+---
+
+## 2026-05-27 — RSU Local Migration Attempt
+
+**Task:** Run merged RSU Alembic migrations against local dev Postgres after PR #480.
+
+**Learnings:**
+
+- **Main synced to PR #480 merge commit `8c9a117`.** The head commit is `RSU automation: live price/yield, 25% dividend tax, payout to income pool (#480)`.
+- **Migration chain is blocked before DB contact.** `f2a3b4c5d6e7_normalize_price_cache_yield_to_percent.py` is present and correctly uses `WHERE dividend_yield IS NOT NULL AND dividend_yield > 0 AND dividend_yield < 1`, but its `down_revision = "e5f6a7b8c9d0"` file is missing from `main`.
+- **No rows were converted.** Per safety rules, I stopped before `uv run alembic current` / `upgrade` because the Alembic revision chain is broken. Final DB head is therefore unverified, and pre/post backfill counts were not collected.
+- **Invocation pattern remains:** run from `apps/backend/` with `uv run alembic ...` once the missing `e5f6a7b8c9d0_add_dividend_yield_to_price_cache.py` migration is restored to `main`.
+- **Gotcha:** unrelated local worktree changes were preserved in a stash named `pre-rsu-migration-sync-2026-05-27T23-37-09+03-00` so `main` could be fast-forwarded safely.
+📌 Team update (2026-05-29T122212Z): Credit-Card Expense Analysis Pipeline architecture proposal completed by Keaton. Work items CC-1..CC-14 pending Jony sign-off on Section 8 blockers. Your assignments coming imminently.
