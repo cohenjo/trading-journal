@@ -5,16 +5,21 @@ name: Supabase — Apply Migrations to Production
 # ──────────────────────────────────────────────────────────────────────────────
 # 1. push to main  — when migration files change, show a pending-migrations diff
 #    and auto-apply if the commit message contains the [apply-migrations] marker.
-# 2. workflow_dispatch — always applies (use for manual replays and emergency fixes).
+# 2. workflow_dispatch — applies when dry_run=false; dry_run=true shows the diff only.
 #
 # Required GitHub Secrets (Settings → Secrets and Variables → Actions):
-#   SUPABASE_ACCESS_TOKEN   — Personal access token from supabase.com/dashboard/account/tokens
-#   SUPABASE_DB_PASSWORD    — Database password for the linked production project
+#   Preferred path:
+#     SUPABASE_ACCESS_TOKEN — Personal access token from supabase.com/dashboard/account/tokens
+#     SUPABASE_DB_PASSWORD  — Database password for the linked production project
+#   Fallback path:
+#     SUPABASE_PROD_DB_URL  — Direct Postgres URL with embedded credentials; used only
+#                             when the preferred CLI secrets are unavailable.
 #
 # Decisions context (decisions.md):
-#   - Use direct connection (not pooler) for migrations; supabase CLI handles this.
-#   - Workflow: `supabase link` + `supabase db push --linked` (idempotent).
-#   - SUPABASE_ACCESS_TOKEN must be exported for CLI commands.
+#   - Prefer linked Supabase CLI migrations when access-token/password secrets exist.
+#   - Fall back to `--db-url` with the direct production connection URL for emergency
+#     applies when Management API secrets are missing.
+#   - Never log database connection strings; rely on GitHub secret masking and add-mask.
 # ──────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -47,23 +52,37 @@ jobs:
       contents: read
 
     steps:
-      # ── 0. Guard: fail fast if required secrets are missing ──────────────────
-      - name: Guard — required secrets must be present
+      # ── 0. Guard: fail fast if no supported migration auth path exists ──────
+      - name: Guard — migration secrets must be present
+        id: secrets
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
         shell: bash
         run: |
-          missing=()
-          [ -z "$SUPABASE_ACCESS_TOKEN" ] && missing+=(SUPABASE_ACCESS_TOKEN)
-          [ -z "$SUPABASE_DB_PASSWORD" ]  && missing+=(SUPABASE_DB_PASSWORD)
-          if [ ${#missing[@]} -gt 0 ]; then
-            for s in "${missing[@]}"; do
-              echo "::error::Required secret '$s' is empty or not set. Add it under Settings → Secrets → Actions."
-            done
+          set -euo pipefail
+
+          if [ -n "${SUPABASE_PROD_DB_URL:-}" ]; then
+            masked_url="${SUPABASE_PROD_DB_URL//%/%25}"
+            masked_url="${masked_url//$'\r'/%0D}"
+            masked_url="${masked_url//$'\n'/%0A}"
+            echo "::add-mask::$masked_url"
+          fi
+
+          if [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] && [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
+            echo "auth_path=linked" >> "$GITHUB_OUTPUT"
+            echo "✅ Preferred Supabase CLI migration secrets present."
+          elif [ -n "${SUPABASE_PROD_DB_URL:-}" ]; then
+            echo "auth_path=db-url" >> "$GITHUB_OUTPUT"
+            echo "✅ Using SUPABASE_PROD_DB_URL fallback for production migrations."
+            if [ -n "${SUPABASE_ACCESS_TOKEN:-}" ] || [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
+              echo "::warning::Only one preferred Supabase CLI secret is set; falling back to SUPABASE_PROD_DB_URL."
+            fi
+          else
+            echo "::error::Set either SUPABASE_ACCESS_TOKEN + SUPABASE_DB_PASSWORD or SUPABASE_PROD_DB_URL under Settings → Secrets → Actions."
             exit 1
           fi
-          echo "✅ All required migration secrets present."
 
       # ── 1. Determine apply mode ───────────────────────────────────────────────
       #
@@ -117,12 +136,20 @@ jobs:
       - name: Show pending migrations
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
         shell: bash
         run: |
+          set -euo pipefail
+
           echo "## Apply mode: ${{ steps.mode.outputs.reason }}"
           echo ""
           echo "### Pending migrations on production:"
-          supabase migration list --linked 2>&1 || true
+          if [ "${{ steps.secrets.outputs.auth_path }}" = "db-url" ]; then
+            supabase migration list --db-url "$SUPABASE_PROD_DB_URL"
+          else
+            supabase migration list --linked
+          fi
         working-directory: supabase
 
       # ── 3. Apply (conditional) ────────────────────────────────────────────────
@@ -131,10 +158,17 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
         shell: bash
         run: |
+          set -euo pipefail
+
           echo "🚀 Applying pending migrations to production..."
-          supabase db push --linked
+          if [ "${{ steps.secrets.outputs.auth_path }}" = "db-url" ]; then
+            supabase db push --db-url "$SUPABASE_PROD_DB_URL" --yes
+          else
+            supabase db push --linked --yes
+          fi
           echo "✅ Migrations applied successfully."
         working-directory: supabase
 
