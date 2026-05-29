@@ -4,16 +4,31 @@ correct parser.
 Security conditions from Rabin CC-2 review:
 - File size limit: 5 MB (PDFTooLarge raised before opening)
 - Text size limit: 500 KB (PDFTooLarge raised after extraction)
-- Timeout: 30 s via SIGALRM (ParserTimeout raised on signal)
+- Timeout: 30 s via ThreadPoolExecutor future (ParserTimeout raised on timeout)
 - Full card-number scrub enforced inside each parser (SecurityError)
+
+Thread-safety note (CC-11 follow-up):
+  The original SIGALRM approach only works in the main thread of the main
+  interpreter. APScheduler runs jobs in a worker thread pool, causing
+  "signal only works in main thread" errors.  We now use
+  concurrent.futures.ThreadPoolExecutor with Future.result(timeout=...) which
+  is thread-safe.
+
+  Cancellation caveat: cancelling a Future that wraps synchronous pdfplumber
+  code is best-effort — on timeout we call ``executor.shutdown(wait=False)``
+  so the caller is not blocked, but the background thread continues until
+  pdfplumber yields (or the worker process exits). Zombie parse threads are
+  rare and bounded (one per timed-out PDF), so this is acceptable. If true
+  hard-kill isolation is ever required, switch to subprocess-based isolation
+  (e.g. pebble.ProcessPool).
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import signal
-from typing import NoReturn
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 import pdfplumber
 
@@ -44,17 +59,17 @@ _PARSER_MAP = {
 }
 
 
-def _timeout_handler(signum: int, frame: object) -> NoReturn:
-    raise ParserTimeout("PDF parsing exceeded 30-second time limit")
-
-
-def dispatch_pdf(path: str) -> ParsedStatement:
+def dispatch_pdf(path: str, timeout_seconds: int = _TIMEOUT_SECONDS) -> ParsedStatement:
     """Open *path*, detect the issuer, and parse the statement.
 
     Parameters
     ----------
     path:
         Absolute or relative filesystem path to the PDF file.
+    timeout_seconds:
+        Maximum wall-clock seconds allowed for parsing.  Defaults to 30 s
+        (Rabin CC-12 §timeout requirement).  Raises :exc:`ParserTimeout` if
+        the limit is exceeded.
 
     Returns
     -------
@@ -66,7 +81,7 @@ def dispatch_pdf(path: str) -> ParsedStatement:
     PDFTooLarge
         If the file exceeds 5 MB or the extracted text exceeds 500 KB.
     ParserTimeout
-        If parsing takes longer than 30 seconds.
+        If parsing takes longer than *timeout_seconds*.
     UnknownIssuer
         If the PDF cannot be fingerprinted to a known issuer.
     SecurityError
@@ -83,21 +98,28 @@ def dispatch_pdf(path: str) -> ParsedStatement:
     if size > _MAX_FILE_BYTES:
         raise PDFTooLarge(f"PDF file is {size:,} bytes; limit is {_MAX_FILE_BYTES:,} bytes")
 
-    # ── Security: SIGALRM timeout ────────────────────────────────────────
-    old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-    signal.alarm(_TIMEOUT_SECONDS)
-
+    # ── Thread-safe timeout via concurrent.futures ───────────────────────
+    # ThreadPoolExecutor.Future.result(timeout=...) works in any thread,
+    # unlike signal.SIGALRM which is restricted to the main thread.
+    #
+    # On timeout we call shutdown(wait=False) so the caller is not blocked
+    # waiting for pdfplumber to yield.  The background thread is a daemon and
+    # will be reaped when the worker process exits.  This is acceptable because
+    # zombie parse threads are rare and bounded (one per timed-out PDF).
+    # If hard-kill isolation is ever required, switch to subprocess isolation.
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_do_parse, path)
     try:
-        result = _do_parse(path)
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
-
-    return result
+        result = future.result(timeout=timeout_seconds)
+        executor.shutdown(wait=True)
+        return result
+    except FuturesTimeoutError:
+        executor.shutdown(wait=False)  # don't block on hung pdfplumber thread
+        raise ParserTimeout(f"PDF parsing exceeded {timeout_seconds}-second time limit")
 
 
 def _do_parse(path: str) -> ParsedStatement:
-    """Internal parse (called inside the SIGALRM timeout context)."""
+    """Internal parse worker (submitted to ThreadPoolExecutor by dispatch_pdf)."""
     # Extract full text for fingerprinting
     try:
         pdf = pdfplumber.open(path)

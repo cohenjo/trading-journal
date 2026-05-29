@@ -5,7 +5,7 @@ Scans ``reports/credit-card/inbox/`` every 60 seconds, ingests new PDFs:
 1. SHA-256 dedup (``file_hash`` check against ``expense_inbox`` table).
 2. Insert ``expense_inbox`` row (status=processing).
 3. ``dispatch_pdf()`` → ``ParsedStatement``
-   (includes 30 s SIGALRM timeout + 5 MB file cap + 500 KB text cap).
+   (includes 30 s thread-safe timeout + 5 MB file cap + 500 KB text cap).
 4. Build ``CreditCardStatement`` + ``CreditCardTransaction`` rows.
 5. ``CategoryResolver.resolve()`` for each transaction.
 6. INSERT into ``credit_card_statements`` + ``credit_card_transactions``.
@@ -332,7 +332,7 @@ def process_one_pdf(
     Security (Rabin CC-5):
     - ``_sanitize_filename()`` strips any directory components before any
       filesystem operation (path-traversal defence).
-    - ``dispatch_pdf()`` enforces 30 s SIGALRM timeout, 5 MB file cap,
+    - ``dispatch_pdf()`` enforces 30 s thread-safe timeout, 5 MB file cap,
       and 500 KB extracted-text cap.
     - Processed/error files are set to ``0600``.
     """
@@ -414,7 +414,7 @@ def process_one_pdf(
 
     # ── Phase 2: parse → categorise → persist (single atomic transaction) ─
     try:
-        # dispatch_pdf() enforces 30 s SIGALRM + size caps (Rabin CC-5 §1.1).
+        # dispatch_pdf() enforces 30 s thread-safe timeout + size caps (Rabin CC-5 §1.1).
         parsed = dispatch_pdf(str(pdf_path))
 
         stmt = CreditCardStatement(

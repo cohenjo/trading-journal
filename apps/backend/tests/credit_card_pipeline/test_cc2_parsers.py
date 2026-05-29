@@ -285,3 +285,72 @@ def test_regression__installment_amount_unit_correct() -> None:
         assert txn.amount_ils < Decimal("100000.00"), (
             f"amount_ils suspiciously large: {txn.amount_ils} — unit overflow?"
         )
+
+
+# ---------------------------------------------------------------------------
+# CC-11 follow-up: thread-safe timeout regression test
+# ---------------------------------------------------------------------------
+
+
+def test_dispatch_pdf_timeout_works_from_worker_thread(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pytest.TempPathFactory,
+) -> None:
+    """CC-11: dispatch_pdf must raise ParserTimeout (not 'signal only works in
+    main thread') when called from a non-main thread and parsing hangs.
+
+    We monkeypatch pdfplumber.open to return a fake PDF whose page extraction
+    blocks on a threading.Event (so it can be released cleanly after the test).
+    We call dispatch_pdf with timeout_seconds=1 from a background thread.
+    The call must raise ParserTimeout cleanly, without the classic SIGALRM
+    'signal only works in main thread' error.
+    """
+    import threading
+
+    from app.services.expenses.parsers.base import ParserTimeout
+    from app.services.expenses.parsers.dispatcher import dispatch_pdf
+
+    # Create a minimal real file so the os.path.getsize check passes.
+    dummy_pdf = tmp_path / "dummy.pdf"  # type: ignore[operator]
+    dummy_pdf.write_bytes(b"%PDF-1.4 dummy\n")
+
+    # Event lets us unblock the fake page after the test completes so the
+    # background thread can exit cleanly rather than leaking forever.
+    _unblock = threading.Event()
+
+    class _HangingPage:
+        def extract_text(self) -> str:  # noqa: D401
+            # Block until the test releases us (or 30 s safety timeout).
+            _unblock.wait(timeout=30)
+            return ""
+
+    class _HangingPDF:
+        pages = [_HangingPage()]
+
+        def __enter__(self) -> "_HangingPDF":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            pass
+
+    monkeypatch.setattr("pdfplumber.open", lambda _path: _HangingPDF())
+
+    result: list[object] = []
+
+    def _worker() -> None:
+        try:
+            dispatch_pdf(str(dummy_pdf), timeout_seconds=1)
+            result.append("no_error")
+        except ParserTimeout as exc:
+            result.append(exc)
+        except Exception as exc:  # noqa: BLE001
+            result.append(exc)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=10)
+    _unblock.set()  # release any still-running background parse thread
+
+    assert result, "Worker thread did not complete within 10 s"
+    exc = result[0]
+    assert isinstance(exc, ParserTimeout), f"Expected ParserTimeout from worker thread, got {type(exc).__name__}: {exc}"
