@@ -353,17 +353,21 @@ def process_one_pdf(
     ).first()
 
     if already_done is not None:
-        dup = ExpenseInbox(
-            id=uuid4(),
-            file_path=safe_name,
-            file_hash=file_hash,
-            file_size_bytes=file_size,
-            status="duplicate",
-            household_id=household_id,
-            submitted_at=datetime.utcnow(),
-        )
-        db.add(dup)
-        db.commit()
+        # Duplicate of an already-completed PDF — the unique constraint on
+        # file_hash prevents inserting a second DB row, so just move the file
+        # to processed/ silently.  No DB write needed: the original row is the
+        # authoritative record.
+        PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+        dest = PROCESSED_DIR / safe_name
+        try:
+            shutil.move(str(pdf_path), str(dest))
+            os.chmod(dest, 0o600)
+        except OSError as exc:
+            logger.warning(
+                "expenses_inbox: could not move duplicate %r to processed/: %s",
+                safe_name,
+                exc,
+            )
         logger.debug(
             "expenses_inbox: duplicate %r (hash=%s…) — skipped",
             safe_name,

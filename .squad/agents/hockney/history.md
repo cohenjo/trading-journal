@@ -1,3 +1,31 @@
+## 2026-05-29 — CC-14 Backfill (Credit-Card Expenses Pipeline)
+
+**Task:** Historical backfill of 30 credit-card PDFs (Cal/CalPayBox/Max/Isracard) into the expenses pipeline. Confirm all files ingested, run verification queries, document edge cases.
+
+**Learnings:**
+
+- **`expense_inbox_file_hash_unique` blocks duplicate-status rows.** When the dedup path tried to INSERT a new `expense_inbox` row with `status='duplicate'` and the same `file_hash`, it violated the unique constraint — crashing the scanner and blocking the next file. Fix: skip the DB insert entirely for duplicates; just move the file to `processed/` and return `"duplicate"`. The original `completed` row is the authoritative record.
+
+- **`expense_categories` must be seeded before `category_id` populates.** The rule engine correctly resolves 43% of transactions to `resolution_status='auto'` but cannot write the FK because the table is empty. This is a prerequisite (McManus/Keaton), not a pipeline defect.
+
+- **CalPayBox and Cal/5712 statement period dates return `date.min` (0001-01-01).** Individual `txn_date` values are fine — only the statement-header date extraction fails for supplementary-cardholder Cal PDFs and all PayBox layout variants. Non-blocking but should be filed with McManus.
+
+- **Transfers use `resolution_status='transfer'`, not an `is_transfer` column.** All 40 transfer rows are CalPayBox. The rule engine tags them correctly.
+
+- **Hebrew merchants are stored reversed (visual RTL order from pdfplumber).** `merchant_raw` and `merchant_normalized` carry the same reversed string. This is expected per McManus's RTL note — display layer must reverse for rendering.
+
+- **Docker source code is not volume-mounted.** Patching Python source on the host has no effect on the running container. Fixes take effect only after `docker compose build`. Manual file moves were used to unblock the stalled scanner in this session.
+
+**Files changed:**
+- `apps/backend/app/worker/expenses_inbox.py` (fix duplicate-hash UniqueViolation crash in dedup path)
+
+**Deliverables:**
+- `.squad/decisions/inbox/hockney-cc14-backfill.md`
+
+**Outcome:** 30/30 PDFs ingested, 0 errors, 407 transactions, 4 issuers, all cardholders correct.
+
+---
+
 ## 2026-05-27 — RSU Pricing Pipeline
 
 **Task:** End-to-end RSU pricing pipeline: nightly price + dividend_yield cached for MSFT/WIX, exposed via API, hydrated into plan/snapshot JSON blobs.
