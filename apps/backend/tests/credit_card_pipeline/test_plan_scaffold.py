@@ -17,26 +17,33 @@ Run check (should be ALL skip/xfail, zero failures):
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
+from shutil import copy
 from typing import Optional
 from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
-
-from pathlib import Path
-
+from sqlmodel import Session, select
 
 from app.schema.expenses import (
+    CreditCardStatement,
     CreditCardTransaction,
     ExpenseCategory,
+    ExpenseInbox,
     MerchantCategoryMapping,
 )
 from app.services.expenses.categorize import (
     CategoryResolver,
+)
+import app.worker.expenses_inbox as expenses_inbox
+from app.worker.expenses_inbox import (
+    _reset_orphaned_processing_rows,
+    scan_inbox_once,
 )
 
 # Repo root — used to resolve fixture PDF paths from the project root.
@@ -686,6 +693,17 @@ def test_categorization_regex_rule_match_with_subcategory(
 # ===========================================================================
 
 
+# Helper shared by all worker/dedup tests that need temporary dirs.
+def _patch_worker_dirs(monkeypatch, tmp_path: Path) -> None:
+    """Monkeypatch the three directory constants in expenses_inbox."""
+    inbox = tmp_path / "inbox"
+    processed = tmp_path / "processed"
+    errors = tmp_path / "errors"
+    monkeypatch.setattr(expenses_inbox, "INBOX_DIR", inbox)
+    monkeypatch.setattr(expenses_inbox, "PROCESSED_DIR", processed)
+    monkeypatch.setattr(expenses_inbox, "ERRORS_DIR", errors)
+
+
 def test_dedup_same_file_dropped_twice(seeded_session, monkeypatch, tmp_path) -> None:
     """D-1: Inserting same file hash twice → second row status='duplicate', statements count unchanged.
 
@@ -802,28 +820,109 @@ def test_dedup_partial_write_stays_error_and_retried(session, monkeypatch, tmp_p
     assert row.error_message is not None
 
 
-def test_dedup_concurrent_five_files_no_double_processing() -> None:
+def test_dedup_concurrent_five_files_no_double_processing(seeded_session, monkeypatch, tmp_path) -> None:
     """D-5: 5 distinct PDFs arrive simultaneously → 5 unique expense_inbox rows, each unique hash.
 
     See scenario D-5 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    session, _slug_map = seeded_session
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+
+    # Use 5 distinct Cal fixture PDFs.
+    fixtures = [
+        _REPO_ROOT / _CAL_FIXTURES["happy_path"],
+        _REPO_ROOT / _CAL_FIXTURES["page2"],
+        _REPO_ROOT / _CAL_FIXTURES["fx_row"],
+        _REPO_ROOT / _CAL_FIXTURES["installment"],
+        _REPO_ROOT / _CAL_FIXTURES["year_boundary"],
+    ]
+    for i, src in enumerate(fixtures):
+        copy(src, inbox / f"statement_{i}.pdf")
+
+    @contextmanager
+    def sf():
+        yield session
+
+    result = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+    assert result["scanned"] == 5
+
+    rows = session.exec(select(ExpenseInbox)).all()
+    completed = [r for r in rows if r.status == "completed"]
+    assert len(completed) == 5
+
+    hashes = {r.file_hash for r in completed}
+    assert len(hashes) == 5, "Each PDF must have a unique SHA-256 hash"
 
 
-def test_dedup_requeue_after_transient_error() -> None:
-    """D-6: status='error' row picked up on next poll, retry_count increments.
+def test_dedup_requeue_after_transient_error(seeded_session, monkeypatch, tmp_path) -> None:
+    """D-6: status='errored' row picked up on next poll, retry_count increments.
 
     See scenario D-6 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    session, _slug_map = seeded_session
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    src = _REPO_ROOT / _CAL_FIXTURES["happy_path"]
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def sf():
+        yield session
+
+    # First pass — simulated error by using a broken PDF.
+    fake_pdf = inbox / "broken.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    row = session.exec(select(ExpenseInbox)).first()
+    assert row is not None
+    assert row.status == "errored"
+    assert row.retry_count == 1
+
+    # Move errors file back to inbox and call again — retry_count must go to 2.
+    error_file = tmp_path / "errors" / "broken.pdf"
+    if error_file.exists():
+        copy(error_file, inbox / "broken.pdf")
+
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    session.refresh(row)
+    assert row.retry_count == 2
 
 
-def test_dedup_worker_restart_resumes_orphaned_processing_rows() -> None:
+def test_dedup_worker_restart_resumes_orphaned_processing_rows(session) -> None:
     """D-7: Rows with status='processing' at startup are detected and re-queued.
 
     See scenario D-7 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    from datetime import datetime
+    from uuid import uuid4
+
+    orphan = ExpenseInbox(
+        id=uuid4(),
+        file_path="orphaned.pdf",
+        file_hash="abc123" * 10 + "ab",  # 62-char fake hash
+        file_size_bytes=1024,
+        status="processing",
+        retry_count=0,
+        household_id=_TEST_HOUSEHOLD_ID,
+        submitted_at=datetime.utcnow(),
+    )
+    session.add(orphan)
+    session.commit()
+
+    reset_count = _reset_orphaned_processing_rows(session)
+    assert reset_count == 1
+
+    session.refresh(orphan)
+    assert orphan.status == "errored"
+    assert orphan.retry_count == 1
 
 
 # ===========================================================================
@@ -1364,61 +1463,200 @@ def test_api_by_category_unauthenticated_returns_401(
 # ===========================================================================
 
 
-def test_worker_inbox_scan_picks_up_new_pdf() -> None:
+def test_worker_inbox_scan_picks_up_new_pdf(seeded_session, monkeypatch, tmp_path) -> None:
     """W-1: New .pdf in inbox → expense_inbox row created within one poll cycle.
 
     See scenario W-1 in redfoot-cc-test-plan.md.
-    Unblock: remove skip when CC-5 (worker) ships.
     """
-    pytest.skip("CC-5 not yet implemented")
+    session, _slug_map = seeded_session
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    copy(_REPO_ROOT / _CAL_FIXTURES["happy_path"], inbox / "statement.pdf")
+
+    @contextmanager
+    def sf():
+        yield session
+
+    result = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+    assert result["scanned"] == 1
+    assert result["completed"] == 1
+
+    row = session.exec(select(ExpenseInbox)).first()
+    assert row is not None
+    assert row.status == "completed"
 
 
-def test_worker_success_moves_file_to_processed() -> None:
-    """W-2: Successfully parsed file moved to processed/YYYY-MM/; original path gone.
+def test_worker_success_moves_file_to_processed(seeded_session, monkeypatch, tmp_path) -> None:
+    """W-2: Successfully parsed file moved to processed/; original path gone.
 
     See scenario W-2 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    session, _slug_map = seeded_session
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    copy(_REPO_ROOT / _CAL_FIXTURES["happy_path"], inbox / "statement.pdf")
+
+    @contextmanager
+    def sf():
+        yield session
+
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    assert not (inbox / "statement.pdf").exists(), "File should be gone from inbox"
+    assert (tmp_path / "processed" / "statement.pdf").exists(), "File should be in processed/"
 
 
-def test_worker_error_moves_file_to_errors_with_sidecar() -> None:
+def test_worker_error_moves_file_to_errors_with_sidecar(session, monkeypatch, tmp_path) -> None:
     """W-3: Failed parse → file moved to errors/; .error.txt sidecar created.
 
     See scenario W-3 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    fake_pdf = inbox / "bad.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    @contextmanager
+    def sf():
+        yield session
+
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    assert not fake_pdf.exists(), "File should be gone from inbox"
+    assert (tmp_path / "errors" / "bad.pdf").exists(), "File should be in errors/"
+    assert (tmp_path / "errors" / "bad.pdf.error.txt").exists(), ".error.txt sidecar must exist"
 
 
-def test_worker_restart_resumes_orphaned_processing_rows() -> None:
+def test_worker_restart_resumes_orphaned_processing_rows(session, monkeypatch, tmp_path) -> None:
     """W-4: status='processing' rows at startup are detected and retried.
 
     See scenario W-4 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    from datetime import datetime
+    from uuid import uuid4
+
+    orphan = ExpenseInbox(
+        id=uuid4(),
+        file_path="orphaned.pdf",
+        file_hash="d" * 64,
+        file_size_bytes=512,
+        status="processing",
+        retry_count=0,
+        household_id=_TEST_HOUSEHOLD_ID,
+        submitted_at=datetime.utcnow(),
+    )
+    session.add(orphan)
+    session.commit()
+
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+    (tmp_path / "inbox").mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def sf():
+        yield session
+
+    # scan_inbox_once resets orphaned rows at startup.
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    session.refresh(orphan)
+    assert orphan.status == "errored"
+    assert orphan.retry_count == 1
 
 
-def test_worker_reprocess_done_row_is_noop() -> None:
-    """W-5: Re-processing a status='done' row is a no-op; statement + transaction counts unchanged.
+def test_worker_reprocess_done_row_is_noop(seeded_session, monkeypatch, tmp_path) -> None:
+    """W-5: Re-processing a status='completed' row is a no-op; statement + transaction counts unchanged.
 
     See scenario W-5 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    session, _slug_map = seeded_session
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    src = _REPO_ROOT / _CAL_FIXTURES["happy_path"]
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def sf():
+        yield session
+
+    # First pass — completed.
+    copy(src, inbox / "statement.pdf")
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    stmt_count = len(session.exec(select(CreditCardStatement)).all())
+    txn_count = len(session.exec(select(CreditCardTransaction)).all())
+    inbox_count = len(session.exec(select(ExpenseInbox)).all())
+
+    # Second pass — same bytes back in inbox.
+    copy(src, inbox / "statement_copy.pdf")
+    result = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+    assert result["deduped"] == 1
+
+    # Counts must not change.
+    assert len(session.exec(select(CreditCardStatement)).all()) == stmt_count
+    assert len(session.exec(select(CreditCardTransaction)).all()) == txn_count
+    assert len(session.exec(select(ExpenseInbox)).all()) == inbox_count + 1  # +1 for dup row
 
 
-def test_worker_non_pdf_file_in_inbox_ignored() -> None:
+def test_worker_non_pdf_file_in_inbox_ignored(session, monkeypatch, tmp_path) -> None:
     """W-6: .csv or .jpg in inbox → skipped; no expense_inbox row created.
 
     See scenario W-6 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    (inbox / "data.csv").write_text("col1,col2\n1,2\n")
+    (inbox / "image.jpg").write_bytes(b"\xff\xd8\xff\xe0")
+
+    @contextmanager
+    def sf():
+        yield session
+
+    result = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+    assert result["scanned"] == 0
+
+    rows = session.exec(select(ExpenseInbox)).all()
+    assert len(rows) == 0
 
 
-def test_worker_unknown_issuer_format_lands_in_error() -> None:
-    """W-7: PDF not matching any fingerprint → status='error', error_message contains 'unknown format'.
+def test_worker_unknown_issuer_format_lands_in_error(session, monkeypatch, tmp_path) -> None:
+    """W-7: PDF not matching any fingerprint → status='errored', error_message contains issuer hint.
 
     See scenario W-7 in redfoot-cc-test-plan.md.
     """
-    pytest.skip("CC-5 not yet implemented")
+    _patch_worker_dirs(monkeypatch, tmp_path)
+    monkeypatch.setattr(expenses_inbox, "_DEFAULT_HOUSEHOLD_ID", None)
+
+    inbox = tmp_path / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    # Write a minimal but structurally valid PDF that no issuer fingerprint recognises.
+    fake_pdf = inbox / "unknown_issuer.pdf"
+    fake_pdf.write_bytes(b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n")
+
+    @contextmanager
+    def sf():
+        yield session
+
+    scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
+
+    row = session.exec(select(ExpenseInbox)).first()
+    assert row is not None
+    assert row.status == "errored"
+    assert row.error_message is not None
 
 
 # ===========================================================================

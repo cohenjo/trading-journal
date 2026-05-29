@@ -1,5 +1,6 @@
 """Job handler and schedule registry for the backend worker."""
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -7,6 +8,7 @@ from typing import Literal
 from app.services.trading_batch import run_trading_sync_batch
 from app.worker.backtest_handler import run_backtest_job
 from app.worker.bonds_scanner import refresh_bond_scanner_results
+from app.worker.expenses_inbox import scan_inbox_once
 from app.worker.handlers.options_grouping import handle_compute_options_strategy_groups
 from app.worker.handlers.options_metrics import handle_compute_options_monthly_metrics
 from app.worker.handlers.options_margin_sync import (
@@ -83,3 +85,14 @@ JOB_SCHEDULES: list[JobSchedule] = [
         handler=run_flex_refresh_poll,
     ),
 ]
+
+# Gate on CREDIT_CARD_INBOX_ENABLED (default: enabled).
+if os.getenv("CREDIT_CARD_INBOX_ENABLED", "true").lower() in ("1", "true", "yes"):
+    JOB_SCHEDULES.append(
+        JobSchedule(
+            job_id="expenses_inbox_scan",
+            kind="interval",
+            seconds=60,
+            handler=scan_inbox_once,
+        )
+    )
