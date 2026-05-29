@@ -147,3 +147,65 @@
 - `apps/backend/tests/conftest.py` (import expenses schema to register tables in SQLModel.metadata)
 
 **Commit:** `bf899da` on `squad/credit-cards`
+
+---
+
+## 2026-06-01 — CC-2: Credit-Card PDF Parsers
+
+**Task:** Implement 4 PDF parsers (Cal, CalPayBox, Max, Isracard) using pdfplumber;
+base classes, fingerprint detector, dispatcher; all Rabin security conditions.
+
+**Learnings:**
+
+- **pdfplumber extracts Hebrew in VISUAL (character-reversed) order.** Do NOT
+  reverse or re-order Hebrew codepoints. Store `merchant_raw` and `sector_raw`
+  verbatim. The category engine's sector lookup works on visual-order strings.
+  Reversing them will silently break category resolution.
+
+- **Cal column order is LTR extracted:** `charge_ils | txn_amount | card_shown | [installment] | sector | merchant | date`.
+  The installment marker `N - מ M םולשת` has total FIRST (N), num SECOND (M)
+  in visual order — opposite of logical reading order.
+
+- **Fixture trap: `_CAL_FIXTURES["fx_row"]` = `04-26-2.pdf` is CalPayBox, not Cal FX.**
+  Real Cal FX row is in `05-26.pdf`. `_CAL_FIXTURES["installment"]` = `05-26-3.pdf`
+  has no installment rows — use `01-26.pdf` or `02-26.pdf` instead.
+
+- **Max date artefact**: pdfplumber occasionally yields 3-digit year `05/04/267`.
+  Fix: take first 2 digits of year field → `26` → `2026`. Pattern: `DD/MM/YY[Y]`.
+
+- **Max date–merchant concatenation**: date is often directly appended to merchant
+  with no space separator: `UPAPP05/04/267`. Use `_DATE_RE = re.compile(r'(\d{2}/\d{2}/\d{2,3})$')`.
+
+- **Isracard split-letter artefact**: pdfplumber inserts a space after the first letter
+  of all-caps Latin words in the foreign section: `E UROPAPARK` → fix with
+  `_fix_split_latin_merchant()` using `re.sub(r'(?<![A-Z])([A-Z]) ([A-Z])', r'\1\2', s)`
+  applied twice.
+
+- **Isracard refund FX rows omit the commission column.** Normal FX rows have
+  `charge | 0.00 | rate | ...`; refund rows have `charge | rate | ...` (no commission).
+  Detect by checking if charge is negative.
+
+- **SIGALRM timeout works on macOS/Linux but NOT on Windows.** If porting to Windows,
+  replace with a threading.Timer approach.
+
+- **pdfplumber==0.11.9 pin**: changes to pyproject.toml pin require Docker image
+  rebuild when CC-5 worker ships. Flag in PR.
+
+- **Sector/merchant split strategy**: sort known sector tokens by descending length
+  and use `str.find()` not regex — more reliable for Hebrew substring matching
+  since re anchoring interacts poorly with bidirectional text.
+
+**Files changed:**
+- `apps/backend/app/services/expenses/parsers/__init__.py` (new)
+- `apps/backend/app/services/expenses/parsers/base.py` (new)
+- `apps/backend/app/services/expenses/parsers/fingerprint.py` (new)
+- `apps/backend/app/services/expenses/parsers/cal.py` (new)
+- `apps/backend/app/services/expenses/parsers/cal_paybox.py` (new)
+- `apps/backend/app/services/expenses/parsers/max.py` (new)
+- `apps/backend/app/services/expenses/parsers/isracard.py` (new)
+- `apps/backend/app/services/expenses/parsers/dispatcher.py` (new)
+- `apps/backend/tests/credit_card_pipeline/test_cc2_parsers.py` (new — 19 tests)
+- `apps/backend/pyproject.toml` (pin pdfplumber==0.11.9)
+- `apps/backend/uv.lock` (regenerated)
+
+**PR:** https://github.com/cohenjo/trading-journal/pull/483
