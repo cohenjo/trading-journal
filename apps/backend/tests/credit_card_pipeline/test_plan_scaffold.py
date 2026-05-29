@@ -705,8 +705,11 @@ def _patch_worker_dirs(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_dedup_same_file_dropped_twice(seeded_session, monkeypatch, tmp_path) -> None:
-    """D-1: Inserting same file hash twice → second row status='duplicate', statements count unchanged.
+    """D-1: Re-dropping same file hash → no new inbox row, statements count unchanged.
 
+    Updated for the CC-14 dedup contract: the worker silently moves the duplicate
+    to processed/ without writing a new DB row (the file_hash UNIQUE constraint
+    makes a "duplicate"-status row impossible anyway).
     See scenario D-1 in redfoot-cc-test-plan.md.
     """
     session, _slug_map = seeded_session
@@ -739,13 +742,18 @@ def test_dedup_same_file_dropped_twice(seeded_session, monkeypatch, tmp_path) ->
     # Statement count must not grow.
     assert len(session.exec(select(CreditCardStatement)).all()) == stmt_count
 
-    dup_row = session.exec(select(ExpenseInbox).where(ExpenseInbox.status == "duplicate")).first()
-    assert dup_row is not None
+    # New dedup contract: NO new DB row is created for duplicates. The original
+    # "completed" row remains the authoritative record.
+    final_rows = session.exec(select(ExpenseInbox)).all()
+    assert len(final_rows) == 1
+    assert final_rows[0].status == "completed"
 
 
 def test_dedup_file_renamed_still_duplicate(seeded_session, monkeypatch, tmp_path) -> None:
-    """D-2: Same bytes, different file_name → hash matches existing row → status='duplicate'.
+    """D-2: Same bytes, different file_name → hash matches existing row → file moved silently.
 
+    Updated for the CC-14 dedup contract: no new DB row is written for duplicates;
+    the original "completed" row is unchanged.
     See scenario D-2 in redfoot-cc-test-plan.md.
     """
     session, _slug_map = seeded_session
@@ -769,9 +777,10 @@ def test_dedup_file_renamed_still_duplicate(seeded_session, monkeypatch, tmp_pat
     result = scan_inbox_once(session_factory=sf, household_id=_TEST_HOUSEHOLD_ID)
     assert result["deduped"] == 1
 
-    dup = session.exec(select(ExpenseInbox).where(ExpenseInbox.status == "duplicate")).first()
-    assert dup is not None
-    assert dup.file_path == "completely_different_name.pdf"
+    rows = session.exec(select(ExpenseInbox)).all()
+    assert len(rows) == 1
+    assert rows[0].status == "completed"
+    assert rows[0].file_path == "original_name.pdf"
 
 
 @pytest.mark.xfail(
@@ -1667,7 +1676,8 @@ def test_worker_reprocess_done_row_is_noop(seeded_session, monkeypatch, tmp_path
     # Counts must not change.
     assert len(session.exec(select(CreditCardStatement)).all()) == stmt_count
     assert len(session.exec(select(CreditCardTransaction)).all()) == txn_count
-    assert len(session.exec(select(ExpenseInbox)).all()) == inbox_count + 1  # +1 for dup row
+    # New dedup contract (CC-14): duplicates do NOT create a new inbox row.
+    assert len(session.exec(select(ExpenseInbox)).all()) == inbox_count
 
 
 def test_worker_non_pdf_file_in_inbox_ignored(session, monkeypatch, tmp_path) -> None:
