@@ -100,3 +100,50 @@
 - **Invocation pattern remains:** run from `apps/backend/` with `uv run alembic ...` once the missing `e5f6a7b8c9d0_add_dividend_yield_to_price_cache.py` migration is restored to `main`.
 - **Gotcha:** unrelated local worktree changes were preserved in a stash named `pre-rsu-migration-sync-2026-05-27T23-37-09+03-00` so `main` could be fast-forwarded safely.
 📌 Team update (2026-05-29T122212Z): Credit-Card Expense Analysis Pipeline architecture proposal completed by Keaton. Work items CC-1..CC-14 pending Jony sign-off on Section 8 blockers. Your assignments coming imminently.
+
+---
+
+## 2026-06-06 — CC-4 Categorization Engine
+
+**Task:** Implement 3-tier categorization engine resolving `category_id + subcategory_id` for each parsed CC transaction. Unblock Redfoot's 10 Section 2 test stubs (C-1 through C-10) in `test_plan_scaffold.py`.
+
+**Learnings:**
+
+- **Resolution order deviates from task spec (user mapping beats YAML rule).** The spec said Tier 1 → Tier 2 (rules) → Tier 3 (mappings). But Redfoot's C-4 explicitly requires user mappings to win over YAML rules. Correct order: transfer pre-check → issuer sector → user-confirmed DB mappings (`source='user'`) → YAML rules → inferred DB mappings → unresolved.
+
+- **Hebrew RTL extraction gotcha (critical for sector dict and rule patterns).** pdfplumber extracts Hebrew PDF characters in visual left-to-right order. Each Hebrew word has characters reversed: `ביטוח` (insurance) → extracted as `חוטיב`. The `_SECTOR_TO_SLUG` dict keys and YAML patterns must be written in the **extracted (reversed)** form.
+
+- **Sector lookup is substring-based, not exact.** `sector_raw` may be multi-word (e.g., `'ניפו חוטיב'`). Lookup iterates `_SECTOR_TO_SLUG` checking `sector_key.lower() in sector_raw.lower()`. Shorter keys like `'חוטיב'` (insurance) match longer sector strings containing that word.
+
+- **`_pick_best_match`: subcategory rules must beat parent rules on equal weight.** The sort key `(-weight, slug_key)` with `slug_key = "category/subcategory"` causes parent rule `"transfers/"` to beat subcategory rule `"transfers/transfers-paybox"` alphabetically (slash < letter). Fix: add a middle sort term `0 if has_subcategory else 1` so subcategory (more specific) wins on weight tie. This was a silent bug — C-5 PAYBOX test failed with `subcategory_id=None` until fixed.
+
+- **SQLModel `Optional[List]` (bare, no type arg) has no SQLAlchemy type mapping.** `parse_warnings: Optional[List]` in `expenses.py` raises `TypeError: Could not resolve type 'List'`. Must be `sa_column=Column(JSON, nullable=True)`. Lesson: always pass a concrete type arg to `List` when SQLModel needs to infer the column type, or use an explicit `sa_column`.
+
+- **SQLModel `Field(nullable=False, sa_column=Column(...))` raises RuntimeError.** `nullable=` in `Field()` conflicts with `sa_column=`. The `nullable` constraint must live only inside `Column()`. Remove it from `Field()` entirely.
+
+- **`gen_random_uuid()` is PostgreSQL-only — SQLite tests need explicit `id=uuid4()`.** The `MerchantCategoryMapping` schema uses `server_default=text("gen_random_uuid()")` for its PK. SQLite in-memory tests must provide an explicit `id` when inserting, otherwise the INSERT fails with `unknown function: gen_random_uuid()`.
+
+- **Module-level category cache (`_CATEGORY_SLUG_CACHE`).** Tests MUST call `_invalidate_category_cache()` before seeding the in-memory DB — and again in fixture teardown. The `seeded_session` fixture handles both. Without teardown invalidation, stale UUIDs from a prior test's engine leak into the next test.
+
+- **Conftest `from __future__ import annotations` must be at file top.** Placing it mid-file inside a section block causes `SyntaxError`. When extending an existing test file that already has `from __future__ import annotations`, don't add it again.
+
+- **`tests/__init__.py` breaks existing tests that `from conftest import ...`.** Adding `tests/__init__.py` to enable `tests.credit_card_pipeline.helpers` imports changes how pytest resolves `conftest` as a module. Existing files using `from conftest import TEST_HOUSEHOLD_ID` stop working. Solution: use relative imports (`from .helpers import ...`) inside the package's own conftest, and define helper classes inline in test files rather than cross-importing.
+
+- **YAML default weight is 0.5, not 1.0.** The task CC-4 description said "default 1.0" but McManus's YAML header comment says `Default = 0.5`. Used 0.5 as `_DEFAULT_RULE_WEIGHT`.
+
+- **`entertainment` category does NOT exist in McManus's YAML.** Redfoot's C-2 expected `category.slug == 'entertainment'` for NETFLIX. McManus put Netflix under `utilities-streaming` (subcategory of `utilities`). Tests must expect `utilities` + `utilities-streaming`.
+
+- **`resolution_source='issuer_sector'` (not `'sector'`).** Matches both decisions.md and Redfoot's test plan C-1.
+
+- **Rabin §5.2 audit requirement.** `match_count += 1` and `last_used_at = datetime.utcnow()` must be set every time a Tier-3 mapping is applied. The DB commit happens inside `_query_mapping()`.
+
+**Files changed:**
+- `apps/backend/app/services/expenses/categorize.py` (new — full 3-tier engine)
+- `apps/backend/app/services/expenses/__init__.py` (re-exports CategoryResolver, CategoryAssignment)
+- `apps/backend/app/schema/expenses.py` (fix parse_warnings JSON column, remove nullable conflict)
+- `apps/backend/tests/credit_card_pipeline/test_plan_scaffold.py` (Section 2: 10 skips → passing tests)
+- `apps/backend/tests/credit_card_pipeline/conftest.py` (new — seeded_session fixture)
+- `apps/backend/tests/credit_card_pipeline/helpers.py` (new — _SyntheticTxn, seed_expense_categories)
+- `apps/backend/tests/conftest.py` (import expenses schema to register tables in SQLModel.metadata)
+
+**Commit:** `bf899da` on `squad/credit-cards`
