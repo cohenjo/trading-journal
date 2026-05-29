@@ -17,8 +17,8 @@ name: Supabase — Apply Migrations to Production
 #
 # Decisions context (decisions.md):
 #   - Prefer linked Supabase CLI migrations when access-token/password secrets exist.
-#   - Fall back to `--db-url` with the direct production connection URL for emergency
-#     applies when Management API secrets are missing.
+#   - Production has known migration-history drift that blocks safe `db push` in the
+#     fallback path; use targeted, idempotent psql applies for the expense pipeline.
 #   - Never log database connection strings; rely on GitHub secret masking and add-mask.
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -132,6 +132,17 @@ jobs:
         with:
           version: latest
 
+      - name: Setup PostgreSQL client (DB URL fallback)
+        if: steps.secrets.outputs.auth_path == 'db-url'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y postgresql-client
+          fi
+          psql --version
+
       # ── 2. Show pending migrations (always) ───────────────────────────────────
       - name: Show pending migrations
         env:
@@ -146,14 +157,42 @@ jobs:
           echo ""
           echo "### Pending migrations on production:"
           if [ "${{ steps.secrets.outputs.auth_path }}" = "db-url" ]; then
-            supabase migration list --db-url "$SUPABASE_PROD_DB_URL"
+            applied_versions="$(psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 -Atc "select version from supabase_migrations.schema_migrations order by version")"
+
+            echo "Local migration files not present in production migration history:"
+            found_pending=false
+            while IFS= read -r file; do
+              base="$(basename "$file")"
+              version="${base%%_*}"
+              if ! grep -qx "$version" <<< "$applied_versions"; then
+                echo "  - $base"
+                found_pending=true
+              fi
+            done < <(find migrations -maxdepth 1 -type f -name '[0-9]*_*.sql' | sort)
+            if [ "$found_pending" = "false" ]; then
+              echo "  (none)"
+            fi
+
+            echo ""
+            echo "Production history entries not present locally (known drift; not repaired by this workflow):"
+            local_versions="$(find migrations -maxdepth 1 -type f -name '[0-9]*_*.sql' -exec basename {} \; | sed -E 's/^([0-9]+)_.*/\1/' | sort)"
+            found_remote_only=false
+            while IFS= read -r version; do
+              if [ -n "$version" ] && ! grep -qx "$version" <<< "$local_versions"; then
+                echo "  - $version"
+                found_remote_only=true
+              fi
+            done <<< "$applied_versions"
+            if [ "$found_remote_only" = "false" ]; then
+              echo "  (none)"
+            fi
           else
             supabase migration list --linked
           fi
         working-directory: supabase
 
       # ── 3. Apply (conditional) ────────────────────────────────────────────────
-      - name: Apply migrations (supabase db push)
+      - name: Apply migrations
         if: steps.mode.outputs.apply == 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
@@ -163,9 +202,106 @@ jobs:
         run: |
           set -euo pipefail
 
+          required_tables=(
+            expense_inbox
+            expense_categories
+            credit_card_statements
+            credit_card_transactions
+            merchant_category_mappings
+          )
+          expense_migrations=(
+            20260529122500_add_credit_card_expense_pipeline.sql
+            20260529122501_seed_expense_categories.sql
+          )
+
+          table_list_sql() {
+            local joined=""
+            local table
+            for table in "${required_tables[@]}"; do
+              if [ -n "$joined" ]; then
+                joined+=","
+              fi
+              joined+="'$table'"
+            done
+            printf '%s' "$joined"
+          }
+
+          record_migration() {
+            local file="$1"
+            local base version name
+            base="$(basename "$file")"
+            version="${base%%_*}"
+            name="${base#*_}"
+            name="${name%.sql}"
+
+            if ! [[ "$version" =~ ^[0-9]{14}$ ]] || ! [[ "$name" =~ ^[A-Za-z0-9_]+$ ]]; then
+              echo "::error::Unexpected migration filename '$base'."
+              exit 1
+            fi
+
+            psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 -c \
+              "insert into supabase_migrations.schema_migrations(version, name, statements) values ('$version', '$name', array['-- applied by production DB URL fallback workflow']) on conflict (version) do nothing;" \
+              >/dev/null
+          }
+
+          verify_expense_tables() {
+            local existing_tables missing_count categories_count table
+            existing_tables="$(psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 -Atc "select table_name from information_schema.tables where table_schema = 'public' and table_name in ($(table_list_sql)) order by table_name")"
+            missing_count=0
+            for table in "${required_tables[@]}"; do
+              if ! grep -qx "$table" <<< "$existing_tables"; then
+                echo "::error::Required production table '$table' is missing."
+                missing_count=$((missing_count + 1))
+              fi
+            done
+            if [ "$missing_count" -ne 0 ]; then
+              return 1
+            fi
+
+            categories_count="$(psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 -Atc "select count(*) from public.expense_categories")"
+            echo "✅ Verified credit-card expense tables exist; expense_categories rows: $categories_count"
+          }
+
+          apply_expense_pipeline_directly() {
+            local applied_versions existing_tables apply_needed migration table
+
+            applied_versions="$(psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 -Atc "select version from supabase_migrations.schema_migrations order by version")"
+            existing_tables="$(psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 -Atc "select table_name from information_schema.tables where table_schema = 'public' and table_name in ($(table_list_sql)) order by table_name")"
+            apply_needed=false
+
+            for table in "${required_tables[@]}"; do
+              if ! grep -qx "$table" <<< "$existing_tables"; then
+                echo "::warning::Production table '$table' is missing; rerunning idempotent expense pipeline migrations."
+                apply_needed=true
+              fi
+            done
+
+            for migration in "${expense_migrations[@]}"; do
+              if ! grep -qx "${migration%%_*}" <<< "$applied_versions"; then
+                echo "::warning::Migration history is missing '${migration%%_*}'; applying $migration."
+                apply_needed=true
+              fi
+            done
+
+            if [ "$apply_needed" = "false" ]; then
+              echo "No direct psql apply needed; expense pipeline migrations are already tracked and tables exist."
+              verify_expense_tables
+              return
+            fi
+
+            for migration in "${expense_migrations[@]}"; do
+              echo "Applying $migration via direct psql fallback..."
+              psql "$SUPABASE_PROD_DB_URL" -v ON_ERROR_STOP=1 -f "migrations/$migration"
+              record_migration "migrations/$migration"
+            done
+
+            verify_expense_tables
+          }
+
           echo "🚀 Applying pending migrations to production..."
           if [ "${{ steps.secrets.outputs.auth_path }}" = "db-url" ]; then
-            supabase db push --db-url "$SUPABASE_PROD_DB_URL" --yes
+            echo "Using direct DB URL fallback. Known production migration drift blocks safe db push; applying/verifying the idempotent expense pipeline migrations only."
+            apply_expense_pipeline_directly
           else
             supabase db push --linked --yes
           fi
