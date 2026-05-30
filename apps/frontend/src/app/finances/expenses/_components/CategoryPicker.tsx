@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExpenseCategory, ExpenseSubcategory } from "@/types/expenses";
 import { EXPENSE_CATEGORIES } from "@/types/expenses";
+import { getCategories } from "@/lib/expenses/api";
 
 export interface CategorySelection {
   category: ExpenseCategory;
@@ -22,9 +23,9 @@ function matches(text: string, query: string): boolean {
   return text.toLowerCase().includes(query.toLowerCase());
 }
 
-function filterCategories(query: string): ExpenseCategory[] {
-  if (!query.trim()) return EXPENSE_CATEGORIES;
-  return EXPENSE_CATEGORIES.filter(
+function filterCategories(categories: ExpenseCategory[], query: string): ExpenseCategory[] {
+  if (!query.trim()) return categories;
+  return categories.filter(
     (cat) =>
       matches(cat.name, query) ||
       matches(cat.name_he, query) ||
@@ -42,10 +43,27 @@ export function CategoryPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [expandedSlugs, setExpandedSlugs] = useState<Set<string>>(new Set());
+  const [categories, setCategories] = useState<ExpenseCategory[]>(EXPENSE_CATEGORIES);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const filteredCategories = useMemo(() => filterCategories(query), [query]);
+  // Fetch real categories from API on mount
+  useEffect(() => {
+    let mounted = true;
+    getCategories()
+      .then((fetchedCategories) => {
+        if (mounted) setCategories(fetchedCategories);
+      })
+      .catch((err) => {
+        console.error("[CategoryPicker] failed to fetch categories:", err);
+        // Keep using EXPENSE_CATEGORIES fallback
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const filteredCategories = useMemo(() => filterCategories(categories, query), [categories, query]);
 
   function handleOpen() {
     if (disabled) return;
