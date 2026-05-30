@@ -41,3 +41,4 @@
 ---
 
 📌 **Team update (2026-05-30T07:57:13Z):** McManus's Transportation taxonomy split (PR #489, commit `1355ef6`) surfaced UUID staleness in CategoryPicker hardcoded constants. Pattern established: dynamic category fetching at runtime prevents future taxonomy-change regressions. Frontend lead note: Future taxonomy PRs should wire pickers to `/api/expenses/categories` as standard practice. — decided by McManus
+📌 Team update (2026-05-30T14:01:30Z): CategoryPicker dynamic category fetching (2026-05-30 fix, commits f270700+fedef20) proved critical when McManus shipped Housing/Utilities taxonomy (commit 4d0e931, workflow 26685706819). New 7 housing subcategories were added to prod without any frontend code changes — CategoryPicker auto-discovered them at runtime via `/api/expenses/categories`. Pattern validated: dynamic category fetching at component mount is the right design. No more static type stubs needed when taxonomy changes. — McManus

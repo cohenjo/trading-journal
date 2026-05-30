@@ -1185,3 +1185,212 @@ CategoryPicker fetches real UUIDs at runtime with graceful fallback to hardcoded
 **Deployment:**
 
 Fix pushed as commits `f270700` + `fedef20` directly to main. Vercel deploy succeeded.
+
+---
+
+### 2026-05-30: Dynamic Migration Discovery for CI Fallback Path
+
+**By:** Kujan (DevOps/Platform)
+
+**Context:** P1 bug — hardcoded migration allowlist in Supabase CI workflow silently skipped new migrations
+
+**Problem**
+
+The `.github/workflows/supabase-migrations.yml` db-url fallback path had a hardcoded array of 2 specific migration filenames:
+
+```bash
+expense_migrations=(
+  20260529122500_add_credit_card_expense_pipeline.sql
+  20260529122501_seed_expense_categories.sql
+)
+```
+
+The `apply_expense_pipeline_directly()` function only applied migrations in this array. Any new migration added to `supabase/migrations/` was silently skipped, even when the workflow ran with `[apply-migrations]` in the commit message.
+
+**Impact:** McManus's PR #489 added `20260530055800_add_transportation_category.sql`. The workflow ran "successfully" but the Transportation migration was never applied. User was staring at stale taxonomy in prod (35 categories instead of 39).
+
+**Root Cause**
+
+Hardcoded allowlists in CI scripts rot immediately and fail silently. The original implementation was written to apply only the expense pipeline migrations, but the function was never updated to be general-purpose as new migrations were added.
+
+**Decision**
+
+**Replace hardcoded allowlist with dynamic discovery.**
+
+New behavior (`apply_pending_migrations_directly`):
+1. List all `*.sql` files in `supabase/migrations/` (sorted by version)
+2. Query prod `supabase_migrations.schema_migrations` for applied versions
+3. For each local migration whose version is NOT in prod's applied list, apply it via `psql -v ON_ERROR_STOP=1 -f migrations/{file}` and record it via the existing `record_migration` helper
+4. After applying, run `verify_expense_tables` to validate baseline schema
+
+**Safety invariants:**
+- Idempotent — running twice is safe (the `on conflict (version) do nothing` in `record_migration` already handles this)
+- Only applies LOCAL migrations to prod (never removes or alters prod-only history entries)
+- Fails LOUD if any psql apply fails (set -euo pipefail already in place)
+
+**Implementation**
+
+- **Commit f63185e:** Replaced `apply_expense_pipeline_directly()` with `apply_pending_migrations_directly()` in `.github/workflows/supabase-migrations.yml`
+- **Commit 2f52292:** Fixed `20260512010000_enforce_dividend_yield_decimal.sql` to be idempotent (wrapped constraint creation in IF NOT EXISTS guard to handle prod drift)
+- **Workflow run 26679731909:** Successfully applied 5 pending migrations including Transportation. Final verification: `expense_categories rows: 39` ✅
+
+**Why**
+
+- Hardcoded allowlists rot immediately and fail silently. Dynamic discovery (sorted local files vs. prod history) is the only safe pattern for fallback migration paths that need to tolerate prod drift.
+- Pattern is now documented in `.squad/agents/kujan/history.md` and should be applied to any future CI scripts that need to apply migrations outside of the Supabase CLI's normal `db push` flow.
+
+---
+
+### 2026-05-30: Housing/Utilities Category Taxonomy
+
+**By:** McManus (Data/Finance Dev)
+
+**Status:** Shipped (commit 4d0e931, workflow run 26685706819)
+
+**Context:** User gap report — "Meniv Rishon is the Water Utility company in Rishon LeZion. I didn't find a category that would fit utility bills related to housing (like water, electricity, home insurance etc)."
+
+**Problem**
+
+The existing "Utilities & Communications" category covers **telecom and streaming** (internet, mobile, HBO Max, HOT cable). There was no category for **housing-related utility bills**:
+- Water utilities (Meniv Rishon, Hagihon, Mei Avivim, etc.)
+- Electricity (Israel Electric Corporation / IEC)
+- Cooking gas (Pazgas, Supergas, Amisragas)
+- Home insurance (ביטוח דירה)
+- Property tax / Arnona (ארנונה)
+- Building HOA / Va'ad Bayit (ועד בית)
+- Home maintenance / repairs
+
+These are distinct spending categories with different budgeting needs than telecom.
+
+**Decision**
+
+Created a **new top-level "Housing" category** (slug: `housing`, Hebrew: דיור, color: #795548, icon: home) with **7 subcategories**:
+
+1. **housing-water** (מים) — Water utilities
+   - Meniv Rishon (Rishon LeZion)
+   - Hagihon (Jerusalem)
+   - Mei Avivim (Tel Aviv)
+   - Mey Galim (Haifa)
+   - Pelagei Sharon (Sharon region)
+
+2. **housing-electricity** (חשמל) — Electricity
+   - Israel Electric Corporation (IEC / חברת החשמל)
+
+3. **housing-gas** (גז) — Cooking gas
+   - Pazgas, Supergas, Amisragas
+
+4. **housing-home-insurance** (ביטוח דירה) — Home insurance
+   - Context-dependent: major providers (Harel, Migdal, Phoenix, Clal, Menorah) when descriptor includes "דירה" (dwelling)
+
+5. **housing-property-tax** (ארנונה) — Property tax
+   - Arnona (municipal tax billed by the Iriya)
+
+6. **housing-hoa** (ועד בית) — Building HOA
+   - Va'ad Bayit (building committee / HOA fees)
+
+7. **housing-home-maintenance** (תחזוקת הבית) — Home repairs
+   - Plumber, electrician, handyman, repairs
+
+**Rationale**
+
+### Why separate from Utilities & Communications?
+
+- **Different budgeting contexts:** Housing utilities are recurring fixed costs tied to dwelling ownership/rental. Telecom/streaming are discretionary subscriptions.
+- **Different financial planning:** Property tax and home insurance are annual lump sums. Water/electricity/gas are monthly variable costs.
+- **User mental model:** People think of "utilities" as telecom + internet, not water/electricity (confirmed by user feedback).
+
+### Why these subcategories?
+
+- **Water/Electricity/Gas:** The three classic housing utilities. Distinct vendors, distinct billing cycles, distinct usage patterns.
+- **Home insurance:** Legally required for mortgaged properties. Distinct from vehicle/life insurance.
+- **Property tax (Arnona):** Israel-specific municipal tax. Very high weight (0.98) due to unique keyword.
+- **HOA (Va'ad Bayit):** Israel-specific building committee fees. Common in apartment buildings.
+- **Home maintenance:** Captures plumber, electrician, handyman, repair costs. Distinct from insurance/tax.
+
+**Display order:** Housing given `display_order: 12` (between Transfers=10 and Other=99). Leaves room for future top-level categories.
+
+**Merchant Patterns**
+
+### High-confidence patterns (weight 0.95+)
+
+- **Water:** `meniv\s*rishon|בינמ.*ןושאר` (Meniv Rishon), `hagihon|ןוחיגה` (Hagihon), `mei\s*avivim` (Mei Avivim)
+- **Electricity:** `\biec\b|למשחה\s*תרבח|israel\s*electric` (IEC)
+- **Gas:** `pazgas|supergas|amisragas` (gas providers)
+- **Property tax:** `arnona|הנורא` (arnona keyword, weight 0.98)
+- **HOA:** `va'?ad\s*ba?yit|תיב\s*דעו` (va'ad bayit)
+
+### Context-dependent patterns (weight 0.8-0.9)
+
+- **Home insurance:** `(harel|migdal|phoenix|clal|menorah).*הריד` (provider + dwelling context)
+- **Home maintenance:** `(plumb|electrician|handyman|םינוקית|היצלטסניא)` (repair professionals)
+
+**Sector Mappings**
+
+Added to `categorize.py`:
+
+```python
+"רוייד": "housing",  # reversed דיור (housing)
+"ינוריע": ("housing", "housing-property-tax"),  # reversed עירוני (municipal)
+```
+
+The `ינוריע` (municipal) sector directly maps to the subcategory (two-tier tuple), following the Transportation pattern.
+
+**Migration**
+
+**File:** `supabase/migrations/20260530165734_add_housing_category.sql`
+
+**Idempotency:**
+- `INSERT ... ON CONFLICT (slug) DO NOTHING` for new categories
+- `UPDATE ... WHERE slug = 'housing'` for metadata refresh
+- Safe to re-run
+
+**No reparenting:**
+- All 8 rows (1 parent + 7 subs) are new entities.
+- No existing categories moved under Housing.
+
+**Result:**
+- `expense_categories` row count: 47 (was 39, added 8)
+- Workflow run 26685706819 succeeded in 13s
+
+**Alternatives Considered**
+
+1. **Merge into existing "Utilities & Communications"** — Rejected. Users think of "utilities" as telecom/internet, not water/electricity.
+2. **Make "Utilities" a parent with "Telecom" and "Housing" as children** — Rejected. Over-nesting. Two-level hierarchy is sufficient.
+3. **Add "Housing" subcategory under "Financial & Insurance"** — Rejected. Home insurance is only one of seven housing costs.
+4. **Create separate top-level categories for Water, Electricity, Gas** — Rejected. Too granular.
+
+**Open Questions**
+
+### Should Internet/Mobile move to Housing?
+
+**Current state:** Internet and Mobile are under "Utilities & Communications".
+
+**Decision:** Keep current split. If user feedback shows confusion, revisit in 3 months.
+
+### Should Home Insurance move to a top-level "Insurance" category?
+
+**Current state:** Home insurance is under Housing. Vehicle insurance is under Transportation. Life/health insurance is under Financial.
+
+**Decision:** Keep insurance split by context. Insurance subcategory follows the context of the insured item.
+
+**Impact**
+
+- **User workflow:** "Meniv Rishon" water bill now auto-categorizes to Housing > Water (was previously falling into "Other" or manual resolution).
+- **Plan engine (CC-13):** Housing category excluded from is_transfer filter. Full spending included in household expense projections.
+- **Frontend CategoryPicker:** Dynamic fetching from `/api/expenses/categories` means no code change needed (Hockney's 2026-05-30 fix).
+
+**Follow-up Work**
+
+- [ ] **User validation:** Confirm Meniv Rishon charges now auto-categorize after next statement upload.
+- [ ] **Israel Electric Corporation:** Verify IEC charges match the patterns.
+- [ ] **Arnona patterns:** If municipal invoices have English "municipal tax" in merchant field, add fallback pattern.
+- [ ] **Home maintenance edge cases:** Plumber/electrician patterns may collide with construction/renovation. Monitor resolution queue for false positives.
+- [ ] **Chart color collision:** Housing (#795548) uses same brown as Financial (#795548). Verify intentional or pick distinct color (e.g., #8D6E63).
+
+**Commit & Workflow**
+
+- **Commit:** `4d0e931`
+- **Workflow run:** `26685706819`
+- **Push timestamp:** 2026-05-30T14:00:45Z
+- **Migration applied:** 2026-05-30T14:00:56Z
+- **Final expense_categories count:** 47

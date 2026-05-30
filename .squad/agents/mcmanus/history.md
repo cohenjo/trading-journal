@@ -232,3 +232,103 @@ All 113 regex patterns compile clean. is_transfer=true on `transfers`, `transfer
 ---
 
 📌 **Team update (2026-05-30T07:57:13Z):** Hockney established dynamic category fetching pattern for CategoryPicker to prevent UUID staleness after taxonomy changes. New pattern: All category pickers wire to `/api/expenses/categories` endpoint at runtime. Future taxonomy changes no longer require manual TypeScript constant updates. — decided by Hockney
+
+---
+
+## 2026-05-30 — ✅ Housing/Utilities Category Taxonomy (direct push to main)
+
+**Commit:** `4d0e931` | **Workflow run:** `26685706819`
+
+Closed taxonomy gap for housing-related utility bills. User reported "Meniv Rishon is the Water Utility company in Rishon LeZion. I didn't find a category that would fit utility bills related to housing (like water, electricity, home insurance etc)."
+
+**Distinct from existing "Utilities & Communications" category (telecom, internet, streaming).**
+
+### Taxonomy design
+
+Top-level slug: `housing` (English: "Housing", Hebrew: "דיור", color: #795548, icon: home)
+
+7 subcategories:
+1. **housing-water** (מים) — Israeli water utilities: Meniv Rishon (Rishon LeZion), Hagihon (Jerusalem), Mei Avivim (Tel Aviv), Mey Galim (Haifa), Pelagei Sharon (Sharon region)
+2. **housing-electricity** (חשמל) — Israel Electric Corporation (IEC / חברת החשמל)
+3. **housing-gas** (גז) — Cooking gas providers: Pazgas, Supergas, Amisragas
+4. **housing-home-insurance** (ביטוח דירה) — Home insurance from major Israeli providers (Harel, Migdal, Phoenix, Clal, Menorah) when context includes "דירה"
+5. **housing-property-tax** (ארנונה) — Municipal property tax (arnona)
+6. **housing-hoa** (ועד בית) — Building HOA fees (va'ad bayit)
+7. **housing-home-maintenance** (תחזוקת הבית) — Home repairs, plumber, electrician, handyman
+
+### Merchant patterns
+
+**category_rules.yaml additions:**
+- `meniv\s*rishon|בינמ.*ןושאר` → water (Meniv Rishon utility, weight 0.95)
+- `hagihon|ןוחיגה` → water (Jerusalem water, weight 0.95)
+- `mei\s*avivim|םיביבא\s*ימ` → water (Tel Aviv, weight 0.95)
+- `\biec\b|למשחה\s*תרבח|israel\s*electric` → electricity (IEC, weight 0.95)
+- `pazgas|supergas|amisragas` → gas (cooking gas, weight 0.95)
+- `arnona|הנורא` → property-tax (arnona, weight 0.98)
+- `va'?ad\s*ba?yit|תיב\s*דעו` → hoa (va'ad bayit, weight 0.95)
+- `(harel|migdal|phoenix|clal|menorah).*הריד` → home-insurance (context-dependent, weight 0.9)
+- `(plumb|electrician|handyman|םינוקית|היצלטסניא)` → home-maintenance (weight 0.8)
+
+**Sector mappings (categorize.py):**
+- `רוייד` (reversed דיור = housing) → `"housing"`
+- `ינוריע` (reversed עירוני = municipal) → `("housing", "housing-property-tax")`
+
+### Files changed
+
+**Migration:**
+- `supabase/migrations/20260530165734_add_housing_category.sql` — idempotent (INSERT ... ON CONFLICT, UPDATE with WHERE slug = ...)
+- 1 top-level + 7 subcategories
+- No reparenting (all new entities)
+
+**Backend:**
+- `apps/backend/app/services/expenses/category_rules.yaml` — added Housing block before "Other"
+- `apps/backend/app/services/expenses/categorize.py` — added 2 sector mappings (רוייד, ינוריע)
+
+**Frontend:**
+- `apps/frontend/src/types/expenses.ts` — added Housing to EXPENSE_CATEGORIES array for chart color map
+
+### Deployment
+
+- Push to main with `[apply-migrations]` marker
+- Workflow run 26685706819 succeeded in 13s
+- Dynamic discovery applied 1 pending migration (20260530165734_add_housing_category.sql)
+- Final `expense_categories` row count: **47** (was 39, added 8 = 1 parent + 7 subs)
+- Migration idempotency verified: `INSERT 0 1`, `UPDATE 1`, `INSERT 0 7`, `UPDATE 7`, `COMMIT`
+
+### Learnings
+
+**Housing vs Utilities distinction:**
+- Existing "Utilities & Communications" category covers **telecom/streaming** (internet, mobile, HBO Max, HOT cable).
+- New "Housing" category covers **dwelling utilities** (water, electricity, gas, property tax, HOA, home insurance, home maintenance).
+- These are separate spending categories with different budgeting needs — user correctly identified the gap.
+
+**Arnona (ארנונה) — property tax:**
+- Extracted as `הנורא` (reversed ארנונה).
+- Very specific to Israeli context (municipal tax billed by the Iriya).
+- Weight 0.98 (highest in housing subcategories) — extremely specific keyword.
+
+**Va'ad Bayit (ועד בית) — building HOA:**
+- Extracted as `תיב דעו` (reversed ועד בית).
+- Israel-specific term for building committee / HOA.
+- Regex pattern allows English variants: `va'?ad\s*ba?yit`.
+
+**Home insurance context patterns:**
+- Used conjunction pattern: `(provider).*הריד` (reversed דירה = dwelling).
+- Ensures we don't capture vehicle/life insurance from the same providers.
+- Weight 0.9 — high but below utilities (arnona/water) due to context ambiguity.
+
+**Sector mapping for municipal:**
+- `ינוריע` (reversed עירוני = municipal) maps to `("housing", "housing-property-tax")`.
+- This is a two-tier tuple: top-level category + subcategory.
+- Follows the Transportation pattern (sector directly maps to subcategory).
+
+**Display order:**
+- Housing given display_order 12 (between Transfers=10 and Other=99).
+- Leaves room for future categories (e.g., Pets, Insurance as top-level).
+
+**Migration idempotency verification:**
+- `INSERT 0 1` = new parent already exists (ON CONFLICT DO NOTHING).
+- `UPDATE 1` = updated parent metadata (display_order, color, icon).
+- `INSERT 0 7` = 7 new subcategories already exist (ON CONFLICT DO NOTHING).
+- `UPDATE 7` = updated all 7 subcategories (metadata refresh).
+- Pattern allows re-running safely — no duplicate UUIDs, no lost data.
