@@ -60,7 +60,10 @@ _DEFAULT_RULE_WEIGHT = 0.5
 # Cal and Isracard include a Hebrew ענף (sector) field on domestic transactions.
 # These strings are matched as substrings (case-insensitive) against sector_raw.
 # ~18 entries covering all common Israeli CC sectors.
-_SECTOR_TO_SLUG: dict[str, str] = {
+CategoryTarget = str | tuple[str, str]
+
+
+_SECTOR_TO_SLUG: dict[str, CategoryTarget] = {
     # Insurance (ביטוח → extracted חוטיב)
     "חוטיב": "financial-insurance",
     # Food / Groceries (מזון → ןוזמ; אוכל → לכוא)
@@ -69,8 +72,8 @@ _SECTOR_TO_SLUG: dict[str, str] = {
     # Restaurants / Cafés (מסעדות → תודעסמ; קפה → הפק)
     "תודעסמ": "restaurants",
     "הפק": "restaurants",
-    # Fuel (דלק → קלד)
-    "קלד": "fuel",
+    # MIGRATED: fuel → transportation-fuel (2026-05-30)
+    "קלד": ("transportation", "transportation-fuel"),
     # Communications / Utilities (תקשורת → תרושקת)
     "תרושקת": "utilities",
     # Clothing (הלבשה → השבלה)
@@ -83,7 +86,7 @@ _SECTOR_TO_SLUG: dict[str, str] = {
     # Leisure / Entertainment (פנאי → יאנפ)
     "יאנפ": "travel",
     # Auto / Garage (מכונאית → תיאנוכמ)
-    "תיאנוכמ": "travel",
+    "תיאנוכמ": ("transportation", "transportation-maintenance"),
     # Education (חינוך → ךוניח)
     "ךוניח": "kids-education",
     # Shopping (קניות → תויינק)
@@ -431,20 +434,25 @@ class CategoryResolver:
         order = Hebrew common-sector priority order).
         """
         sector_lower = sector_raw.lower()
-        for sector_key, slug in _SECTOR_TO_SLUG.items():
+        for sector_key, target in _SECTOR_TO_SLUG.items():
             if sector_key.lower() in sector_lower:
-                cat_id = slug_map.get(slug)
-                if cat_id is None:
+                if isinstance(target, tuple):
+                    category_slug, subcategory_slug = target
+                else:
+                    category_slug, subcategory_slug = target, None
+                cat_id = slug_map.get(category_slug)
+                subcat_id = slug_map.get(subcategory_slug) if subcategory_slug is not None else None
+                if cat_id is None or (subcategory_slug is not None and subcat_id is None):
                     # Slug not in DB yet — skip this sector hit
                     logger.debug(
                         "Sector key '%s' → slug '%s' not found in DB categories",
                         sector_key,
-                        slug,
+                        target,
                     )
                     continue
                 return CategoryAssignment(
                     category_id=cat_id,
-                    subcategory_id=None,
+                    subcategory_id=subcat_id,
                     resolution_status="auto",
                     resolution_source="sector",
                     is_transfer=False,

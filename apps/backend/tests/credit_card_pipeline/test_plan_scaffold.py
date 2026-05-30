@@ -473,6 +473,55 @@ def test_categorization_no_sector_yaml_rule_fires(
     assert result.is_transfer is False
 
 
+def test_categorization_transportation_fuel_sector_resolves_subcategory(
+    seeded_session: tuple,
+) -> None:
+    """Transportation regression: sector דלק (extracted קלד) → Fuel.
+
+    MIGRATED: fuel → transportation-fuel (2026-05-30). Fuel sector matches now
+    populate the top-level Transportation category and the Fuel subcategory.
+    """
+    session, slug_map = seeded_session
+    txn = _SyntheticTxn(merchant_normalized="UNKNOWN", sector_raw="קלד")
+    resolver = CategoryResolver()
+    from uuid import UUID
+
+    hh_id = UUID("00000000-0000-0000-0000-000000000101")
+    result = resolver.resolve(txn, session, hh_id)
+
+    assert result.resolution_status == "auto"
+    assert result.resolution_source == "sector"
+    assert result.category_id == slug_map["transportation"]
+    assert result.subcategory_id == slug_map["transportation-fuel"]
+
+
+def test_categorization_transportation_yaml_rules_split_commute_from_travel(
+    seeded_session: tuple,
+) -> None:
+    """Transportation regression: commute merchants classify outside Travel."""
+    session, slug_map = seeded_session
+    resolver = CategoryResolver()
+    from uuid import UUID
+
+    hh_id = UUID("00000000-0000-0000-0000-000000000101")
+
+    public_transit = resolver.resolve(
+        _SyntheticTxn(merchant_normalized="לארשי תבכר", sector_raw=None),
+        session,
+        hh_id,
+    )
+    registration = resolver.resolve(
+        _SyntheticTxn(merchant_normalized="הרובחתה דרשמ", sector_raw=None),
+        session,
+        hh_id,
+    )
+
+    assert public_transit.category_id == slug_map["transportation"]
+    assert public_transit.subcategory_id == slug_map["transportation-public-transit"]
+    assert registration.category_id == slug_map["transportation"]
+    assert registration.subcategory_id == slug_map["transportation-registration"]
+
+
 def test_categorization_both_fail_lands_unresolved(
     seeded_session: tuple,
 ) -> None:
@@ -1466,8 +1515,9 @@ def test_api_by_category_month_filter(client: TestClient, seeded_session: tuple)
 # COVERED-BY-E2E: e2e/expenses/08-empty-states.spec.ts — "by-category empty for selected month → 'אין נתונים לחודש זה'"
 def test_api_by_category_empty_category_returns_zero_subtotal(client: TestClient, seeded_session: tuple) -> None:
     """A-CAT-3: Category with no transactions → empty list, subtotal=0.0, no crash."""
-    # 'fuel' is seeded but no transactions added for it
-    resp = client.get("/api/expenses/by-category/fuel")
+    # MIGRATED: fuel → transportation-fuel (2026-05-30)
+    # 'transportation' is seeded but no transactions added for it
+    resp = client.get("/api/expenses/by-category/transportation")
     assert resp.status_code == 200
 
     body = resp.json()
