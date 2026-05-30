@@ -6,6 +6,22 @@ DevOps/Platform engineer. Owns Supabase infrastructure, Docker/Aspire setup, CI/
 
 ## Learnings
 
+### 2026-05-30: P1 Hardcoded Migration Allowlist Bug — CI Silently Skipped New Migrations
+
+**Root cause:** `.github/workflows/supabase-migrations.yml`'s db-url fallback path had a hardcoded 2-migration array (`expense_migrations`). The `apply_expense_pipeline_directly()` function only applied these two specific migrations, silently skipping ANY new migration added to `supabase/migrations/`.
+
+McManus's PR #489 added `20260530055800_add_transportation_category.sql`. The workflow ran "successfully" in 21s, reported `✅ Migrations applied successfully`, but the log showed `expense_categories rows: 35` (should be 39 after Transportation). The Transportation migration was never applied because it wasn't in the hardcoded allowlist.
+
+**Fix:** Replaced `apply_expense_pipeline_directly()` with `apply_pending_migrations_directly()` that dynamically discovers all local `*.sql` files in `supabase/migrations/`, queries prod `supabase_migrations.schema_migrations` for applied versions, and applies any pending migrations via `psql -v ON_ERROR_STOP=1 -f migrations/{file}`.
+
+**Workflow run `26679731909`** (2026-05-30T08:54) applied 5 pending migrations including Transportation. Final verification: **expense_categories rows: 39** ✅.
+
+**Secondary fix:** Migration `20260512010000_enforce_dividend_yield_decimal.sql` wasn't idempotent — it tried to create a constraint that already existed in prod due to historical drift. Wrapped the `ALTER TABLE ADD CONSTRAINT` in a `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '...') THEN ... END IF; END$$;` guard.
+
+**Pattern:** CI migration fallbacks must be **dynamic, not hardcoded**. Hardcoded allowlists rot immediately and fail silently. Dynamic discovery (sorted local files vs. prod history) is the only safe pattern for fallback migration paths.
+
+---
+
 ### 2026-05-29: CC-11 Worker Rebuild Verification — v1 (Pre-Fix)
 
 **✅ Rebuild successful — new job registered & running.**
