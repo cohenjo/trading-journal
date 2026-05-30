@@ -5,6 +5,13 @@
 -- The normalise migration (20260511230000) already converted all existing rows;
 -- this constraint locks the door going forward.
 
-ALTER TABLE stock_positions
-    ADD CONSTRAINT chk_dividend_yield_decimal
-    CHECK (dividend_yield IS NULL OR (dividend_yield >= 0 AND dividend_yield <= 1));
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'chk_dividend_yield_decimal'
+    ) THEN
+        ALTER TABLE stock_positions
+            ADD CONSTRAINT chk_dividend_yield_decimal
+            CHECK (dividend_yield IS NULL OR (dividend_yield >= 0 AND dividend_yield <= 1));
+    END IF;
+END$$;
