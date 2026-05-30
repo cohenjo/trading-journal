@@ -1117,3 +1117,71 @@ def compute_expense_cash_outflows(
 - **Gap:** Category seed missing (McManus owns CC-3); Docker rebuild pending (Kujan owns CC-11 v2)
 
 **Total Merged:** 15 decision notes
+
+---
+
+### 2026-05-30: Transportation Taxonomy Split
+
+**By:** McManus (Frontend Lead)
+
+**What:**
+
+Split Transportation / תחבורה (daily commute and vehicle costs) from Travel (vacations, flights, hotels) as a top-level expense category.
+
+Israeli household budgeting treats commute, fuel, car insurance, maintenance, vehicle registration, and public transport as recurring daily-life costs. Those planning signals are distinct from vacation/travel spend such as flights and hotels.
+
+**Taxonomy Changes:**
+
+- `fuel` → `transportation-fuel` (UUID preserved)
+- `travel-transit` → `transportation-public-transit` (UUID preserved)
+- Added: `transportation-insurance`, `transportation-maintenance`, `transportation-registration`
+
+The migration updates existing rows instead of deleting/reinserting them, preserving category UUIDs for historical transactions and merchant mappings.
+
+**Why:**
+
+User-stated business rules: commute costs are recurring operational expenses; travel is discretionary spending. Distinct categorization enables household budget forecasting and merchant rule mapping without conflation.
+
+**Deployment:**
+
+PR #489 merged to main as commit `1355ef6` with `[apply-migrations]` tag. Supabase migration applied in 21s.
+
+---
+
+### 2026-05-30: Dynamic Category Fetching for Expense Classification
+
+**By:** Hockney (Backend Lead)
+
+**What:**
+
+CategoryPicker now fetches expense categories dynamically from `/api/expenses/categories` on component mount, replacing hardcoded placeholder UUIDs.
+
+**Problem:**
+
+After PR #489 (Transportation taxonomy split), users saw "שגיאה בשמירת הסיווג" when saving expense classifications. Root cause: CategoryPicker used hardcoded fake UUIDs (`"cat-transportation"`, etc.) from `EXPENSE_CATEGORIES` array in `expenses.ts`, but the backend validated these against real database UUIDs from the `expense_categories` table. The mismatch became critical when PR #489 changed category UUIDs.
+
+**Decision:**
+
+CategoryPicker fetches real UUIDs at runtime with graceful fallback to hardcoded array for offline/test scenarios. No manual sync required when `expense_categories` schema changes.
+
+**Why:**
+
+1. **Schema changes break static data immediately** — fragile and easy to miss.
+2. **The endpoint already existed** but was never wired to CategoryPicker (flagged by TODO).
+3. **Matches Supabase single-source-of-truth pattern** — database is authoritative; frontend fetches at runtime.
+
+**Pattern for Future Taxonomy Changes:**
+
+1. Write SQL migration and apply to prod.
+2. Frontend fetches dynamically (already handled via dynamic fetch).
+3. Update hardcoded fallback IF needed for tests/offline.
+
+**Team Impact:**
+
+- **McManus (frontend lead):** No action. CategoryPicker now self-healing for future taxonomy changes.
+- **Keaton (test lead):** CategoryPicker tests still pass with hardcoded fallback.
+- **Rabin (security):** Reduced attack surface — UUIDs fetched fresh on each session, not bundled.
+
+**Deployment:**
+
+Fix pushed as commits `f270700` + `fedef20` directly to main. Vercel deploy succeeded.

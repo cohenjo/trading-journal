@@ -228,3 +228,7 @@ All 113 regex patterns compile clean. is_transfer=true on `transfers`, `transfer
 - `transfers` is_transfer=true propagated to both subcategories in the seed migration.
   The is_transfer flag on subcategories means the rule engine can stop at sub-level
   without needing to traverse to parent to determine exclusion.
+
+---
+
+📌 **Team update (2026-05-30T07:57:13Z):** Hockney established dynamic category fetching pattern for CategoryPicker to prevent UUID staleness after taxonomy changes. New pattern: All category pickers wire to `/api/expenses/categories` endpoint at runtime. Future taxonomy changes no longer require manual TypeScript constant updates. — decided by Hockney
