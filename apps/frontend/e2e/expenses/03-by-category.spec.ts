@@ -62,7 +62,7 @@ authTest.describe('@expenses 03 — By Category tab', () => {
     const categoryList = page.getByRole('list', { name: 'רשימת קטגוריות' });
     await expect(categoryList).toBeVisible({ timeout: 10_000 });
 
-    // The fixture has groceries, restaurants, health, fuel, shopping for 2026-05
+    // The fixture has groceries, restaurants, health, transportation, and shopping across months.
     // The page defaults to current month (2026-05 hardcoded in the component)
     const listItems = categoryList.getByRole('listitem');
     const count = await listItems.count();

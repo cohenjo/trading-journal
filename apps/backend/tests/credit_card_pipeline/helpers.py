@@ -53,7 +53,8 @@ _CATEGORY_SEED = [
     ("shopping", None, False),
     ("kids-education", None, False),
     ("financial", None, False),
-    ("fuel", None, False),
+    # MIGRATED: fuel → transportation-fuel (2026-05-30)
+    ("transportation", None, False),
     ("transfers", None, True),
     ("other", None, False),
     # health subcategories
@@ -76,7 +77,12 @@ _CATEGORY_SEED = [
     ("travel-flights", "travel", False),
     ("travel-hotels", "travel", False),
     ("travel-parking", "travel", False),
-    ("travel-transit", "travel", False),
+    # transportation subcategories
+    ("transportation-fuel", "transportation", False),
+    ("transportation-public-transit", "transportation", False),
+    ("transportation-insurance", "transportation", False),
+    ("transportation-maintenance", "transportation", False),
+    ("transportation-registration", "transportation", False),
     # shopping subcategories
     ("shopping-clothing", "shopping", False),
     ("shopping-electronics", "shopping", False),
@@ -88,7 +94,6 @@ _CATEGORY_SEED = [
     # transfers subcategories
     ("transfers-paybox", "transfers", True),
     ("transfers-family", "transfers", True),
-    # fuel has no subcategories
     # groceries has no subcategories
 ]
 

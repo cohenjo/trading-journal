@@ -185,7 +185,6 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
       { id: "cat-travel-flights", slug: "travel-flights", name: "Flights", name_he: "טיסות", parent_slug: "travel" },
       { id: "cat-travel-hotels", slug: "travel-hotels", name: "Hotels", name_he: "מלונות ולינה", parent_slug: "travel" },
       { id: "cat-travel-parking", slug: "travel-parking", name: "Parking", name_he: "חניון ופנגו", parent_slug: "travel" },
-      { id: "cat-travel-transit", slug: "travel-transit", name: "Transit", name_he: "תחבורה ציבורית ורישוי", parent_slug: "travel" },
     ],
   },
   {
@@ -228,15 +227,22 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
       { id: "cat-financial-insurance", slug: "financial-insurance", name: "Insurance", name_he: "ביטוח", parent_slug: "financial" },
     ],
   },
+  // MIGRATED: fuel → transportation-fuel; travel-transit → transportation-public-transit (2026-05-30)
   {
-    id: "cat-fuel",
-    slug: "fuel",
-    name: "Fuel",
-    name_he: "דלק",
-    color: "#F44336",
-    icon: "fuel",
+    id: "cat-transportation",
+    slug: "transportation",
+    name: "Transportation",
+    name_he: "תחבורה",
+    color: "#FF5722",
+    icon: "car",
     is_transfer: false,
-    subcategories: [],
+    subcategories: [
+      { id: "cat-transportation-fuel", slug: "transportation-fuel", name: "Fuel", name_he: "דלק", parent_slug: "transportation" },
+      { id: "cat-transportation-public-transit", slug: "transportation-public-transit", name: "Public Transport", name_he: "תחבורה ציבורית", parent_slug: "transportation" },
+      { id: "cat-transportation-insurance", slug: "transportation-insurance", name: "Car Insurance", name_he: "ביטוח רכב", parent_slug: "transportation" },
+      { id: "cat-transportation-maintenance", slug: "transportation-maintenance", name: "Car Maintenance", name_he: "תחזוקת רכב", parent_slug: "transportation" },
+      { id: "cat-transportation-registration", slug: "transportation-registration", name: "Vehicle Registration", name_he: "רישוי רכב", parent_slug: "transportation" },
+    ],
   },
   {
     id: "cat-transfers",

@@ -29,7 +29,8 @@ export const monthlySummaryFixture: MonthlySummaryRow[] = [
   // 2026-04
   { month: '2026-04', category_slug: 'groceries',   category_name: 'Groceries',   category_name_he: 'מזון וסופרמרקט',      amount_ils: 2100.75, txn_count: 14 },
   { month: '2026-04', category_slug: 'restaurants',  category_name: 'Restaurants', category_name_he: 'מסעדות ומשלוחים',     amount_ils: 480.00,  txn_count: 4  },
-  { month: '2026-04', category_slug: 'fuel',         category_name: 'Fuel',        category_name_he: 'דלק',                 amount_ils: 390.00,  txn_count: 2  },
+  // MIGRATED: fuel → transportation-fuel (2026-05-30)
+  { month: '2026-04', category_slug: 'transportation', category_name: 'Transportation', category_name_he: 'תחבורה',                 amount_ils: 390.00,  txn_count: 2  },
 
   // 2026-05
   { month: '2026-05', category_slug: 'groceries',   category_name: 'Groceries',   category_name_he: 'מזון וסופרמרקט',      amount_ils: 1990.25, txn_count: 13 },

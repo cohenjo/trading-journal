@@ -328,19 +328,6 @@ categories:
           - pattern: "לדז|ןוינח"
             weight: 0.85
 
-      - slug: travel-transit
-        name: Public Transit & Licensing
-        name_he: תחבורה ציבורית ורישוי
-        display_order: 4
-        rules:
-          # Ministry of Transport — license renewal (₪1,770 seen on Jony's card)
-          # Extracted: הרובחתה דרשמ (reversed משרד התחבורה)
-          - pattern: "הרובחתה\\s*דרשמ"
-            weight: 0.9
-          # Israeli train / bus
-          - pattern: "לארשי\\s*תבכר|רכבת|אגד|רב.קו|metrodan|hopon"
-            weight: 0.8
-
   # ── 6. SHOPPING ────────────────────────────────────────────────────────────
   - slug: shopping
     name: Shopping
@@ -494,12 +481,9 @@ categories:
       # Apple subscription charges
       - pattern: "apple\\.com/bill|apple.*subscription"
         weight: 0.8
-      # Klemobil insurance agency (כלמוביל → reversed ליבומלכ). Recurring installments.
-      - pattern: "ליבומלכ"
-        weight: 0.85
-      # Generic insurance sector marker (ביטוח → reversed חוטיב)
+      # Generic insurance sector marker (ביטוח → reversed חוטיב); vehicle-specific insurance is Transportation.
       - pattern: "חוטיב"
-        weight: 0.6
+        weight: 0.45
       # Bank fee generic
       - pattern: "(הלמע|bank.*fee|card.*fee)"
         weight: 0.5
@@ -509,19 +493,9 @@ categories:
         name_he: ביטוח
         display_order: 1
         rules:
-          # Klemobil insurance agency — recurring 5-installment policies
-          - pattern: "ליבומלכ"
-            weight: 0.95
-          # Alon insurance (ביטוח אילון → reversed ןולייא חוטיב)
-          - pattern: "ןולייא\\s*חוטיב|חוטיב\\s*ןולייא"
-            weight: 0.9
-          # Mandatory vehicle insurance (רכב חובה → reversed הבוח בכר)
-          - pattern: "הבוח\\s*בכר|יאלקח\\s*חוטיב|ירטנמלא\\s*חוטיב"
-            weight: 0.9
-          # Generic insurance
-          - pattern: "חוטיב|insurance|harel|הראל|migdal|לדגמ|menorah|הרונמ|clal|ללכ|phoenix|סינקפ"
-            weight: 0.6
-
+          # Generic non-vehicle insurance. Car insurance lives under Transportation.
+          - pattern: "חוטיב|insurance|life\\s*insurance|health\\s*insurance|home\\s*insurance|יאלקח\\s*חוטיב|ירטנמלא\\s*חוטיב"
+            weight: 0.7
       - slug: financial-government
         name: Government & Municipal
         name_he: ממשלה ועירייה
@@ -533,9 +507,9 @@ categories:
           # Municipality
           - pattern: "תייריע|arnona|ארנונה"
             weight: 0.85
-          # Ministry of Transport (already in travel.transit but can cross-match)
-          - pattern: "הרובחתה\\s*דרשמ"
-            weight: 0.5
+          # Government payments not otherwise classified by Transportation Registration.
+          - pattern: "gov\\.il|government"
+            weight: 0.35
 
       - slug: financial-fees
         name: Bank & Card Fees
@@ -545,32 +519,88 @@ categories:
           - pattern: "(הלמע|bank.*charge|card.*fee|annual.*fee)"
             weight: 0.8
 
-  # ── 9. FUEL ────────────────────────────────────────────────────────────────
-  - slug: fuel
-    name: Fuel
-    name_he: דלק
-    icon: gas-pump
-    color: "#F44336"
+  # ── 9. TRANSPORTATION ──────────────────────────────────────────────────────
+  # Daily commute and vehicle costs. Vacations stay under Travel.
+  # MIGRATED: fuel → transportation-fuel; travel-transit → transportation-public-transit (2026-05-30)
+  - slug: transportation
+    name: Transportation
+    name_he: תחבורה
+    icon: car
+    color: "#FF5722"
     display_order: 9
     rules:
-      # Naimi fuel station — seen on Jony's Isracard (₪20 and ₪286 charges)
-      # Extracted: הקימ קלד תנחת דיינ (reversed ניד תחנת דלק מיקה)
-      # "קלד" = reversed "דלק" (fuel) — reliable marker for fuel stations in extracted text
-      - pattern: "קלד\\s*תנחת|דיינ.*קלד"
-        weight: 0.9
-      # Dor Alon (דור אלון → reversed ןולא רוד)
-      - pattern: "ןולא\\s*רוד|dor.alon"
-        weight: 0.9
-      # Paz (פז → reversed זפ)
-      - pattern: "\\bזפ\\b|\\bpaz\\b"
-        weight: 0.9
-      # Sonol (סונול → reversed לונוס)
-      - pattern: "לונוס|sonol"
-        weight: 0.9
-      # Delek (דלק → reversed קלד) — general fuel marker
-      - pattern: "\\bקלד\\b|\\bdelek\\b|gas\\s*station|fuel"
-        weight: 0.7
-    subcategories: []
+      # Generic commute / vehicle fallback. Hebrew RTL: תחבורה → הרובחת; רכב → בכר.
+      - pattern: "transport|commute|vehicle|car|תחבורה|הרובחת|רכב|בכר"
+        weight: 0.55
+    subcategories:
+      - slug: transportation-fuel
+        name: Fuel
+        name_he: דלק
+        display_order: 1
+        rules:
+          # Naimi fuel station — seen on Jony's Isracard (₪20 and ₪286 charges)
+          # Extracted: הקימ קלד תנחת דיינ (reversed ניד תחנת דלק מיקה)
+          # "קלד" = reversed "דלק" (fuel) — reliable marker for fuel stations in extracted text
+          - pattern: "קלד\\s*תנחת|דיינ.*קלד"
+            weight: 0.96
+          # Dor Alon (דור אלון → reversed ןולא רוד)
+          - pattern: "ןולא\\s*רוד|dor.alon"
+            weight: 0.95
+          # Paz (פז → reversed זפ)
+          - pattern: "\\bזפ\\b|\\bpaz\\b"
+            weight: 0.95
+          # Sonol (סונול → reversed לונוס)
+          - pattern: "לונוס|sonol"
+            weight: 0.95
+          # Delek (דלק → reversed קלד) — general fuel marker
+          - pattern: "\\bקלד\\b|\\bdelek\\b|gas\\s*station|fuel"
+            weight: 0.85
+
+      - slug: transportation-public-transit
+        name: Public Transport
+        name_he: תחבורה ציבורית
+        display_order: 2
+        rules:
+          # Hebrew RTL: רב-קו → וק-בר; אגד → דגא; רכבת ישראל → לארשי תבכר
+          - pattern: "rav\\s*kav|וק\\s*-?\\s*בר|egg?ed|דגא|dan\\s*bus|אוטובוס|סובוטוא|bus|rail|train|תבכר|לארשי\\s*תבכר|metrodan|hopon"
+            weight: 0.95
+
+      - slug: transportation-insurance
+        name: Car Insurance
+        name_he: ביטוח רכב
+        display_order: 3
+        rules:
+          # Hebrew RTL: ביטוח רכב → בכר חוטיב; רכב חובה → הבוח בכר
+          - pattern: "car\\s*insurance|vehicle\\s*insurance|auto\\s*insurance|בכר\\s*חוטיב|הבוח\\s*בכר"
+            weight: 0.97
+          # Hebrew RTL: מגדל → לדגמ; הראל → לארה; הפניקס → סקינפה; כלל → ללכ
+          - pattern: "migdal|לדגמ|harel|לארה|phoenix|סקינפה|clal|ללכ"
+            weight: 0.88
+          # Hebrew RTL: מנורה → הרונמ; שומרה → הרמוש; כלמוביל → ליבומלכ; אילון → ןולייא
+          - pattern: "menora|menorah|הרונמ|aig|shomera|הרמוש|klemobil|ליבומלכ|ayalon|ןולייא"
+            weight: 0.88
+
+      - slug: transportation-maintenance
+        name: Car Maintenance
+        name_he: תחזוקת רכב
+        display_order: 4
+        rules:
+          # Hebrew RTL: מוסך → כסומ; מר צמיג → גימצ רמ; סיכה → הכיס
+          - pattern: "garage|mechanic|auto\\s*repair|car\\s*service|כסומ|גימצ\\s*רמ|הכיס"
+            weight: 0.96
+          - pattern: "esco|universal\\s*motors|mr\\s*tire|goodyear|mobileye|oil\\s*change|lubrication"
+            weight: 0.9
+
+      - slug: transportation-registration
+        name: Vehicle Registration
+        name_he: רישוי רכב
+        display_order: 5
+        rules:
+          # Hebrew RTL: משרד הרישוי → יושירה דרשמ; משרד התחבורה → הרובחתה דרשמ
+          - pattern: "יושירה\\s*דרשמ|הרובחתה\\s*דרשמ|רישוי|יושיר|ןוישיר|מבחן\\s*רכב|בכר\\s*ןחבמ"
+            weight: 0.97
+          - pattern: "vehicle\\s*registration|car\\s*registration|licen[cs]e|mot\\b|rishui|transport.*gov\\.il|vehicle.*gov\\.il|rechev.*gov\\.il|רכב\\.gov\\.il"
+            weight: 0.92
 
   # ── 10. TRANSFERS ──────────────────────────────────────────────────────────
   - slug: transfers
