@@ -96,6 +96,10 @@ _SECTOR_TO_SLUG: dict[str, CategoryTarget] = {
     "הייריע": "financial",
     # National Insurance (ביטוח לאומי → יאמול חוטיב; sector appears as ילאומ)
     "ילאומ": "financial",
+    # Housing utilities (דיור → רוייד; added 2026-05-30)
+    "רוייד": "housing",
+    # Municipal services (עירוני → ינוריע; covers arnona, municipal)
+    "ינוריע": ("housing", "housing-property-tax"),
 }
 
 

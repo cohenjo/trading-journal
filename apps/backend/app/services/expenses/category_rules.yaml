@@ -652,7 +652,157 @@ categories:
           - pattern: "(הרבעה.*רובע|transfer.*for)"
             weight: 0.5
 
-  # ── 11. OTHER ──────────────────────────────────────────────────────────────
+  # ── 11. HOUSING ────────────────────────────────────────────────────────────
+  - slug: housing
+    name: Housing
+    name_he: דיור
+    icon: home
+    color: "#795548"
+    display_order: 12
+    rules:
+      # Meniv Rishon (מניב ראשון) — water utility in Rishon LeZion
+      # Hebrew מניב → reversed בינמ
+      - pattern: "meniv\\s*rishon|בינמ.*ןושאר|מניב\\s*ראשון"
+        weight: 0.95
+      # Hagihon (הגיחון) — Jerusalem water utility
+      - pattern: "hagihon|ןוחיגה"
+        weight: 0.95
+      # Mei Avivim (מי אביבים) — Tel Aviv water utility
+      - pattern: "mei\\s*avivim|םיביבא\\s*ימ"
+        weight: 0.95
+      # Israel Electric Corporation (IEC / חברת החשמל)
+      # Extracted: למשחה תרבח (reversed חברת החשמל)
+      - pattern: "\\biec\\b|למשחה\\s*תרבח|israel\\s*electric|חברת\\s*החשמל"
+        weight: 0.95
+      # Pazgas, Supergas, Amisragas — cooking gas providers
+      - pattern: "pazgas|supergas|amisragas|סגזפ|סגרפוס"
+        weight: 0.9
+      # Arnona (ארנונה) — property tax
+      # Extracted: הנורא (reversed ארנונה)
+      - pattern: "arnona|הנורא|ארנונה"
+        weight: 0.95
+      # Va'ad Bayit (ועד בית) — building HOA
+      # Extracted: תיב דעו (reversed ועד בית)
+      - pattern: "va'?ad\\s*ba?yit|תיב\\s*דעו|ועד\\s*בית"
+        weight: 0.9
+      # Home insurance context clues (ביטוח + דירה)
+      # דירה → הריד (reversed)
+      - pattern: "חוטיב.*הריד|insurance.*dwelling|home\\s*insurance"
+        weight: 0.85
+      # Generic housing utility fallback
+      - pattern: "(plumb|electrician|תקלסטלא|םיקינכט|handyman)"
+        weight: 0.4
+    subcategories:
+      - slug: housing-water
+        name: Water
+        name_he: מים
+        display_order: 1
+        rules:
+          # Meniv Rishon water utility (Rishon LeZion)
+          - pattern: "meniv\\s*rishon|בינמ.*ןושאר|מניב\\s*ראשון"
+            weight: 0.95
+          # Hagihon (Jerusalem water)
+          - pattern: "hagihon|ןוחיגה"
+            weight: 0.95
+          # Mei Avivim (Tel Aviv)
+          - pattern: "mei\\s*avivim|םיביבא\\s*ימ"
+            weight: 0.95
+          # Mey Galim (Haifa)
+          - pattern: "mey\\s*galim|םילג\\s*ימ"
+            weight: 0.95
+          # Pelagei Sharon (Sharon region)
+          - pattern: "pelagei\\s*sharon|ןורש\\s*יגלפ"
+            weight: 0.95
+          # Generic water utility cue
+          - pattern: "(\\bwater\\b|םימ\\s*תרבח|water\\s*corporation)"
+            weight: 0.7
+
+      - slug: housing-electricity
+        name: Electricity
+        name_he: חשמל
+        display_order: 2
+        rules:
+          # Israel Electric Corporation (IEC / חברת החשמל)
+          # Extracted: למשחה תרבח (reversed חברת החשמל)
+          - pattern: "\\biec\\b|למשחה\\s*תרבח|israel\\s*electric|חברת\\s*החשמל"
+            weight: 0.95
+          # Generic electricity cue
+          - pattern: "(electric|למשח)"
+            weight: 0.6
+
+      - slug: housing-gas
+        name: Gas
+        name_he: גז
+        display_order: 3
+        rules:
+          # Pazgas — major cooking gas provider
+          - pattern: "pazgas|סגזפ"
+            weight: 0.95
+          # Supergas
+          - pattern: "supergas|סגרפוס"
+            weight: 0.95
+          # Amisragas
+          - pattern: "amisragas|סגרסימא"
+            weight: 0.95
+          # Generic gas cue
+          - pattern: "(\\bgas\\b|זג\\s*תקפסא)"
+            weight: 0.5
+
+      - slug: housing-home-insurance
+        name: Home Insurance
+        name_he: ביטוח דירה
+        display_order: 4
+        rules:
+          # Major Israeli insurance providers when context is dwelling
+          # דירה → הריד (reversed)
+          - pattern: "(harel|migdal|phoenix|clal|menorah|לארה|לדגמ|סקניפ|ללכ|הרונמ).*הריד"
+            weight: 0.9
+          - pattern: "הריד.*(harel|migdal|phoenix|clal|menorah|לארה|לדגמ|סקניפ|ללכ|הרונמ)"
+            weight: 0.9
+          - pattern: "home\\s*insurance|dwelling\\s*insurance|ביטוח\\s*דירה"
+            weight: 0.85
+
+      - slug: housing-property-tax
+        name: Property Tax (Arnona)
+        name_he: ארנונה
+        display_order: 5
+        rules:
+          # Arnona (ארנונה) — municipal property tax
+          # Extracted: הנורא (reversed ארנונה)
+          - pattern: "arnona|הנורא|ארנונה"
+            weight: 0.98
+          # Municipal tax context
+          - pattern: "(municipal|הייריע).*tax"
+            weight: 0.7
+
+      - slug: housing-hoa
+        name: Building HOA (Va'ad Bayit)
+        name_he: ועד בית
+        display_order: 6
+        rules:
+          # Va'ad Bayit (ועד בית) — building committee / HOA
+          # Extracted: תיב דעו (reversed ועד בית)
+          - pattern: "va'?ad\\s*ba?yit|תיב\\s*דעו|ועד\\s*בית"
+            weight: 0.95
+          # Building committee context
+          - pattern: "(building\\s*committee|committee|דעו)"
+            weight: 0.5
+
+      - slug: housing-home-maintenance
+        name: Home Maintenance
+        name: תחזוקת הבית
+        display_order: 7
+        rules:
+          # Home repair professionals
+          # תיקונים → םינוקית (reversed)
+          # אינסטלציה → היצלטסניא (reversed)
+          - pattern: "(plumb|electrician|handyman|םינוקית|היצלטסניא|תקלסטלא|ןנכטמ)"
+            weight: 0.8
+          # Home repair/maintenance context
+          - pattern: "(repair|maintenance|הקוזחת|ןוקית)"
+            weight: 0.5
+
+  # ── 12. OTHER ──────────────────────────────────────────────────────────────
   - slug: other
     name: Other / Uncategorized
     name_he: אחר / לא מסווג
