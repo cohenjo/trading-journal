@@ -28,7 +28,7 @@ dependencies = [
     "github-copilot-sdk>=0.1.25",
     "pdfplumber==0.11.9",
     "pypdf>=6.11.0",
-    "python-multipart>=0.0.29",
+    "python-multipart>=0.0.30",
     "cachetools>=7.1.2",
     "python-jose[cryptography]>=3.5.0",
     "passlib[bcrypt]>=1.7.4",
