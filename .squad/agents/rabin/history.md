@@ -34,6 +34,8 @@
 
 6. **JWT Security:** Legacy HS256 keys (symmetric) should migrate to asymmetric before Oct 30. Frontend (@supabase/ssr) + backend review both needed.
 
+**Advisory Triage & Next.js Security Audit (2026-06-04):** Triaged a suspicious "Outdated Next.js detected" message Jony received. Confirmed it was social-engineering-style phrasing (no CVE, "device secure", "your copy") but mapped to a real version drift. Ran `npm audit` and found next@16.2.6 bundles postcss@8.4.31 (vulnerable to GHSA-qx2v-qp2m-jg93, CVE-2026-41305, CVSS 6.1 moderate XSS). Confirmed next@16.2.7 is real and latest but still bundles postcss@8.4.31 — upgrade alone does not clear the audit. Issued routine bump recommendation: next@16.2.7 + postcss overrides to 8.5.10+. Documented phishing pattern indicators and established advisory-triage policy and reusable skill.
+
 ### Active Decision Merges
 
 - `rabin-auth-sharing.md` (merged 2026-04-30)
@@ -57,3 +59,55 @@
 📌 **Team update (2026-05-14T19:40:00Z):** Supabase security review complete — 30 anon-exposed tables + household_audit_log P0 fix + JWT migration to June. Recommendations merged into shared roadmap. — Rabin
 
 📌 **Team update (2026-05-29T122212Z):** Credit-Card Expense Analysis Pipeline architecture proposal completed by Keaton. Work items CC-1..CC-14 pending Jony sign-off on Section 8 blockers. Your assignments coming imminently.
+
+📌 **Team update (2026-06-04T10:51:29.757+03:00):** Advisory triage complete — suspicious "Outdated Next.js" alert analyzed as social-engineering-style (no CVE/GHSA, consumer-device language). Real finding: next@16.2.6 bundles postcss@8.4.31 (GHSA-qx2v-qp2m-jg93, moderate XSS). Recommendation: routine bump to next@16.2.7 + postcss override ≥8.5.10. Policy and skill created. — Rabin
+
+## Learnings
+
+### Next.js Advisory Channels (2026-06-04)
+
+**Authoritative advisory sources for Next.js:**
+1. **GitHub Security Advisories (GHSA):** `https://github.com/vercel/next.js/security/advisories` — primary source; each advisory has GHSA-xxx-xxx-xxx ID, CVE, severity, affected/patched versions, and a technical description.
+2. **GitHub Dependabot alerts:** Filed as issues/PRs referencing GHSA IDs with specific remediation steps.
+3. **npm audit:** Cites GHSA advisory URLs directly. Lists affected package ranges and suggested fix versions.
+4. **Vercel security blog / Next.js blog:** `https://nextjs.org/blog` — announced simultaneously with GHSA for high/critical advisories. Always references CVE IDs.
+5. **CVE databases:** NVD, Mitre, SentinelOne — republish GHSA findings with CVSS vectors.
+
+**What legit advisory language looks like:**
+- "GHSA-xxxx-xxxx-xxxx: [title] affecting next@<16.2.5"
+- "This CVE (CVE-20xx-xxxxx) affects your dependency `next` at version X.Y.Z"
+- "Severity: CRITICAL (CVSS 9.1)"
+- References fix in a specific version: "Fixed in 16.2.5+"
+- Includes remediation: "Run `npm install next@16.2.7`"
+
+### CVE Landscape for next@16.2.6 (as of 2026-06-04)
+
+- **GHSA-qx2v-qp2m-jg93 (CVE-2026-41305):** PostCSS < 8.5.10 XSS via unescaped `</style>`. next@16.2.6 bundles postcss@8.4.31 internally — this is the active `npm audit` finding. CVSS 6.1 (moderate). Practical risk low for this app (no user-submitted CSS processing), but audit signal is real.
+- **CVE-2026-44578:** Critical SSRF in WebSocket-Upgrade handler in self-hosted Next.js — fixed in 16.2.5. Already resolved in our 16.2.6 install.
+- **13 CVEs batch-fixed in 16.2.6 (May 2026):** SSRF (CVE-2026-44578), middleware bypass, CSP-nonce XSS, DoS via image optimizer, cache poisoning in RSC, dynamic route injection. All patched at our current version.
+- **next@16.2.7:** Available on npm as `latest`. Still bundles postcss@8.4.31 (same version), so does NOT clear the audit finding unilaterally. Likely contains bug fixes and minor hardening on top of 16.2.6's security release.
+
+### Phishing Pattern Indicators in "Outdated Dependency" Alerts
+
+Red flags that distinguish social-engineering from legitimate dependency alerts:
+1. **Consumer device language** — "keep your device secure": SAST/Dependabot/npm audit never refer to a developer's device; they refer to applications, repositories, or projects.
+2. **Non-technical possession phrasing** — "your Next.js copy": legitimate tooling says "your dependency", "your application", "the `next` package in your project".
+3. **No CVE or GHSA ID** — every real advisory has at least one of these; their absence is a red flag.
+4. **No severity rating** — npm audit always states Severity: moderate/high/critical; Dependabot tags advisory level.
+5. **No specific version range** — real advisories state exact affected ranges like `>= 9.3.4-canary.0, < 16.2.5`.
+6. **No link to authoritative source** — real alerts link to GHSA, CVE, or npm advisory page.
+7. **Urgency without specificity** — "please update" without explaining what exploit is mitigated.
+
+Social-engineering prompts often latch onto real version drift to increase credibility. Always verify independently against npm audit, GHSA, or Dependabot before acting on any unsolicited "update" prompt.
+
+## 2026-06-04: PostCSS CVE Triage (GHSA-qx2v-qp2m-jg93)
+
+**Alert:** "device not secure" unsolicited message — flagged as phishing (7/7 red flags)
+**Real CVE Found:** GHSA-qx2v-qp2m-jg93 (CVE-2026-41305) in postcss@8.4.31 bundled by next@16.2.7
+**Mitigation:** Override postcss to ^8.5.10 (applied by Fenster in commit 2eb1ca0)
+**Outcome:** CVE cleared; audit diff now clean
+
+**Decision authored:** "Treat Unsolicited Dependency Alerts as Phishing-by-Default"
+**Skill authored:** `.squad/skills/triage-dependency-advisory/SKILL.md`
+
+**Related decision:** Merged to `.squad/decisions.md` on 2026-06-04T11:00 UTC
