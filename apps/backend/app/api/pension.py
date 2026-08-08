@@ -11,6 +11,7 @@ import dateutil.relativedelta
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, select
+from pydantic import BaseModel
 
 from app.dal.database import get_session
 from app.dependencies import get_current_user_id
@@ -781,6 +782,86 @@ def get_pension_dashboard(
         ).all()
         plan = db.exec(select(Plan).order_by(Plan.updated_at.desc()).limit(1)).first()
         return build_pension_dashboard_payload(snapshots, plan)
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class PensionOverrideRequest(BaseModel):
+    value: float
+    deposits: float
+    withdrawal_coefficient: float
+
+
+@router.put("/{pension_id}/override")
+def override_pension_values(
+    pension_id: str,
+    payload: PensionOverrideRequest,
+    db: Session = Depends(get_session),
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """Override a pension's current sum, monthly contribution, and withdrawal coefficient (household-scoped)."""
+    household_id = get_user_household_id(db, user_id)
+    if not household_id:
+        raise HTTPException(status_code=403, detail="User not associated with any household")
+
+    try:
+        # 1. Update in the latest FinanceSnapshot
+        latest_snapshot = db.exec(
+            select(FinanceSnapshot)
+            .where(FinanceSnapshot.household_id == household_id)
+            .order_by(FinanceSnapshot.date.desc())
+            .limit(1)
+        ).first()
+
+        snapshot_updated = False
+        if latest_snapshot:
+            items = latest_snapshot.data.get("items", [])
+            for item in items:
+                if item.get("type") == "Pension" and _matches_pension_identity(item, pension_id):
+                    item["value"] = payload.value
+                    if "details" not in item:
+                        item["details"] = {}
+                    item["details"]["deposits"] = payload.deposits
+                    item["details"]["monthly_contribution"] = payload.deposits
+                    item["details"]["withdrawal_coefficient"] = payload.withdrawal_coefficient
+                    snapshot_updated = True
+
+            if snapshot_updated:
+                latest_snapshot.data["items"] = items
+                _recalculate_snapshot(latest_snapshot)
+                flag_modified(latest_snapshot, "data")
+                db.add(latest_snapshot)
+
+        # 2. Update in the active Plan
+        plan = db.exec(
+            select(Plan).where(Plan.household_id == household_id).order_by(Plan.updated_at.desc()).limit(1)
+        ).first()
+
+        plan_updated = False
+        if plan:
+            plan_items = plan.data.get("items", [])
+            for item in plan_items:
+                if (item.get("account_settings") or {}).get("type") == "Pension" and get_pension_identity(
+                    item
+                ) == pension_id:
+                    item["value"] = payload.value
+                    if "details" not in item:
+                        item["details"] = {}
+                    item["details"]["deposits"] = payload.deposits
+                    item["details"]["monthly_contribution"] = payload.deposits
+                    item["details"]["withdrawal_coefficient"] = payload.withdrawal_coefficient
+                    plan_updated = True
+
+            if plan_updated:
+                plan.data["items"] = plan_items
+                flag_modified(plan, "data")
+                db.add(plan)
+
+        db.commit()
+        return {"status": "success", "snapshot_updated": snapshot_updated, "plan_updated": plan_updated}
     except Exception as exc:
         import traceback
 

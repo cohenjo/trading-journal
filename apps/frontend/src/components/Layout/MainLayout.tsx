@@ -109,6 +109,13 @@ function MainLayoutInner({ children }: { children: ReactNode }) {
                             Pension
                         </Link>
                         <Link
+                            href="/pension-estimation"
+                            className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            Pension Estimation
+                        </Link>
+                        <Link
                             href="/dividends"
                             className="block px-6 py-3 text-base font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
                             onClick={() => setMenuOpen(false)}

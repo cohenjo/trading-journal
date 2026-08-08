@@ -27,6 +27,9 @@ export type UserSettings = {
 
   // App Settings
   mainCurrency: 'USD' | 'ILS' | 'EUR';
+
+  // Pension Settings
+  pensionAssumedRate: number;
 };
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -45,6 +48,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   optionsFinalYear: 2064,
 
   mainCurrency: 'ILS',
+  pensionAssumedRate: 0.0386,
 };
 
 const STORAGE_KEY = "trading-journal-settings-v1";
@@ -107,6 +111,11 @@ const loadSettings = (): UserSettings => {
       mainCurrency: (parsed.mainCurrency === 'USD' || parsed.mainCurrency === 'EUR')
         ? parsed.mainCurrency
         : DEFAULT_SETTINGS.mainCurrency,
+
+      pensionAssumedRate:
+        typeof parsed.pensionAssumedRate === "number"
+          ? parsed.pensionAssumedRate
+          : DEFAULT_SETTINGS.pensionAssumedRate,
     };
   } catch {
     return DEFAULT_SETTINGS;

@@ -102,6 +102,7 @@ export default function SettingsPage() {
     // UI State
     const [targetIncome, setTargetIncome] = useState<number>(settings.targetIncome);
     const [defaultRungTarget, setDefaultRungTarget] = useState<number>(settings.defaultRungTarget);
+    const [pensionAssumedRate, setPensionAssumedRate] = useState<number>((settings.pensionAssumedRate || 0.0386) * 100);
 
     // Modal State
     const [editPerson, setEditPerson] = useState<'primary' | 'spouse' | null>(null);
@@ -109,12 +110,14 @@ export default function SettingsPage() {
     useEffect(() => {
         setTargetIncome(settings.targetIncome);
         setDefaultRungTarget(settings.defaultRungTarget);
+        setPensionAssumedRate((settings.pensionAssumedRate || 0.0386) * 100);
     }, [settings]);
 
     const handleFinancialSave = () => {
         updateSettings({
             targetIncome: Math.max(0, targetIncome),
             defaultRungTarget: Math.max(0, defaultRungTarget),
+            pensionAssumedRate: Math.max(0, pensionAssumedRate) / 100,
         });
     };
 
@@ -247,6 +250,20 @@ export default function SettingsPage() {
                                         className="w-full bg-slate-950 border border-slate-700 rounded p-2 pl-7 text-white focus:ring-2 focus:ring-violet-500 outline-none"
                                         value={defaultRungTarget}
                                         onChange={(e) => setDefaultRungTarget(Number(e.target.value) || 0)}
+                                        onBlur={handleFinancialSave}
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 block">Pension Assumed Rate (%)</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-2.5 text-slate-500">%</span>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        className="w-full bg-slate-950 border border-slate-700 rounded p-2 pl-7 text-white focus:ring-2 focus:ring-violet-500 outline-none"
+                                        value={pensionAssumedRate}
+                                        onChange={(e) => setPensionAssumedRate(Number(e.target.value) || 0)}
                                         onBlur={handleFinancialSave}
                                     />
                                 </div>
