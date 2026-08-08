@@ -473,8 +473,11 @@ export async function listPensionReports(): Promise<PensionReportsResponse> {
   return { status: 'success', reports: [] satisfies PensionReportFile[], snapshots: snapshotSummaries };
 }
 
+import { unstable_noStore as noStore } from 'next/cache';
+
 /** Returns pension dashboard history, projections, active accounts, and milestones. */
 export async function getPensionDashboard(): Promise<PensionDashboardResponse> {
+  noStore();
   const householdId = await getAuthenticatedHouseholdId();
   if (!householdId) return EMPTY_DASHBOARD;
   const [snapshots, plan] = await Promise.all([fetchSnapshots(householdId), fetchLatestPlan(householdId)]);

@@ -638,3 +638,53 @@ def test_validate_pension_payload_no_warning_for_valid_data() -> None:
     }
     warnings = _validate_pension_payload(payload)
     assert warnings == []
+
+
+def test_override_pension_values() -> None:
+    from app.api.pension import override_pension_values
+    from app.api.pension import PensionOverrideRequest
+
+    session = make_session()
+
+    comprehensive = extract_pension_payload(
+        owner="You",
+        result={
+            "Pension Product": "פנסיה מקיפה",
+            "Pension Fund Name": "כלל פנסיה",
+            "Total Amount": 1194873,
+        },
+        filename="Report_03_2025.pdf",
+        target_date=date(2025, 9, 30),
+    )
+
+    snapshot = make_snapshot(date(2025, 9, 30), [comprehensive])
+    plan = make_plan()
+    upsert_plan_pension(plan, comprehensive)
+
+    session.add(snapshot)
+    session.add(plan)
+    session.commit()
+
+    payload = PensionOverrideRequest(value=1336154, deposits=5140, withdrawal_coefficient=225)
+
+    res = override_pension_values(pension_id=comprehensive["id"], payload=payload, db=session, user_id=TEST_USER_ID)
+
+    assert res["status"] == "success"
+    assert res["snapshot_updated"] is True
+    assert res["plan_updated"] is True
+
+    # Verify snapshot
+    persisted_snapshots = session.exec(select(FinanceSnapshot).order_by(FinanceSnapshot.date.desc())).all()
+    assert len(persisted_snapshots) == 1
+    snapshot_items = persisted_snapshots[0].data["items"]
+    updated_item = next(i for i in snapshot_items if i["id"] == comprehensive["id"])
+    assert updated_item["value"] == 1336154
+    assert updated_item["details"]["monthly_contribution"] == 5140
+    assert updated_item["details"]["divide_rate"] == 225
+
+    # Verify plan
+    persisted_plan = session.exec(select(Plan)).first()
+    plan_items = persisted_plan.data["items"]
+    updated_plan_item = next(i for i in plan_items if i["id"] == comprehensive["id"])
+    assert updated_plan_item["value"] == 1336154
+    assert updated_plan_item["account_settings"]["divide_rate"] == 225

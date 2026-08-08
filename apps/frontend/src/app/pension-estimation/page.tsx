@@ -104,7 +104,26 @@ export default function PensionEstimationPage() {
         })
       });
       setIsEditing(prev => ({ ...prev, [id]: false }));
-      await fetchAccounts();
+
+      // Update local state instantly for snappy UI
+      setAccounts(prev => prev.map(acc => {
+        if (acc.id === id) {
+          return {
+            ...acc,
+            value: parseFloat(state.value) || acc.value,
+            details: {
+              ...(acc.details || {}),
+              deposits: parseFloat(state.deposits) || acc.details?.deposits || 0,
+              withdrawal_coefficient: parseFloat(state.withdrawal_coefficient) || acc.details?.withdrawal_coefficient || 200,
+              divide_rate: parseFloat(state.withdrawal_coefficient) || acc.details?.divide_rate || 200,
+            }
+          };
+        }
+        return acc;
+      }));
+
+      // Still fetch in background to ensure consistency
+      fetchAccounts().catch(console.error);
     } catch (err) {
       console.error('Failed to save', err);
       alert('Failed to save overrides');
