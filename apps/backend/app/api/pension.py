@@ -820,7 +820,13 @@ def override_pension_values(
         if latest_snapshot:
             items = latest_snapshot.data.get("items", [])
             for item in items:
-                if item.get("type") == "Pension" and _matches_pension_identity(item, pension_id):
+                t = str(item.get("type", "")).lower()
+                sc = str(item.get("sub_category", "")).lower()
+                n = str(item.get("name", "")).lower()
+                is_pension = (
+                    t == "pension" or t == "pension fund" or sc == "pension fund" or "pension" in n or "gemel" in n
+                )
+                if is_pension and _matches_pension_identity(item, pension_id):
                     item["value"] = payload.value
                     if "details" not in item:
                         item["details"] = {}
@@ -845,13 +851,16 @@ def override_pension_values(
         if plan:
             plan_items = plan.data.get("items", [])
             for item in plan_items:
-                if (item.get("account_settings") or {}).get("type") == "Pension" and get_pension_identity(
-                    item
-                ) == pension_id:
+                t = str((item.get("account_settings") or {}).get("type", "")).lower()
+                sc = str(item.get("sub_category", "")).lower()
+                n = str(item.get("name", "")).lower()
+                is_plan_pension = (
+                    t == "pension" or t == "pension fund" or sc == "pension fund" or "pension" in n or "gemel" in n
+                )
+                if is_plan_pension and get_pension_identity(item) == pension_id:
                     item["value"] = payload.value
                     if "details" not in item:
                         item["details"] = {}
-                    item["details"]["deposits"] = payload.deposits
                     item["details"]["monthly_contribution"] = payload.deposits
                     item["details"]["withdrawal_coefficient"] = payload.withdrawal_coefficient
                     item["details"]["divide_rate"] = payload.withdrawal_coefficient
