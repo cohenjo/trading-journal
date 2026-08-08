@@ -16,6 +16,7 @@ import {
   Legend,
   BarChart,
   Bar,
+  Tooltip,
 } from 'recharts';
 
 type EditState = {
