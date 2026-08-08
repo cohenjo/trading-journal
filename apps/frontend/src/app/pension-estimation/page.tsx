@@ -18,6 +18,7 @@ import {
   Bar,
   Tooltip,
   ReferenceLine,
+  LabelList,
 } from 'recharts';
 
 type EditState = {
@@ -553,7 +554,16 @@ export default function PensionEstimationPage() {
                   <Bar
                     dataKey="payout"
                     radius={[4, 4, 0, 0]}
-                  />
+                  >
+                    <LabelList
+                      dataKey="payout"
+                      position="top"
+                      formatter={(val: number) => formatILS(val)}
+                      fill="#e2e8f0"
+                      fontSize={13}
+                      fontWeight="bold"
+                    />
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
