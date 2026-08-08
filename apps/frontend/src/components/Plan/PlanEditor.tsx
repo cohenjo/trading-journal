@@ -6,6 +6,7 @@ import { PlanMilestoneModal } from './PlanMilestoneModal';
 import { PlanModal } from './PlanModal';
 import { useSettings } from '../../app/settings/SettingsContext';
 import { convertCurrency } from '@/lib/currency';
+import { calculateProjectedPensionPayout } from '@/lib/pension';
 
 interface Props {
     data: PlanData;
@@ -230,29 +231,52 @@ export const PlanEditor: React.FC<Props> = ({ data, onChange, finances, dividend
             && a.account_settings?.draw_income
         );
 
+        // Find FI milestone to determine when contributions stop
+        const fiMilestone = data.milestones.find(m => m.type === 'Financial Independence');
+        const currentYear = new Date().getFullYear();
+        let stopWorkYear = currentYear + 8; // Default 8 years
+        if (fiMilestone) {
+            if (fiMilestone.date) stopWorkYear = new Date(fiMilestone.date).getFullYear();
+            else if (fiMilestone.year_offset !== undefined) stopWorkYear = currentYear + fiMilestone.year_offset;
+        }
+
         return pensions.map(p => {
-            // Calculate implied annual payout for display
-            // Payout = Value / Divide Rate * 12
-            const rate = p.account_settings?.divide_rate || 200;
-            const annual = rate > 0 ? (p.value / rate) * 12 : 0;
-            const monthly = annual / 12;
             const startAge = p.account_settings?.starting_age || 67;
+            const rate = p.account_settings?.divide_rate || 200;
+            const monthlyContribution = p.account_settings?.monthly_contribution || 0;
+
+            // Resolve ages
+            const isSpouse = p.owner === 'Spouse';
+            const birthYear = isSpouse ? settings.spouse.birthYear : settings.primaryUser.birthYear;
+            const currentAge = currentYear - birthYear;
+            const stopWorkAge = stopWorkYear - birthYear;
+            const growthRate = (p.growth_rate && p.growth_rate > 0) ? (p.growth_rate / 100) : 0.0386; // Fallback to estimation default
+
+            const projected = calculateProjectedPensionPayout(
+                p.value,
+                monthlyContribution,
+                currentAge,
+                startAge,
+                stopWorkAge,
+                growthRate,
+                rate
+            );
 
             return {
                 id: `pension_income_${p.id}`,
                 name: `Pension: ${p.name}`,
                 category: 'Income',
-                value: monthly, // Show Monthly Value
-                frequency: 'Monthly', // Use Monthly Frequency label
+                value: projected.monthlyPayout, // Show Projected Monthly Value
+                frequency: 'Monthly',
                 currency: mainCurrency,
                 isLinked: true,
-                isVirtual: true, // Marker to disable editing
+                isVirtual: true,
                 start_condition: 'Age',
                 start_reference: startAge,
-                growth_rate: 0 // Pensions typically don't grow like salary
+                growth_rate: 0
             };
         });
-    }, [mergedAccounts]);
+    }, [mergedAccounts, data.milestones, settings, mainCurrency]);
 
     // --- Virtual Income Streams: dividends, bonds, options (#441) ---
     // These are auto-computed from server actions that feed /summary.

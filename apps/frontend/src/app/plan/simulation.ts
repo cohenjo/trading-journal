@@ -566,7 +566,12 @@ class Accounts {
   readonly activeAnnuities: Annuity[] = [];
   private readonly currentYear = thisYear();
 
-  constructor(readonly accounts: Account[], private readonly settings: Record<string, unknown>, private readonly birthYear: number) {}
+  constructor(
+    readonly accounts: Account[],
+    private readonly settings: Record<string, unknown>,
+    private readonly birthYear: number,
+    private readonly milestones: { id: string; type: string }[] = []
+  ) {}
 
   currentDividendPayouts(skipAccountIds?: Set<string>): DividendPayout[] {
     return this.accounts.flatMap(account => {
@@ -601,9 +606,16 @@ class Accounts {
       if (account.monthly_contribution.gt(0)) {
         const checkAge = account.owner === 'Spouse' ? year - spouseBirthYear(this.settings, this.birthYear) : age;
         if (!(account.type === 'Pension' && checkAge >= account.starting_age)) {
-          const annualContribution = account.monthly_contribution.mul(12);
-          account.value = account.value.plus(annualContribution);
-          cash = cash.minus(annualContribution);
+          // Check if Financial Independence is reached (stop pension contributions)
+          const fi = this.milestones.find(m => m.type === 'Financial Independence');
+          const fiYear = fi ? resolved.get(fi.id) : undefined;
+          const isWorking = fiYear === undefined || year <= fiYear;
+
+          if (account.type !== 'Pension' || isWorking) {
+            const annualContribution = account.monthly_contribution.mul(12);
+            account.value = account.value.plus(annualContribution);
+            cash = cash.minus(annualContribution);
+          }
         }
       }
 
@@ -818,7 +830,7 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
   const planItems = items(plan);
   const accounts = loadAccounts(plan, planInput.finances ?? null, settings);
   const loadedAssets = loadRealAssets(plan, planInput.finances ?? null, settings);
-  const accountManager = new Accounts(accounts, settings, birthYear);
+  const accountManager = new Accounts(accounts, settings, birthYear, plan.milestones ?? []);
   const realAssetManager = new RealAssets(loadedAssets.assets);
   const milestoneManager = new Milestones(plan.milestones ?? [], birthYear, settings, accounts);
   let unallocatedCash = loadedAssets.cashDiff;
