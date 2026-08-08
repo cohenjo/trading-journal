@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { getPensionDashboard } from '@/app/pension/actions';
 import { apiFetch } from '@/lib/api-client';
 import { useSettings } from '@/app/settings/SettingsContext';
+import { generatePensionProjection } from '@/lib/pension';
 import type { PensionAccount } from '@/components/Pension/pensionTypes';
 import {
   LineChart,
@@ -135,44 +136,32 @@ export default function PensionEstimationPage() {
     }
   };
 
-  // Helper to calculate FV month by month
-  const calculateFV = (
-    startValue: number,
-    monthlyDeposit: number,
-    startDate: Date,
-    targetDate: Date,
-    stopDepositDate: Date
-  ) => {
-    let currentVal = startValue;
-    let currDate = new Date(startDate.getTime());
-
-    while (currDate < targetDate) {
-      const isDepositing = currDate < stopDepositDate;
-      const deposit = isDepositing ? monthlyDeposit : 0;
-      currentVal = currentVal * (1 + assumedRateMonthly) + deposit;
-
-      // Advance 1 month
-      currDate.setMonth(currDate.getMonth() + 1);
-    }
-    return currentVal;
-  };
+  // generatePensionProjection handles the FV math!
 
   const projections: ProjectionRow[] = useMemo(() => {
     const now = new Date();
+    const currentYear = now.getFullYear();
+    const stopWorkYear = stopWorkDate.getFullYear();
+
     return accounts.map(acc => {
       const owner = (acc.owner || 'You').toLowerCase();
       const isSpouse = owner === 'rita' || owner === 'spouse';
 
-      const date60 = isSpouse ? rita60Date : jony60Date;
-      const date67 = isSpouse ? rita67Date : jony67Date;
+      const birthYear = isSpouse ? (settings?.spouse?.birthYear || 1982) : (settings?.primaryUser?.birthYear || 1984);
+      const age60Year = birthYear + 60;
+      const age67Year = birthYear + 67;
 
       const currentSum = parseFloat(editStates[acc.id]?.value || '0') || acc.value;
       const monthlyContribution = parseFloat(editStates[acc.id]?.deposits || '0') || (acc.details?.deposits ?? 0);
       const withdrawalCoefficient = parseFloat(editStates[acc.id]?.withdrawal_coefficient || '0') || (acc.details?.divide_rate as number | undefined ?? acc.details?.withdrawal_coefficient as number | undefined ?? 200);
 
-      const savingsAt50 = calculateFV(currentSum, monthlyContribution, now, stopWorkDate, stopWorkDate);
-      const savingsAt60 = calculateFV(currentSum, monthlyContribution, now, date60, stopWorkDate);
-      const savingsAt67 = calculateFV(currentSum, monthlyContribution, now, date67, stopWorkDate);
+      const proj60 = generatePensionProjection(currentYear, birthYear, currentSum, monthlyContribution, stopWorkYear, 60, assumedRateYearly, withdrawalCoefficient);
+      const proj67 = generatePensionProjection(currentYear, birthYear, currentSum, monthlyContribution, stopWorkYear, 67, assumedRateYearly, withdrawalCoefficient);
+
+      // get balance right before they turn 60/67
+      const savingsAt50 = proj60.find(p => p.year === stopWorkYear)?.balance || 0;
+      const savingsAt60 = proj60.find(p => p.year === age60Year - 1)?.balance || 0;
+      const savingsAt67 = proj67.find(p => p.year === age67Year - 1)?.balance || 0;
 
       return {
         id: acc.id,
@@ -184,44 +173,49 @@ export default function PensionEstimationPage() {
         savingsAt50,
         savingsAt60,
         savingsAt67,
-        pensionAt60: withdrawalCoefficient > 0 ? savingsAt60 / withdrawalCoefficient : 0,
-        pensionAt67: withdrawalCoefficient > 0 ? savingsAt67 / withdrawalCoefficient : 0,
+        pensionAt60: proj60.find(p => p.year === age60Year)?.grossPayout || 0, // This is annual, wait. Wait, previously pensionAt60 was monthly!
+        // No wait, calculateFV returned the balance. pensionAt60 = balance / coefficient.
+        // So monthly payout! But generatePensionProjection grossPayout is ANNUAL!
+        // So let's divide by 12.
+        pensionAt60: (proj60.find(p => p.year === age60Year)?.grossPayout || 0) / 12,
+        pensionAt67: (proj67.find(p => p.year === age67Year)?.grossPayout || 0) / 12,
       };
     });
-  }, [accounts, editStates, assumedRateMonthly]);
+  }, [accounts, editStates, assumedRateYearly, settings]);
 
   // Chart Data: Project total family wealth year by year up to 2051
   const chartData = useMemo(() => {
     const data = [];
-    const now = new Date();
+    const currentYear = new Date().getFullYear();
     const endYear = 2051;
+    const stopWorkYear = stopWorkDate.getFullYear();
 
-    const accountSims = accounts.map(acc => {
-       const currentSum = parseFloat(editStates[acc.id]?.value || '0') || acc.value;
-       const monthlyContribution = parseFloat(editStates[acc.id]?.deposits || '0') || (acc.details?.deposits ?? 0);
-       return { id: acc.id, name: acc.display_name || acc.name, val: currentSum, deposit: monthlyContribution };
+    // Generate projections for each account (just growth, no payout)
+    const projectionsByAcc = accounts.map(acc => {
+      const owner = (acc.owner || 'You').toLowerCase();
+      const isSpouse = owner === 'rita' || owner === 'spouse';
+      const birthYear = isSpouse ? (settings?.spouse?.birthYear || 1982) : (settings?.primaryUser?.birthYear || 1984);
+      const currentSum = parseFloat(editStates[acc.id]?.value || '0') || acc.value;
+      const monthlyContribution = parseFloat(editStates[acc.id]?.deposits || '0') || (acc.details?.deposits ?? 0);
+
+      return {
+        name: acc.display_name || acc.name,
+        // Start age 99 so it never pays out during this chart
+        proj: generatePensionProjection(currentYear, birthYear, currentSum, monthlyContribution, stopWorkYear, 99, assumedRateYearly, 200)
+      };
     });
 
-    let currDate = new Date(now.getTime());
-    while (currDate.getFullYear() <= endYear) {
-      if (currDate.getMonth() === 0 || currDate.getTime() === now.getTime()) {
-        const point: any = { year: currDate.getFullYear() };
-        accountSims.forEach(sim => {
-          point[sim.name] = sim.val;
-        });
-        data.push(point);
-      }
-
-      const isDepositing = currDate < stopWorkDate;
-      accountSims.forEach(sim => {
-        const dep = isDepositing ? sim.deposit : 0;
-        sim.val = sim.val * (1 + assumedRateMonthly) + dep;
+    for (let y = currentYear; y <= endYear; y++) {
+      const point: any = { year: y };
+      projectionsByAcc.forEach(pAcc => {
+        const pt = pAcc.proj.find(p => p.year === y);
+        point[pAcc.name] = pt ? pt.balance : 0;
       });
-
-      currDate.setMonth(currDate.getMonth() + 1);
+      data.push(point);
     }
+
     return data;
-  }, [accounts, editStates, assumedRateMonthly]);
+  }, [accounts, editStates, assumedRateYearly, settings]);
 
   const formatILS = (val: number) => new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 }).format(val);
 
@@ -250,50 +244,16 @@ export default function PensionEstimationPage() {
       }
     });
 
-    const calculateTax = (grossPension: number, year: number, isAge67: boolean) => {
-      if (grossPension <= 0) return 0;
+    const getNet = (grossMonthly: number, year: number, is67: boolean) => {
+      if (!showAfterTax) return grossMonthly;
+      const annualGross = grossMonthly * 12;
 
-      const INFLATION_RATE = 1.015;
-      const yearsFrom2026 = Math.max(0, year - 2026);
-      const inflationFactor = Math.pow(INFLATION_RATE, yearsFrom2026);
-
-      const baseBrackets = [
-        { limit: 7010, rate: 0.10 },
-        { limit: 10060, rate: 0.14 },
-        { limit: 16150, rate: 0.20 },
-        { limit: 22440, rate: 0.31 },
-        { limit: 46690, rate: 0.35 },
-        { limit: 60000, rate: 0.47 },
-        { limit: Infinity, rate: 0.50 }
-      ];
-
-      const baseCreditPoint = 242;
-      const creditPointsAmount = 2.25 * baseCreditPoint * inflationFactor;
-      const kibuaZchuyotBase = 5422;
-      const kibuaZchuyot = isAge67 ? kibuaZchuyotBase * inflationFactor : 0;
-
-      const taxableIncome = Math.max(0, grossPension - kibuaZchuyot);
-      let tax = 0;
-      let previousLimit = 0;
-
-      for (const bracket of baseBrackets) {
-        const inflatedLimit = bracket.limit * inflationFactor;
-        if (taxableIncome > previousLimit) {
-          const taxableInBracket = Math.min(taxableIncome, inflatedLimit) - previousLimit;
-          tax += taxableInBracket * bracket.rate;
-        }
-        previousLimit = inflatedLimit;
-      }
-
-      return Math.max(0, tax - creditPointsAmount);
-    };
-
-    const getNet = (gross: number, year: number, is67: boolean) => {
-      if (!showAfterTax) return gross;
-      const exemptPart = gross * 0.15; // Kitzba Mukeret (15%)
-      const taxablePart = gross * 0.85; // Kitzba Mezaka
-      const tax = calculateTax(taxablePart, year, is67);
-      return exemptPart + Math.max(0, taxablePart - tax);
+      // We can use the imported calculateIsraeliPensionTax! But wait, Kitzba Mukeret (15%) logic is baked into it already
+      // if we just pass the gross. Actually calculateIsraeliPensionTax computes the TAX.
+      // So net is (gross - tax) / 12
+      const { calculateIsraeliPensionTax } = require('@/lib/pension');
+      const taxPaidAnnual = calculateIsraeliPensionTax(annualGross, year, is67);
+      return (annualGross - taxPaidAnnual) / 12;
     };
 
     const jony60Year = jony60Date.getFullYear();

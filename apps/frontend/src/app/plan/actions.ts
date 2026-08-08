@@ -2,8 +2,10 @@
 
 import { createClient } from '@/lib/supabase/server';
 import type { Plan, PlanData } from '@/components/Plan/types';
-import { calculatePlanSimulation } from './simulation';
+import { calculatePlanSimulation, loadAccounts } from './simulation';
 import type { PlanSimulationInput, PlanSimulationResult } from './simulation';
+import { generatePensionProjection } from '@/lib/pension';
+import type { PensionProjectionPoint } from '@/lib/pension';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -92,6 +94,62 @@ async function getAuthenticatedHouseholdId(): Promise<string | null> {
  */
 export async function runPlanSimulation(planInput: PlanSimulationInput): Promise<PlanSimulationResult> {
   return calculatePlanSimulation(planInput);
+}
+
+/**
+ * Calculates the exact month-by-month pension projection for all pension accounts
+ * based on the plan settings and FI milestone.
+ */
+export async function getPensionIncomeEstimation(
+  planInput: PlanSimulationInput
+): Promise<Record<string, PensionProjectionPoint[]>> {
+  const plan = planInput.plan ?? { items: [], milestones: [], settings: {} };
+
+  // Extract birthYear and settings
+  const settings = planInput.settings as any;
+  const currentYear = new Date().getFullYear();
+  const birthYear = settings?.primaryUser?.birthYear ? Number(settings.primaryUser.birthYear) : 1980;
+
+  // Find FI milestone to determine stopWorkYear
+  const fiMilestone = plan.milestones?.find(m => m.type === 'Financial Independence');
+  let stopWorkYear = currentYear + 8; // Default 8 years
+  if (fiMilestone) {
+      if (fiMilestone.date) stopWorkYear = new Date(fiMilestone.date).getFullYear();
+      else if (fiMilestone.year_offset !== undefined) stopWorkYear = currentYear + fiMilestone.year_offset;
+  }
+
+  // Use simulation's loadAccounts to merge plan overrides with finance snapshots
+  const accounts = loadAccounts(plan, planInput.finances ?? null, settings);
+
+  const results: Record<string, PensionProjectionPoint[]> = {};
+
+  for (const acc of accounts) {
+    if (acc.type === 'Pension' && acc.draw_income && acc.value.gt(0)) {
+      const isSpouse = acc.owner === 'Spouse';
+      const bYear = isSpouse && settings?.spouse?.birthYear ? Number(settings.spouse.birthYear) : birthYear;
+
+      const startValue = acc.value.toNumber();
+      const monthlyDeposit = acc.monthly_contribution.toNumber();
+      const startAge = acc.starting_age;
+      const divideRate = acc.divide_rate.toNumber();
+      const annualGrowthRate = acc.growth.toNumber() / 100;
+
+      const projection = generatePensionProjection(
+        currentYear,
+        bYear,
+        startValue,
+        monthlyDeposit,
+        stopWorkYear,
+        startAge,
+        annualGrowthRate,
+        divideRate
+      );
+
+      results[acc.id] = projection;
+    }
+  }
+
+  return results;
 }
 
 /**

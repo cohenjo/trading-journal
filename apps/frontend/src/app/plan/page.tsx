@@ -12,7 +12,7 @@ import { getLatestFinanceSnapshot } from '../finances/actions';
 import { getOptionsIncomeEstimation } from '../options/actions';
 import { getDividendSummary } from '../dividends/actions';
 import { getLadderIncome } from '../ladder/actions';
-import type { BondIncomePoint, DividendIncomeTotal } from './simulation';
+import type { BondIncomePoint, DividendIncomeTotal, PensionProjectionPoint } from './simulation';
 
 export default function PlanPage() {
     const { settings } = useSettings();
@@ -22,6 +22,7 @@ export default function PlanPage() {
     const [dividendTotal, setDividendTotal] = useState<DividendIncomeTotal | undefined>(undefined);
     const [dividendByAccount, setDividendByAccount] = useState<{ ibkr: number; schwab: number; ira: number } | undefined>(undefined);
     const [bondProjection, setBondProjection] = useState<BondIncomePoint[]>([]);
+    const [pensionProjections, setPensionProjections] = useState<Record<string, PensionProjectionPoint[]>>({});
     const [projection, setProjection] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
@@ -34,9 +35,21 @@ export default function PlanPage() {
             getOptionsIncomeEstimation(),
             getDividendSummary(),
             getLadderIncome(),
-        ]).then(([planData, financeData, optionsData, dividendData, bondData]) => {
+        ]).then(async ([planData, financeData, optionsData, dividendData, bondData]) => {
             setFinances(financeData);
             setOptionsProjection(optionsData.projections);
+
+            let pensionData: Record<string, PensionProjectionPoint[]> = {};
+            if (planData) {
+                // Fetch pension projection based on loaded plan and finances
+                const { getPensionIncomeEstimation } = await import('./actions');
+                pensionData = await getPensionIncomeEstimation({
+                    plan: planData.data,
+                    finances: financeData,
+                    settings: settings as unknown as Record<string, unknown>
+                });
+            }
+            setPensionProjections(pensionData);
 
             // Wire dividend summary: total_forward_annual is already USD, major units.
             // Display as constant annual income across all plan years.
@@ -115,6 +128,7 @@ export default function PlanPage() {
                 dividendTotal,
                 dividendByAccount,
                 bondProjection,
+                pensionProjections
             })
                 .then(data => {
                     const formatted = data.map(p => ({
@@ -135,7 +149,7 @@ export default function PlanPage() {
         }, 500); // 500ms debounce
 
         return () => clearTimeout(timer);
-    }, [plan, finances, settings, optionsProjection, dividendTotal, dividendByAccount, bondProjection]); // Re-run when any input changes
+    }, [plan, finances, settings, optionsProjection, dividendTotal, dividendByAccount, bondProjection, pensionProjections]); // Re-run when any input changes
 
     // Calculate Markers
     const markers = useMemo(() => {
@@ -330,6 +344,7 @@ export default function PlanPage() {
                                 // Bonds: current or nearest year's coupon+principal income
                                 bondAnnual: bondProjection.find(p => p.year === new Date().getFullYear())?.amount
                                     ?? (bondProjection.length > 0 ? bondProjection[0].amount : undefined),
+                                pensionProjections,
                             }}
                         />}
                     </div>

@@ -36,6 +36,16 @@ export interface DividendIncomeTotal {
   annualTotal: number; // USD, forward annual, constant across all plan years
 }
 
+export interface PensionProjectionPoint {
+  year: number;
+  balance: number;
+  grossPayout: number;
+  netPayout: number;
+  taxPaid: number;
+}
+
+
+
 export interface PlanSimulationInput {
   plan: PlanData;
   finances?: FinanceSnapshot | { data?: { items?: unknown[] } } | null;
@@ -65,6 +75,7 @@ export interface PlanSimulationInput {
     schwab: number;
     ira: number;
   };
+  pensionProjections?: Record<string, PensionProjectionPoint[]>;
 }
 
 export interface PlanSimulationDetail {
@@ -193,9 +204,6 @@ const RATES: Readonly<Record<string, Decimal>> = {
   EUR: new Decimal(3.5),
 };
 
-// RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
-// RSU dividends are taxed at a fixed 25% rate regardless of the plan-level incomeTaxRate.
-// This overrides Default #6 for RSU account types only.
 const RSU_DIVIDEND_TAX_RATE = new Decimal(25);
 
 function thisYear(): number {
@@ -292,18 +300,9 @@ function settingsRecord(settings: Record<string, unknown> | undefined): Record<s
   return settings ?? {};
 }
 
-/**
- * Applies RSU-specific dividend overrides to an account object in place.
- * RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
- *  - dividend_policy is forced to 'Payout': RSU dividends NEVER accumulate/reinvest.
- *  - dividend_tax_rate defaults to RSU_DIVIDEND_TAX_RATE (25%) unless the user
- *    has explicitly set a non-zero rate on the account.
- */
 function applyRsuDividendOverrides(account: Account): void {
   if (account.type !== 'RSU') return;
-  // Force Payout — RSU dividends always flow to income pool, never reinvest.
   account.dividend_policy = 'Payout';
-  // Use 25% flat tax unless user explicitly configured a different rate (non-zero override wins).
   if (account.dividend_tax_rate.isZero()) {
     account.dividend_tax_rate = RSU_DIVIDEND_TAX_RATE;
   }
@@ -400,7 +399,7 @@ function accountFrom(input: {
   };
 }
 
-function loadAccounts(plan: PlanData, finances: PlanSimulationInput['finances'], settings: Record<string, unknown>): Account[] {
+export function loadAccounts(plan: PlanData, finances: PlanSimulationInput['finances'], settings: Record<string, unknown>): Account[] {
   const planItems = items(plan);
   const mainCurrency = stringValue(settings.mainCurrency, 'ILS');
   const accounts: Account[] = [];
@@ -451,7 +450,6 @@ function loadAccounts(plan: PlanData, finances: PlanSimulationInput['finances'],
       dividendPayoutStartCondition: merged.dividend_payout_start_condition == null ? undefined : stringValue(merged.dividend_payout_start_condition),
       dividendPayoutStartReference: typeof merged.dividend_payout_start_reference === 'string' || typeof merged.dividend_payout_start_reference === 'number' ? merged.dividend_payout_start_reference : undefined,
     }));
-    // RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
     applyRsuDividendOverrides(accounts[accounts.length - 1]);
   }
 
@@ -486,7 +484,6 @@ function loadAccounts(plan: PlanData, finances: PlanSimulationInput['finances'],
       dividendPayoutStartCondition: accSettings.dividend_payout_start_condition == null ? undefined : stringValue(accSettings.dividend_payout_start_condition),
       dividendPayoutStartReference: typeof accSettings.dividend_payout_start_reference === 'string' || typeof accSettings.dividend_payout_start_reference === 'number' ? accSettings.dividend_payout_start_reference : undefined,
     }));
-    // RSU dividend rule: see .squad/decisions.md (RSU automation rules, 2026-05-27)
     applyRsuDividendOverrides(accounts[accounts.length - 1]);
   }
 
@@ -565,13 +562,17 @@ class Milestones {
 class Accounts {
   readonly activeAnnuities: Annuity[] = [];
   private readonly currentYear = thisYear();
+  private readonly pensionProjections: Record<string, PensionProjectionPoint[]>;
 
   constructor(
     readonly accounts: Account[],
     private readonly settings: Record<string, unknown>,
     private readonly birthYear: number,
-    private readonly milestones: { id: string; type: string }[] = []
-  ) {}
+    private readonly milestones: { id: string; type: string }[] = [],
+    pensionProjections?: Record<string, PensionProjectionPoint[]>
+  ) {
+    this.pensionProjections = pensionProjections || {};
+  }
 
   currentDividendPayouts(skipAccountIds?: Set<string>): DividendPayout[] {
     return this.accounts.flatMap(account => {
@@ -589,24 +590,32 @@ class Accounts {
     const age = year - this.birthYear;
 
     for (const account of this.accounts) {
-      if (account.type === 'Pension' && account.draw_income && account.value.gt(0)) {
-        const effectiveAge = account.owner === 'Spouse' ? year - spouseBirthYear(this.settings, this.birthYear) : age;
-        if (effectiveAge >= account.starting_age && account.divide_rate.gt(0)) {
-          this.activeAnnuities.push({
-            name: account.name,
-            payout: account.value.div(account.divide_rate).mul(12),
-            tax_rate: account.tax_rate,
-            isAge67: effectiveAge >= 67
-          });
-          account.value = new Decimal(0);
-          continue;
+      if (account.type === 'Pension' && account.draw_income) {
+        const projPoint = account.id ? this.pensionProjections[account.id]?.find(p => p.year === year) : undefined;
+        if (projPoint) {
+          account.value = new Decimal(projPoint.balance);
+          if (projPoint.grossPayout > 0) {
+            const existing = this.activeAnnuities.find(a => a.name === account.name);
+            const isAge67 = (year - this.birthYear) >= 67;
+            if (existing) {
+              existing.payout = new Decimal(projPoint.grossPayout);
+              existing.isAge67 = isAge67;
+            } else {
+              this.activeAnnuities.push({
+                name: account.name,
+                payout: new Decimal(projPoint.grossPayout),
+                tax_rate: account.tax_rate,
+                isAge67: isAge67
+              });
+            }
+          }
         }
+        continue;
       }
 
       if (account.monthly_contribution.gt(0)) {
         const checkAge = account.owner === 'Spouse' ? year - spouseBirthYear(this.settings, this.birthYear) : age;
         if (!(account.type === 'Pension' && checkAge >= account.starting_age)) {
-          // Check if Financial Independence is reached (stop pension contributions)
           const fi = this.milestones.find(m => m.type === 'Financial Independence');
           const fiYear = fi ? resolved.get(fi.id) : undefined;
           const isWorking = fiYear === undefined || year <= fiYear;
@@ -619,7 +628,6 @@ class Accounts {
         }
       }
 
-      // Skip yield-based dividend for accounts with real per-account dividend data (prevents double-counting)
       const gross = (skipAccountIds && account.id && skipAccountIds.has(account.id))
         ? new Decimal(0)
         : this.grossDividend(account);
@@ -816,11 +824,6 @@ function snapshot(account: Account): PlanSimulationAccountSnapshot {
   };
 }
 
-/**
- * Runs the TJ-020 in-process plan projection previously served by the legacy
- * FastAPI plan-simulation route. All monetary arithmetic is Decimal-based and
- * the returned fields match the legacy response shape consumed by the UI.
- */
 export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSimulationResult {
   const plan = planInput.plan ?? { items: [], milestones: [], settings: {} };
   const settings = settingsRecord(planInput.settings);
@@ -830,7 +833,7 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
   const planItems = items(plan);
   const accounts = loadAccounts(plan, planInput.finances ?? null, settings);
   const loadedAssets = loadRealAssets(plan, planInput.finances ?? null, settings);
-  const accountManager = new Accounts(accounts, settings, birthYear, plan.milestones ?? []);
+  const accountManager = new Accounts(accounts, settings, birthYear, plan.milestones ?? [], planInput.pensionProjections);
   const realAssetManager = new RealAssets(loadedAssets.assets);
   const milestoneManager = new Milestones(plan.milestones ?? [], birthYear, settings, accounts);
   let unallocatedCash = loadedAssets.cashDiff;
@@ -840,23 +843,12 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     (planInput.optionsProjection ?? []).map(p => [p.year, p.expectedIncome]),
   );
 
-  // --- Virtual income maps: dividends + bonds (#441) ---
-  // Dividend income: constant annual total in USD across all years.
-  // Source: getDividendSummary().total_forward_annual (already FX-converted to USD).
   const dividendAnnualTotal = planInput.dividendTotal?.annualTotal ?? 0;
 
-  // Bond ladder income: per-year coupon + principal from getLadderIncome() → buildIncome().
-  // Source: income_series[].{ date: "YYYY-01-01", value: number }.
-  // Currency note: amounts may be in mixed bond currencies (see BondIncomePoint JSDoc).
-  // TODO: McManus to cover virtual-income merge in simulation unit tests.
   const bondMap = new Map<number, number>(
     (planInput.bondProjection ?? []).map(p => [p.year, p.amount]),
   );
 
-  // --- Account mapping for dividendByAccount (#NEW) ---
-  // Maps each by_account key (ibkr/schwab/ira) to a real plan Account for balance tracking.
-  // Three-tier strategy: exact name → type-based → fuzzy substring.
-  // Silent synthetic node per default #7: unmapped keys still emit income lines with no balance impact.
   const mappedAccountIds = new Set<string>();
   const dividendAccountMap = new Map<string, Account | null>();
 
@@ -869,7 +861,6 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     if (schwabAcc?.id) mappedAccountIds.add(schwabAcc.id);
     dividendAccountMap.set('schwab', schwabAcc);
 
-    // IRA: prefer real account type 'IRA', then any account with 'ira' in name
     const iraAcc =
       accounts.find(a => a.type === 'IRA') ??
       accounts.find(a => a.name.toLowerCase().includes('ira')) ??
@@ -878,8 +869,6 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     dividendAccountMap.set('ira', iraAcc);
   }
 
-  // Pre-compute constant per-account dividend amounts (USD → mainCurrency, constant across all years).
-  // Default #4: CONSTANT escalation — no annual growth applied to these forward estimates.
   const mainCurrency = stringValue(settings.mainCurrency, 'ILS');
   const perAccountDividends: Array<{ key: string; label: string; amount: Decimal; account: Account | null }> = [];
   let totalRealDividendsAnnual = new Decimal(0);
@@ -993,7 +982,6 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       const kibuaZchuyotBase = 5422;
       const kibuaZchuyot = isAge67 ? kibuaZchuyotBase * inflationFactor : 0;
 
-      // Kitzba Mukeret (15%) is tax exempt
       const taxableIncome = Math.max(0, monthlyGross * 0.85 - kibuaZchuyot);
       let tax = 0;
       let previousLimit = 0;
@@ -1015,9 +1003,6 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       grossIncome = grossIncome.plus(annuity.payout);
       const pTax = calculateIsraeliPensionTax(annuity.payout, year, annuity.isAge67);
       taxPaid = taxPaid.plus(pTax);
-      // We only consider the taxable portion as "taxableIncome" for brackets, or maybe just add the whole gross.
-      // But since pension tax is calculated separately, adding it to taxableIncome might double tax it if there is a global tax?
-      // No, simulation.ts just tracks taxableIncome for reporting.
       taxableIncome = taxableIncome.plus(annuity.payout);
       incomeDetails.push({
           name: `Pension: ${annuity.name}`,

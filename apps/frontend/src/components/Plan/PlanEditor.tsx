@@ -6,7 +6,7 @@ import { PlanMilestoneModal } from './PlanMilestoneModal';
 import { PlanModal } from './PlanModal';
 import { useSettings } from '../../app/settings/SettingsContext';
 import { convertCurrency } from '@/lib/currency';
-import { calculateProjectedPensionPayout } from '@/lib/pension';
+import type { PensionProjectionPoint } from '@/lib/pension';
 
 interface Props {
     data: PlanData;
@@ -22,6 +22,8 @@ interface Props {
         dividendAnnual?: number;
         /** Bond ladder coupon+principal income for the current (or nearest) year */
         bondAnnual?: number;
+        /** Pension projection points per account */
+        pensionProjections?: Record<string, PensionProjectionPoint[]>;
     };
 }
 
@@ -248,25 +250,22 @@ export const PlanEditor: React.FC<Props> = ({ data, onChange, finances, dividend
             // Resolve ages
             const isSpouse = p.owner === 'Spouse';
             const birthYear = isSpouse ? settings.spouse.birthYear : settings.primaryUser.birthYear;
-            const currentAge = currentYear - birthYear;
-            const stopWorkAge = stopWorkYear - birthYear;
-            const growthRate = (p.growth_rate && p.growth_rate > 0) ? (p.growth_rate / 100) : 0.0386; // Fallback to estimation default
+            const targetYear = birthYear + startAge;
 
-            const projected = calculateProjectedPensionPayout(
-                p.value,
-                monthlyContribution,
-                currentAge,
-                startAge,
-                stopWorkAge,
-                growthRate,
-                rate
-            );
+            let projectedMonthly = 0;
+            if (virtualIncomeStreams?.pensionProjections && virtualIncomeStreams.pensionProjections[p.id]) {
+                const proj = virtualIncomeStreams.pensionProjections[p.id];
+                const targetPoint = proj.find(pt => pt.year === targetYear);
+                if (targetPoint) {
+                    projectedMonthly = targetPoint.grossPayout / 12;
+                }
+            }
 
             return {
                 id: `pension_income_${p.id}`,
                 name: `Pension: ${p.name}`,
                 category: 'Income',
-                value: projected.monthlyPayout, // Show Projected Monthly Value
+                value: projectedMonthly, // Show Projected Monthly Value
                 frequency: 'Monthly',
                 currency: mainCurrency,
                 isLinked: true,
