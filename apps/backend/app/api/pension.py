@@ -226,12 +226,18 @@ def get_pension_identity(item: dict[str, Any]) -> Optional[str]:
     if stored_identity:
         return stored_identity
 
-    owner = _safe_text(item.get("owner"))
-    product_name = _safe_text(details.get("pension_product"))
+    owner = _safe_text(item.get("owner")) or "You"
+    product_name = (
+        _safe_text(details.get("pension_product"))
+        or _safe_text(item.get("sub_category"))
+        or _safe_text(item.get("type"))
+        or "Pension"
+    )
     fund_name = _safe_text(details.get("pension_fund_name")) or _safe_text(item.get("name"))
     account_number = _safe_text(details.get("account_number")) or None
-    if not owner or not product_name:
-        return None
+
+    if not product_name:
+        return raw_id or None
 
     return build_pension_identity(owner, product_name, fund_name, account_number)
 
