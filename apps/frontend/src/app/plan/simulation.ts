@@ -176,6 +176,7 @@ interface Annuity {
   name: string;
   payout: Decimal;
   tax_rate: Decimal;
+  isAge67: boolean;
 }
 
 interface DividendPayout {
@@ -586,7 +587,12 @@ class Accounts {
       if (account.type === 'Pension' && account.draw_income && account.value.gt(0)) {
         const effectiveAge = account.owner === 'Spouse' ? year - spouseBirthYear(this.settings, this.birthYear) : age;
         if (effectiveAge >= account.starting_age && account.divide_rate.gt(0)) {
-          this.activeAnnuities.push({ name: account.name, payout: account.value.div(account.divide_rate).mul(12), tax_rate: account.tax_rate });
+          this.activeAnnuities.push({
+            name: account.name,
+            payout: account.value.div(account.divide_rate).mul(12),
+            tax_rate: account.tax_rate,
+            isAge67: effectiveAge >= 67
+          });
           account.value = new Decimal(0);
           continue;
         }
@@ -952,11 +958,61 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       incomeDetails.push({ name: dividend.name, type: dividend.type, gross: roundMoney(dividend.gross), tax: dividend.tax ? roundMoney(dividend.tax) : undefined, value: roundMoney(dividend.gross) });
     }
 
+    function calculateIsraeliPensionTax(annualGross: Decimal, currentYear: number, isAge67: boolean): Decimal {
+      if (annualGross.lte(0)) return new Decimal(0);
+      const monthlyGross = annualGross.div(12).toNumber();
+
+      const INFLATION_RATE = 1.015;
+      const yearsFrom2026 = Math.max(0, currentYear - 2026);
+      const inflationFactor = Math.pow(INFLATION_RATE, yearsFrom2026);
+
+      const baseBrackets = [
+        { limit: 7010, rate: 0.10 },
+        { limit: 10060, rate: 0.14 },
+        { limit: 16150, rate: 0.20 },
+        { limit: 22440, rate: 0.31 },
+        { limit: 46690, rate: 0.35 },
+        { limit: 60000, rate: 0.47 },
+        { limit: Infinity, rate: 0.50 }
+      ];
+
+      const baseCreditPoint = 242;
+      const creditPointsAmount = 2.25 * baseCreditPoint * inflationFactor;
+      const kibuaZchuyotBase = 5422;
+      const kibuaZchuyot = isAge67 ? kibuaZchuyotBase * inflationFactor : 0;
+
+      // Kitzba Mukeret (15%) is tax exempt
+      const taxableIncome = Math.max(0, monthlyGross * 0.85 - kibuaZchuyot);
+      let tax = 0;
+      let previousLimit = 0;
+
+      for (const bracket of baseBrackets) {
+        const inflatedLimit = bracket.limit * inflationFactor;
+        if (taxableIncome > previousLimit) {
+          const taxableInBracket = Math.min(taxableIncome, inflatedLimit) - previousLimit;
+          tax += taxableInBracket * bracket.rate;
+        }
+        previousLimit = inflatedLimit;
+      }
+
+      const monthlyTax = Math.max(0, tax - creditPointsAmount);
+      return new Decimal(monthlyTax * 12);
+    }
+
     for (const annuity of accountManager.activeAnnuities) {
       grossIncome = grossIncome.plus(annuity.payout);
-      taxPaid = taxPaid.plus(annuity.payout.mul(annuity.tax_rate.div(100)));
+      const pTax = calculateIsraeliPensionTax(annuity.payout, year, annuity.isAge67);
+      taxPaid = taxPaid.plus(pTax);
+      // We only consider the taxable portion as "taxableIncome" for brackets, or maybe just add the whole gross.
+      // But since pension tax is calculated separately, adding it to taxableIncome might double tax it if there is a global tax?
+      // No, simulation.ts just tracks taxableIncome for reporting.
       taxableIncome = taxableIncome.plus(annuity.payout);
-      incomeDetails.push({ name: `Pension: ${annuity.name}`, type: 'Pension Income', value: roundMoney(annuity.payout) });
+      incomeDetails.push({
+          name: `Pension: ${annuity.name}`,
+          type: 'Pension Income',
+          value: roundMoney(annuity.payout),
+          tax: roundMoney(pTax)
+      });
     }
 
     const optionsIncome = new Decimal(optionsMap.get(year) ?? 0);
