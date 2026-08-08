@@ -827,6 +827,7 @@ def override_pension_values(
                     item["details"]["deposits"] = payload.deposits
                     item["details"]["monthly_contribution"] = payload.deposits
                     item["details"]["withdrawal_coefficient"] = payload.withdrawal_coefficient
+                    item["details"]["divide_rate"] = payload.withdrawal_coefficient
                     snapshot_updated = True
 
             if snapshot_updated:
@@ -853,6 +854,11 @@ def override_pension_values(
                     item["details"]["deposits"] = payload.deposits
                     item["details"]["monthly_contribution"] = payload.deposits
                     item["details"]["withdrawal_coefficient"] = payload.withdrawal_coefficient
+                    item["details"]["divide_rate"] = payload.withdrawal_coefficient
+                    if "account_settings" not in item:
+                        item["account_settings"] = {}
+                    item["account_settings"]["divide_rate"] = payload.withdrawal_coefficient
+                    item["account_settings"]["monthly_contribution"] = payload.deposits
                     plan_updated = True
 
             if plan_updated:

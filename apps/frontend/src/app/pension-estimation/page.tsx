@@ -71,7 +71,7 @@ export default function PensionEstimationPage() {
         newEditStates[acc.id] = {
           value: acc.value.toString(),
           deposits: (acc.details?.deposits ?? acc.details?.monthly_contribution ?? 0).toString(),
-          withdrawal_coefficient: (acc.details?.withdrawal_coefficient ?? 200).toString(),
+          withdrawal_coefficient: ((acc.details?.divide_rate as number | undefined) ?? (acc.details?.withdrawal_coefficient as number | undefined) ?? 200).toString(),
         };
       });
       setEditStates(newEditStates);
@@ -144,7 +144,7 @@ export default function PensionEstimationPage() {
 
       const currentSum = parseFloat(editStates[acc.id]?.value || '0') || acc.value;
       const monthlyContribution = parseFloat(editStates[acc.id]?.deposits || '0') || (acc.details?.deposits ?? 0);
-      const withdrawalCoefficient = parseFloat(editStates[acc.id]?.withdrawal_coefficient || '0') || (acc.details?.withdrawal_coefficient ?? 200);
+      const withdrawalCoefficient = parseFloat(editStates[acc.id]?.withdrawal_coefficient || '0') || (acc.details?.divide_rate as number | undefined ?? acc.details?.withdrawal_coefficient as number | undefined ?? 200);
 
       const savingsAt50 = calculateFV(currentSum, monthlyContribution, now, stopWorkDate, stopWorkDate);
       const savingsAt60 = calculateFV(currentSum, monthlyContribution, now, date60, stopWorkDate);
