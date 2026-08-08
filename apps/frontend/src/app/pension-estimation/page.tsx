@@ -17,6 +17,7 @@ import {
   BarChart,
   Bar,
   Tooltip,
+  ReferenceLine,
 } from 'recharts';
 
 type EditState = {
@@ -50,6 +51,7 @@ export default function PensionEstimationPage() {
 
   const [editStates, setEditStates] = useState<Record<string, EditState>>({});
   const [isEditing, setIsEditing] = useState<Record<string, boolean>>({});
+  const [showAfterTax, setShowAfterTax] = useState(false);
 
   const assumedRateYearly = settings.pensionAssumedRate || 0.0386;
   const assumedRateMonthly = assumedRateYearly / 12;
@@ -227,48 +229,106 @@ export default function PensionEstimationPage() {
     savingsAt50: acc.savingsAt50 + row.savingsAt50,
     savingsAt60: acc.savingsAt60 + row.savingsAt60,
     savingsAt67: acc.savingsAt67 + row.savingsAt67,
+    pensionAt60: acc.pensionAt60 + row.pensionAt60,
     pensionAt67: acc.pensionAt67 + row.pensionAt67,
   }), { currentSum: 0, savingsAt50: 0, savingsAt60: 0, savingsAt67: 0, pensionAt60: 0, pensionAt67: 0 });
 
   // Withdrawal Strategies Comparison
   const withdrawalStrategiesData = useMemo(() => {
-    // Option 1: All at 60
-    const option1 = totals.pensionAt60;
+    let jonyGross60 = 0, jonyGross67 = 0;
+    let ritaGross60 = 0, ritaGross67 = 0;
 
-    // Option 2: All at 67
-    const option2 = totals.pensionAt67;
-
-    // Option 3: "Tax exempt at 60, rest at 67"
-    // Heuristic: Accounts with "comp" or "gemel" in the name/product are pulled at 60.
-    // The rest are pulled at 67.
-    let splitOptionIncome = 0;
     projections.forEach(row => {
-      const isTaxExemptTarget = row.name.toLowerCase().includes('comp') || row.name.toLowerCase().includes('gemel');
-      if (isTaxExemptTarget) {
-        splitOptionIncome += row.pensionAt60;
+      const isSpouse = row.owner.toLowerCase() === 'rita' || row.owner.toLowerCase() === 'spouse';
+      if (isSpouse) {
+        ritaGross60 += row.pensionAt60;
+        ritaGross67 += row.pensionAt67;
       } else {
-        splitOptionIncome += row.pensionAt67;
+        jonyGross60 += row.pensionAt60;
+        jonyGross67 += row.pensionAt67;
       }
     });
+
+    const calculateTax = (grossPension: number, year: number, isAge67: boolean) => {
+      if (grossPension <= 0) return 0;
+
+      const INFLATION_RATE = 1.015;
+      const yearsFrom2026 = Math.max(0, year - 2026);
+      const inflationFactor = Math.pow(INFLATION_RATE, yearsFrom2026);
+
+      const baseBrackets = [
+        { limit: 7010, rate: 0.10 },
+        { limit: 10060, rate: 0.14 },
+        { limit: 16150, rate: 0.20 },
+        { limit: 22440, rate: 0.31 },
+        { limit: 46690, rate: 0.35 },
+        { limit: 60000, rate: 0.47 },
+        { limit: Infinity, rate: 0.50 }
+      ];
+
+      const baseCreditPoint = 242;
+      const creditPointsAmount = 2.25 * baseCreditPoint * inflationFactor;
+      const kibuaZchuyotBase = 5422;
+      const kibuaZchuyot = isAge67 ? kibuaZchuyotBase * inflationFactor : 0;
+
+      const taxableIncome = Math.max(0, grossPension - kibuaZchuyot);
+      let tax = 0;
+      let previousLimit = 0;
+
+      for (const bracket of baseBrackets) {
+        const inflatedLimit = bracket.limit * inflationFactor;
+        if (taxableIncome > previousLimit) {
+          const taxableInBracket = Math.min(taxableIncome, inflatedLimit) - previousLimit;
+          tax += taxableInBracket * bracket.rate;
+        }
+        previousLimit = inflatedLimit;
+      }
+
+      return Math.max(0, tax - creditPointsAmount);
+    };
+
+    const getNet = (gross: number, year: number, is67: boolean) => {
+      if (!showAfterTax) return gross;
+      const exemptPart = gross * 0.15; // Kitzba Mukeret (15%)
+      const taxablePart = gross * 0.85; // Kitzba Mezaka
+      const tax = calculateTax(taxablePart, year, is67);
+      return exemptPart + Math.max(0, taxablePart - tax);
+    };
+
+    const jony60Year = jony60Date.getFullYear();
+    const jony67Year = jony67Date.getFullYear();
+    const rita60Year = rita60Date.getFullYear();
+    const rita67Year = rita67Date.getFullYear();
+
+    const opt1 = getNet(jonyGross60, jony60Year, false) + getNet(ritaGross60, rita60Year, false);
+    const opt2 = getNet(jonyGross67, jony67Year, true) + getNet(ritaGross67, rita67Year, true);
+
+    // Option 3: 15% at 60 (tax free), 85% at 67 (taxable, with Kibua Zchuyot)
+    const jonyOpt3 = (jonyGross60 * 0.15) + getNet(jonyGross67 * 0.85, jony67Year, true);
+    const ritaOpt3 = (ritaGross60 * 0.15) + getNet(ritaGross67 * 0.85, rita67Year, true);
+
+    const jonyOpt3Val = showAfterTax ? jonyOpt3 : (jonyGross60 * 0.15 + jonyGross67 * 0.85);
+    const ritaOpt3Val = showAfterTax ? ritaOpt3 : (ritaGross60 * 0.15 + ritaGross67 * 0.85);
+    const splitOptionIncome = jonyOpt3Val + ritaOpt3Val;
 
     return [
       {
         name: 'All at Age 60',
-        payout: option1,
+        payout: opt1,
         fill: '#8b5cf6'
       },
       {
-        name: 'Split Option (Tax-Exempt @ 60, Rest @ 67)',
+        name: 'Split Option (15% @ 60, Rest @ 67)',
         payout: splitOptionIncome,
         fill: '#f59e0b'
       },
       {
         name: 'All at Age 67',
-        payout: option2,
+        payout: opt2,
         fill: '#10b981'
       }
     ];
-  }, [totals, projections]);
+  }, [totals, projections, showAfterTax]);
 
   if (loading) {
     return <div className="min-h-screen bg-slate-950 text-white p-8 flex items-center justify-center">Loading estimation...</div>;
@@ -415,6 +475,9 @@ export default function PensionEstimationPage() {
                   labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                <ReferenceLine x={2034} stroke="#cbd5e1" strokeDasharray="3 3" label={{ position: 'top', value: 'Age 50', fill: '#cbd5e1', fontSize: 12 }} />
+                <ReferenceLine x={2044} stroke="#cbd5e1" strokeDasharray="3 3" label={{ position: 'top', value: 'Age 60', fill: '#cbd5e1', fontSize: 12 }} />
+                <ReferenceLine x={2051} stroke="#cbd5e1" strokeDasharray="3 3" label={{ position: 'top', value: 'Age 67', fill: '#cbd5e1', fontSize: 12 }} />
                 {accounts.map((acc, index) => (
                   <Line
                     key={acc.id}
@@ -435,22 +498,31 @@ export default function PensionEstimationPage() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl mb-8">
           <div className="flex flex-col md:flex-row gap-6">
             <div className="md:w-1/3 flex flex-col justify-center">
-              <h2 className="text-xl font-bold mb-4 text-white">Withdrawal Strategies</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-white">Withdrawal Strategies</h2>
+                <button
+                  onClick={() => setShowAfterTax(!showAfterTax)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${showAfterTax ? 'bg-violet-600' : 'bg-slate-700'}`}
+                  title="Toggle Post-Tax vs Pre-Tax"
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${showAfterTax ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
               <p className="text-slate-400 text-sm mb-4">
-                Compare your estimated monthly income across three scenarios.
+                Compare your estimated monthly income across three scenarios. {showAfterTax ? 'Showing POST-TAX amounts based on expected future brackets and exemptions.' : 'Showing PRE-TAX gross amounts.'}
               </p>
               <ul className="space-y-3 text-sm text-slate-300">
                 <li className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-violet-500"></div>
-                  <span><strong>Age 60:</strong> Pull all accounts early.</span>
+                  <span><strong>Age 60:</strong> Pull all accounts early (fully taxed).</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-amber-500"></div>
-                  <span><strong>Split:</strong> Pull tax-exempt accounts (Gemel/Comp) at 60, defer the rest to 67.</span>
+                  <span><strong>Split:</strong> Pull the 15% tax-exempt portion at 60, defer the rest to 67.</span>
                 </li>
                 <li className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-                  <span><strong>Age 67:</strong> Defer everything until retirement age.</span>
+                  <span><strong>Age 67:</strong> Defer everything until retirement age (eligible for Kibua Zchuyot).</span>
                 </li>
               </ul>
             </div>
