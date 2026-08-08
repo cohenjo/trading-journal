@@ -203,12 +203,12 @@ function getPensionIdentity(item: PensionFinanceItem | PlanItem): string | null 
   const storedIdentity = safeText(details.pension_identity) || safeText(accountSettings.pension_identity);
   if (storedIdentity) return storedIdentity;
 
-  const owner = safeText(candidate.owner);
-  const productName = safeText(details.pension_product);
+  const owner = safeText(candidate.owner) || 'You';
+  const productName = safeText(details.pension_product) || safeText(candidate.sub_category) || safeText(candidate.type) || 'Pension';
   const fundName = safeText(details.pension_fund_name) || safeText(candidate.name);
   const accountNumber = safeText(details.account_number) || null;
 
-  if (!owner || !productName) return null;
+  if (!productName) return rawId || null;
   return buildPensionIdentity(owner, productName, fundName, accountNumber);
 }
 
