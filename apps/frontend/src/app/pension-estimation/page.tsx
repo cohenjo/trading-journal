@@ -12,9 +12,10 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   ResponsiveContainer,
   Legend,
+  BarChart,
+  Bar,
 } from 'recharts';
 
 type EditState = {
@@ -206,9 +207,48 @@ export default function PensionEstimationPage() {
     savingsAt50: acc.savingsAt50 + row.savingsAt50,
     savingsAt60: acc.savingsAt60 + row.savingsAt60,
     savingsAt67: acc.savingsAt67 + row.savingsAt67,
-    pensionAt60: acc.pensionAt60 + row.pensionAt60,
     pensionAt67: acc.pensionAt67 + row.pensionAt67,
   }), { currentSum: 0, savingsAt50: 0, savingsAt60: 0, savingsAt67: 0, pensionAt60: 0, pensionAt67: 0 });
+
+  // Withdrawal Strategies Comparison
+  const withdrawalStrategiesData = useMemo(() => {
+    // Option 1: All at 60
+    const option1 = totals.pensionAt60;
+
+    // Option 2: All at 67
+    const option2 = totals.pensionAt67;
+
+    // Option 3: "Tax exempt at 60, rest at 67"
+    // Heuristic: Accounts with "comp" or "gemel" in the name/product are pulled at 60.
+    // The rest are pulled at 67.
+    let splitOptionIncome = 0;
+    projections.forEach(row => {
+      const isTaxExemptTarget = row.name.toLowerCase().includes('comp') || row.name.toLowerCase().includes('gemel');
+      if (isTaxExemptTarget) {
+        splitOptionIncome += row.pensionAt60;
+      } else {
+        splitOptionIncome += row.pensionAt67;
+      }
+    });
+
+    return [
+      {
+        name: 'All at Age 60',
+        payout: option1,
+        fill: '#8b5cf6'
+      },
+      {
+        name: 'Split Option (Tax-Exempt @ 60, Rest @ 67)',
+        payout: splitOptionIncome,
+        fill: '#f59e0b'
+      },
+      {
+        name: 'All at Age 67',
+        payout: option2,
+        fill: '#10b981'
+      }
+    ];
+  }, [totals, projections]);
 
   if (loading) {
     return <div className="min-h-screen bg-slate-950 text-white p-8 flex items-center justify-center">Loading estimation...</div>;
@@ -368,6 +408,63 @@ export default function PensionEstimationPage() {
                 ))}
               </LineChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Withdrawal Strategy Section */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl mb-8">
+          <div className="flex flex-col md:flex-row gap-6">
+            <div className="md:w-1/3 flex flex-col justify-center">
+              <h2 className="text-xl font-bold mb-4 text-white">Withdrawal Strategies</h2>
+              <p className="text-slate-400 text-sm mb-4">
+                Compare your estimated monthly income across three scenarios.
+              </p>
+              <ul className="space-y-3 text-sm text-slate-300">
+                <li className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-violet-500"></div>
+                  <span><strong>Age 60:</strong> Pull all accounts early.</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-amber-500"></div>
+                  <span><strong>Split:</strong> Pull tax-exempt accounts (Gemel/Comp) at 60, defer the rest to 67.</span>
+                </li>
+                <li className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                  <span><strong>Age 67:</strong> Defer everything until retirement age.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="md:w-2/3 h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={withdrawalStrategiesData} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                  <XAxis
+                    dataKey="name"
+                    stroke="#94a3b8"
+                    tick={{ fill: '#94a3b8' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    stroke="#94a3b8"
+                    tick={{ fill: '#94a3b8' }}
+                    tickFormatter={(val) => `₪${(val / 1000).toFixed(0)}k`}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    cursor={{ fill: '#1e293b' }}
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', borderRadius: '0.5rem' }}
+                    formatter={(val: number) => [formatILS(val), 'Monthly Payout']}
+                  />
+                  <Bar
+                    dataKey="payout"
+                    radius={[4, 4, 0, 0]}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 

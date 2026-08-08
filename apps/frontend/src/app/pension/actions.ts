@@ -213,11 +213,17 @@ function getPensionIdentity(item: PensionFinanceItem | PlanItem): string | null 
 }
 
 function isPensionItem(item: PensionFinanceItem): boolean {
-  return item.type === 'Pension';
+  const t = (item.type || '').toLowerCase();
+  const sc = (item.sub_category || '').toLowerCase();
+  const n = (item.name || '').toLowerCase();
+  return t === 'pension' || t === 'pension fund' || sc === 'pension fund' || n.includes('pension') || n.includes('gemel');
 }
 
 function isPensionPlanItem(item: PlanItem): boolean {
-  return item.account_settings?.type === 'Pension';
+  const t = (item.account_settings?.type || '').toLowerCase();
+  const sc = (item.sub_category || '').toLowerCase();
+  const n = (item.name || '').toLowerCase();
+  return t === 'pension' || t === 'pension fund' || sc === 'pension fund' || n.includes('pension') || n.includes('gemel');
 }
 
 function recalculateSnapshot(snapshot: FinanceSnapshotRow): FinanceSnapshotRow {
