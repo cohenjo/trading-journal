@@ -58,27 +58,22 @@ export const CashFlowSankey: React.FC<Props> = ({ data, currency }) => {
             }
         };
 
-        // --- 2. Stage: Specific Incomes -> Income Types ---
-        const incomeTypes = new Set<string>();
+        // --- 2. Stage: Specific Incomes -> Total Inflows ---
+        const totalInflowsId = 'node_Inflows';
+        let hasInflows = false;
 
         // Default Incomes if details missing but total exists
         const safeIncomeDetails = (income_details && income_details.length > 0)
             ? income_details
             : (income > 0 ? [{ name: 'Other Income', type: 'Other Inflows', value: income }] : []);
 
-        safeIncomeDetails.forEach((item: any) => {
+        safeIncomeDetails.forEach((item: any, idx: number) => {
             const rawName = item.name || 'Unknown';
-            const rawType = item.type || 'Other Inflows';
-
-            // Unique IDs
-            const sourceId = `income_src_${rawName}`;
-            const typeId = `income_type_${rawType}`;
+            const sourceId = `income_src_${idx}_${rawName}`;
 
             addNode(sourceId, '#34d399', rawName); // Source Color (Emerald)
-            addNode(typeId, '#2dd4bf', rawType);   // Type Color (Teal)
-            addLink(sourceId, typeId, item.value);
-
-            incomeTypes.add(typeId);
+            addLink(sourceId, totalInflowsId, item.value);
+            hasInflows = true;
         });
 
         // Withdrawals
@@ -86,45 +81,21 @@ export const CashFlowSankey: React.FC<Props> = ({ data, currency }) => {
             ? withdrawal_details
             : (withdrawals > 0 ? [{ name: 'Withdrawals', type: 'Portfolio Withdrawal', value: withdrawals }] : []);
 
-        safeWithdrawalDetails.forEach((item: any) => {
+        safeWithdrawalDetails.forEach((item: any, idx: number) => {
             const rawName = item.name || 'Withdrawal';
-            // const rawType = item.type || 'Inflow';
-            // Map all withdrawals to "Investment Income" type so they get grouped on the right side of the left block
-            const rawType = 'Investment Income';
-
-            const sourceId = `w_src_${rawName}`;
-            const typeId = `income_type_${rawType}`;
+            const sourceId = `w_src_${idx}_${rawName}`;
 
             addNode(sourceId, '#60a5fa', rawName); // Blue
-            addNode(typeId, '#2dd4bf', rawType);   // Teal
-            addLink(sourceId, typeId, item.value);
-
-            incomeTypes.add(typeId);
+            addLink(sourceId, totalInflowsId, item.value);
+            hasInflows = true;
         });
 
-        // --- 3. Stage: Income Types -> Total Inflows ---
-        const totalInflowsId = 'node_Inflows';
-
+        // --- 3. Stage: Total Inflows Node ---
         // Ensure Inflows node exists if we have any income OR any expenses/outflows to attach to it
-        const hasInflows = incomeTypes.size > 0;
         const hasOutflows = (tax_paid > 0) || (totalExpenses > 0) || (savings_details && savings_details.length > 0);
 
         if (hasInflows || hasOutflows) {
             addNode(totalInflowsId, '#3b82f6', 'Inflows'); // bright blue
-        }
-
-        if (hasInflows) {
-            incomeTypes.forEach(typeId => {
-                let typeSum = 0;
-                // Sum from inputs that feed into this type
-                linksList.forEach(link => {
-                    if (link.target === typeId) typeSum += link.value;
-                });
-
-                if (typeSum > 0) {
-                    addLink(typeId, totalInflowsId, typeSum);
-                }
-            });
         }
 
         // --- 4. Stage: Inflows -> Allocations (Tax, Exp, Savings) ---

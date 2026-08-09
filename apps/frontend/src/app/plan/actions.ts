@@ -93,6 +93,9 @@ async function getAuthenticatedHouseholdId(): Promise<string | null> {
  * Runs the TJ-020 plan projection in-process with Decimal-backed monetary math.
  */
 export async function runPlanSimulation(planInput: PlanSimulationInput): Promise<PlanSimulationResult> {
+  if (!planInput.pensionProjections) {
+    planInput.pensionProjections = await getPensionIncomeEstimation(planInput);
+  }
   return calculatePlanSimulation(planInput);
 }
 
