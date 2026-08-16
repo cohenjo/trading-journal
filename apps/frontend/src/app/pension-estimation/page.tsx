@@ -482,7 +482,7 @@ export default function PensionEstimationPage() {
           <h2 className="text-xl font-bold mb-6 text-white">Projected Growth</h2>
           <div className="h-[400px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+              <LineChart data={chartData} margin={{ top: 30, right: 20, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                 <XAxis
                   dataKey="year"
@@ -603,7 +603,7 @@ export default function PensionEstimationPage() {
           </p>
           <div className="h-[400px] w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={cumulativeGraphData} margin={{ top: 10, right: 20, left: 20, bottom: 5 }}>
+              <AreaChart data={cumulativeGraphData} margin={{ top: 30, right: 20, left: 20, bottom: 5 }}>
                 <defs>
                   <linearGradient id="colorOpt1" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
