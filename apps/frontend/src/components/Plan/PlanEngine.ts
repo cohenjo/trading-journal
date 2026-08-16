@@ -100,7 +100,7 @@ export const calculateProjection = (
             // For now, let's look for currency in details or default to ILS.
             const itemCurrency = fItem.currency || 'ILS';
 
-            if (fItem.category === 'Savings' || fItem.category === 'Investments') {
+            if (fItem.category === 'Savings' || fItem.category === 'Investments' || fItem.category === 'Retirement') {
                 const planItem = getPlanConfig(fItem.name, 'Account');
                 const settings = planItem?.account_settings || {} as any;
 

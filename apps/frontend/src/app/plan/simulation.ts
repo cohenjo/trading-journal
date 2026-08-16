@@ -408,7 +408,7 @@ export function loadAccounts(plan: PlanData, finances: PlanSimulationInput['fina
   for (const financeItem of snapshotItems(finances)) {
     const category = stringValue(financeItem.category);
     const name = stringValue(financeItem.name);
-    if (!['Savings', 'Investments', 'Cash', 'Checking', 'Bank', 'Liquid'].includes(category)) continue;
+    if (!['Savings', 'Investments', 'Cash', 'Checking', 'Bank', 'Liquid', 'Retirement'].includes(category)) continue;
 
     const itemCurrency = stringValue(financeItem.currency, 'ILS');
     const config = findItemConfig(planItems, name, 'Account');
