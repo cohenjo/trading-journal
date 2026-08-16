@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import type { Bond, RungData } from '@/components/Ladder/types';
 import { buildIncome, buildOverview, defaultIncomeRange, rungDateRange, rungIdForYear } from './ladder-calculations';
+import { convertCurrency } from '@/lib/currency';
 
 type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
 type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -250,11 +251,12 @@ async function fetchHoldingBonds(supabase: SupabaseLike, householdId: string): P
   });
 }
 
-/** Computes face-value sum per rung from a merged bond list. */
+/** Computes face-value sum per rung from a merged bond list, converted to ILS. */
 function computeCurrentAmountByRung(bonds: Bond[]): Map<string, number> {
   const totals = new Map<string, number>();
   for (const bond of bonds) {
-    totals.set(bond.rung_id, (totals.get(bond.rung_id) ?? 0) + Number(bond.face_value));
+    const amountInILS = convertCurrency(Number(bond.face_value), bond.currency, 'ILS');
+    totals.set(bond.rung_id, (totals.get(bond.rung_id) ?? 0) + amountInILS);
   }
   return totals;
 }

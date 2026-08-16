@@ -812,20 +812,21 @@ class RealAssetManager:
                 val = PlanInterfaces._safe_float(f_item.get("value", 0))
                 item_currency = f_item.get("currency", "ILS")
 
-                if cat in ["Real Estate", "Vehicle"]:
+                if cat in ["Real Estate", "Vehicle", "Asset", "Assets"]:
                     config = find_item_config(name, "Asset") or {}
-                    currency = config.get("currency", item_currency)
-
+                    c_currency = config.get("currency", item_currency)
+                    c_val = PlanInterfaces._safe_float(f_item.get("value", 0))
+                    val_conv = PlanInterfaces.convert_currency(c_val, c_currency, main_currency)
                     real_assets.append(
                         {
                             "name": name,
-                            "value": AccountManager._convert(val, currency, main_currency),
+                            "value": val_conv,
                             "growth": PlanInterfaces._safe_float(config.get("growth_rate", 0.0)),
                             "depreciation": PlanInterfaces._safe_float(config.get("depreciation_rate", 0.0)),
                             "loan_balance": 0.0,
                         }
                     )
-                elif cat in ["Debt", "Liability"]:
+                elif cat in ["Debt", "Liability", "Liabilities"]:
                     unallocated_cash_diff -= AccountManager._convert(val, item_currency, main_currency)
 
         return real_assets, unallocated_cash_diff

@@ -55,7 +55,7 @@ describe('ladder Server Actions', () => {
     });
     const result = await getLadderOverview();
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.rungs.find((rung) => rung.id === '2037')?.current_amount).toBe(100_000);
+    if (result.ok) expect(result.data.rungs.find((rung) => rung.id === '2037')?.current_amount).toBe(360_000);
   });
 
   it('adds a bond scoped to the authenticated household and synthesized rung', async () => {

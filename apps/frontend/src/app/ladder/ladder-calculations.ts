@@ -1,4 +1,5 @@
 import type { Bond, DistributionRow, IncomePoint, RungData } from '@/components/Ladder/types';
+import { convertCurrency } from '@/lib/currency';
 
 export type LadderBondInput = Bond & { issue_date?: string };
 export type Cashflow = {
@@ -81,8 +82,6 @@ export function generateCashflowsForBond(
   bond: LadderBondInput,
   range: { fromDate: string; toDate: string },
 ): Cashflow[] {
-  if (bond.currency !== 'USD') return [];
-
   const perYear = frequencyPerYear(bond.coupon_frequency);
   const monthsStep = 12 / perYear;
   const couponAmount = toFiniteNumber(bond.face_value, 0) * toFiniteNumber(bond.coupon_rate, 0) / perYear;
@@ -146,7 +145,8 @@ export function buildIncome(
   const byYear = new Map<number, number>();
   for (const cashflow of cashflows) {
     const year = parseIsoDate(cashflow.date).getUTCFullYear();
-    byYear.set(year, (byYear.get(year) ?? 0) + cashflow.amount);
+    const amountInILS = convertCurrency(cashflow.amount, cashflow.currency, 'ILS');
+    byYear.set(year, (byYear.get(year) ?? 0) + amountInILS);
   }
 
   const income_series = [...byYear.entries()]

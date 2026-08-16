@@ -816,14 +816,27 @@ function loadRealAssets(plan: PlanData, finances: PlanSimulationInput['finances'
     const category = stringValue(financeItem.category);
     const itemCurrency = stringValue(financeItem.currency, 'ILS');
     const name = stringValue(financeItem.name);
-    if (category === 'Real Estate' || category === 'Vehicle') {
+    if (['Real Estate', 'Vehicle', 'Asset', 'Assets'].includes(category)) {
       const config = findItemConfig(planItems, name, 'Asset');
       const currency = stringValue(config?.currency, itemCurrency);
       assets.push({ name, value: convert(decimalValue(financeItem.value), currency, mainCurrency), growth: decimalValue(config?.growth_rate, 0), depreciation: decimalValue(config?.depreciation_rate, 0), loan_balance: new Decimal(0) });
-    } else if (category === 'Debt' || category === 'Liability') {
+    } else if (['Debt', 'Liability', 'Liabilities'].includes(category)) {
       cashDiff = cashDiff.minus(convert(decimalValue(financeItem.value), itemCurrency, mainCurrency));
     }
   }
+
+  for (const item of planItems) {
+    if (item.category !== 'Asset' || assets.some(a => a.name === item.name)) continue;
+    const currency = stringValue(item.currency, mainCurrency);
+    assets.push({
+      name: item.name,
+      value: convert(new Decimal(item.value ?? 0), currency, mainCurrency),
+      growth: decimalValue(item.growth_rate, 0),
+      depreciation: decimalValue(item.depreciation_rate, 0),
+      loan_balance: new Decimal(0)
+    });
+  }
+
   return { assets, cashDiff };
 }
 
