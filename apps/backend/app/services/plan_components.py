@@ -181,7 +181,7 @@ class AccountManager:
                 val = PlanInterfaces._safe_float(f_item.get("value", 0))
                 item_currency = f_item.get("currency", "ILS")
 
-                if cat in ["Savings", "Investments", "Cash", "Checking", "Bank", "Liquid"]:
+                if cat in ["Savings", "Investments", "Cash", "Checking", "Bank", "Liquid", "Retirement"]:
                     config = find_item_config(name, "Account") or {}
 
                     # 1. Defaults from Finance Snapshot
