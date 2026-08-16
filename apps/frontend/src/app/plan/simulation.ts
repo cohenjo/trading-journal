@@ -984,6 +984,11 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       const end = milestoneManager.yearFromCondition(item, 'end_condition', 'end_reference', 'end_date');
       if (year < start || year > end) continue;
 
+      if (item.frequency === 'Custom') {
+        const period = typeof item.custom_frequency_years === 'number' ? item.custom_frequency_years : parseInt(item.custom_frequency_years as any, 10) || 1;
+        if (period > 0 && (year - start) % period !== 0) continue;
+      }
+
       const baseRaw = decimalValue(item.value);
       const base = convert(baseRaw, item.currency ?? 'ILS', stringValue(settings.mainCurrency, 'ILS')).mul(multiplier(item.frequency));
       const yearsPassed = year - currentYear;
