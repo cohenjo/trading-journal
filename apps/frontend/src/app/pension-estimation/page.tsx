@@ -15,11 +15,12 @@ import {
   CartesianGrid,
   ResponsiveContainer,
   Legend,
-  BarChart,
   Bar,
   Tooltip,
   ReferenceLine,
   LabelList,
+  AreaChart,
+  Area,
 } from 'recharts';
 
 type EditState = {
@@ -173,7 +174,6 @@ export default function PensionEstimationPage() {
         savingsAt50,
         savingsAt60,
         savingsAt67,
-        pensionAt60: proj60.find(p => p.year === age60Year)?.grossPayout || 0, // This is annual, wait. Wait, previously pensionAt60 was monthly!
         // No wait, calculateFV returned the balance. pensionAt60 = balance / coefficient.
         // So monthly payout! But generatePensionProjection grossPayout is ANNUAL!
         // So let's divide by 12.
@@ -279,7 +279,7 @@ export default function PensionEstimationPage() {
         fill: '#8b5cf6'
       },
       {
-        name: 'Split Option (15% @ 60, Rest @ 67)',
+        name: 'Split (15% @ 60, 85% @ 67)',
         payout: splitOptionIncome,
         fill: '#f59e0b'
       },
@@ -289,7 +289,70 @@ export default function PensionEstimationPage() {
         fill: '#10b981'
       }
     ];
-  }, [totals, projections, showAfterTax]);
+  }, [projections, showAfterTax, rita60Date, jony60Date, rita67Date, jony67Date]);
+
+  // Cumulative Withdrawal Comparison
+  const cumulativeGraphData = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const stopWorkYear = stopWorkDate.getFullYear();
+
+    // Earliest year someone hits 60 (Rita in 2042)
+    const startYear = 2042;
+    // Youngest hits 100 (Jony turns 100 in 2084)
+    const endYear = 2084;
+
+    const data = [];
+    let cumOpt1 = 0;
+    let cumOpt2 = 0;
+    let cumOpt3 = 0;
+
+    const projectionsByAcc = accounts.map(acc => {
+      const owner = (acc.owner || 'You').toLowerCase();
+      const isSpouse = owner === 'rita' || owner === 'spouse';
+      const birthYear = isSpouse ? (settings?.spouse?.birthYear || 1982) : (settings?.primaryUser?.birthYear || 1984);
+      const currentSum = parseFloat(editStates[acc.id]?.value || '0') || acc.value;
+      const monthlyContribution = parseFloat(editStates[acc.id]?.deposits || '0') || (acc.details?.deposits ?? 0);
+      const withdrawalCoefficient = parseFloat(editStates[acc.id]?.withdrawal_coefficient || '0') || (acc.details?.divide_rate as number | undefined ?? acc.details?.withdrawal_coefficient as number | undefined ?? 200);
+
+      // Option 1: All at 60
+      const projOpt1 = generatePensionProjection(currentYear, birthYear, currentSum, monthlyContribution, stopWorkYear, 60, assumedRateYearly, withdrawalCoefficient);
+      // Option 2: Jony at 60, Rita at 67
+      const projOpt2 = generatePensionProjection(currentYear, birthYear, currentSum, monthlyContribution, stopWorkYear, isSpouse ? 67 : 60, assumedRateYearly, withdrawalCoefficient);
+      // Option 3: All at 67
+      const projOpt3 = generatePensionProjection(currentYear, birthYear, currentSum, monthlyContribution, stopWorkYear, 67, assumedRateYearly, withdrawalCoefficient);
+
+      return { projOpt1, projOpt2, projOpt3 };
+    });
+
+    for (let y = startYear; y <= endYear; y++) {
+      let annualOpt1 = 0;
+      let annualOpt2 = 0;
+      let annualOpt3 = 0;
+
+      projectionsByAcc.forEach(pAcc => {
+        const pt1 = pAcc.projOpt1.find(p => p.year === y);
+        const pt2 = pAcc.projOpt2.find(p => p.year === y);
+        const pt3 = pAcc.projOpt3.find(p => p.year === y);
+
+        annualOpt1 += pt1 ? pt1.netPayout : 0;
+        annualOpt2 += pt2 ? pt2.netPayout : 0;
+        annualOpt3 += pt3 ? pt3.netPayout : 0;
+      });
+
+      cumOpt1 += annualOpt1;
+      cumOpt2 += annualOpt2;
+      cumOpt3 += annualOpt3;
+
+      data.push({
+        year: y,
+        'All at 60': cumOpt1,
+        'Split (Jony 60, Rita 67)': cumOpt2,
+        'All at 67': cumOpt3
+      });
+    }
+
+    return data;
+  }, [accounts, editStates, assumedRateYearly, settings]);
 
   if (loading) {
     return <div className="min-h-screen bg-slate-950 text-white p-8 flex items-center justify-center">Loading estimation...</div>;
@@ -432,7 +495,7 @@ export default function PensionEstimationPage() {
                 <Tooltip
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                   itemStyle={{ color: '#e2e8f0' }}
-                  formatter={(val: number) => formatILS(val)}
+                  formatter={(val: any) => formatILS(val)}
                   labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
                 />
                 <Legend wrapperStyle={{ paddingTop: '20px' }} />
@@ -509,7 +572,7 @@ export default function PensionEstimationPage() {
                   <Tooltip
                     cursor={{ fill: '#1e293b' }}
                     contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', borderRadius: '0.5rem' }}
-                    formatter={(val: number) => [formatILS(val), 'Monthly Payout']}
+                    formatter={(val: any) => [formatILS(val), 'Monthly Payout']}
                   />
                   <Bar
                     dataKey="payout"
@@ -518,7 +581,7 @@ export default function PensionEstimationPage() {
                     <LabelList
                       dataKey="payout"
                       position="top"
-                      formatter={(val: number) => formatILS(val)}
+                      formatter={(val: any) => formatILS(val)}
                       fill="#e2e8f0"
                       fontSize={13}
                       fontWeight="bold"
@@ -527,6 +590,55 @@ export default function PensionEstimationPage() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          </div>
+        </div>
+
+        {/* Cumulative Withdrawal Comparison Section */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl mb-8">
+          <h2 className="text-xl font-bold mb-2 text-white">Cumulative Post-Tax Withdrawals (Age 60 to 100)</h2>
+          <p className="text-slate-400 text-sm mb-6">
+            Compare total cumulative cash flow from pension payouts across different starting ages. This helps visualize the crossover point where deferring to age 67 overcomes the 7 lost years of payouts.
+          </p>
+          <div className="h-[400px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={cumulativeGraphData} margin={{ top: 10, right: 20, left: 20, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="colorOpt1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorOpt2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorOpt3" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                <XAxis
+                  dataKey="year"
+                  stroke="#94a3b8"
+                  tick={{ fill: '#94a3b8' }}
+                />
+                <YAxis
+                  stroke="#94a3b8"
+                  tick={{ fill: '#94a3b8' }}
+                  tickFormatter={(val) => `₪${(val / 1000000).toFixed(1)}M`}
+                />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', borderRadius: '0.5rem' }}
+                  itemStyle={{ color: '#e2e8f0' }}
+                  formatter={(val: any) => formatILS(val)}
+                  labelStyle={{ color: '#94a3b8', marginBottom: '4px' }}
+                />
+                <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                <Area type="monotone" dataKey="All at 60" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorOpt1)" strokeWidth={3} />
+                <Area type="monotone" dataKey="Split (Jony 60, Rita 67)" stroke="#f59e0b" fillOpacity={1} fill="url(#colorOpt2)" strokeWidth={3} />
+                <Area type="monotone" dataKey="All at 67" stroke="#10b981" fillOpacity={1} fill="url(#colorOpt3)" strokeWidth={3} />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
