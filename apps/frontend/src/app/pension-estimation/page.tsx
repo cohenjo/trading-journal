@@ -19,6 +19,7 @@ import {
   Bar,
   Tooltip,
   ReferenceLine,
+  Label,
   LabelList,
   AreaChart,
   Area,
@@ -638,6 +639,18 @@ export default function PensionEstimationPage() {
                 <Area type="monotone" dataKey="All at 60" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorOpt1)" strokeWidth={3} />
                 <Area type="monotone" dataKey="Split (Jony 60, Rita 67)" stroke="#f59e0b" fillOpacity={1} fill="url(#colorOpt2)" strokeWidth={3} />
                 <Area type="monotone" dataKey="All at 67" stroke="#10b981" fillOpacity={1} fill="url(#colorOpt3)" strokeWidth={3} />
+                <ReferenceLine x={jony60Date.getFullYear()} stroke="#cbd5e1" strokeDasharray="3 3">
+                  <Label value="Age 60" position="top" fill="#cbd5e1" fontSize={12} />
+                </ReferenceLine>
+                <ReferenceLine x={jony67Date.getFullYear()} stroke="#cbd5e1" strokeDasharray="3 3">
+                  <Label value="Age 67" position="top" fill="#cbd5e1" fontSize={12} />
+                </ReferenceLine>
+                <ReferenceLine x={jony60Date.getFullYear() + 20} stroke="#94a3b8" strokeDasharray="3 3">
+                  <Label value="Age 80" position="top" fill="#94a3b8" fontSize={12} />
+                </ReferenceLine>
+                <ReferenceLine x={jony60Date.getFullYear() + 30} stroke="#94a3b8" strokeDasharray="3 3">
+                  <Label value="Age 90" position="top" fill="#94a3b8" fontSize={12} />
+                </ReferenceLine>
               </AreaChart>
             </ResponsiveContainer>
           </div>
