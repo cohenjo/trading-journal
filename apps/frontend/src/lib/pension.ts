@@ -40,6 +40,7 @@ export function generatePensionProjection(
   const monthlyRate = annualGrowthRate / 12;
 
   let currentVal = startValue;
+  let fixedGrossPayout = 0;
 
   // We project for 100 years from birth
   const endYear = birthYear + 100;
@@ -52,8 +53,12 @@ export function generatePensionProjection(
 
     if (age >= startAge) {
       // Payout phase
-      if (currentVal > 0 && divideRate > 0) {
-        grossPayout = (currentVal / divideRate) * 12;
+      if (fixedGrossPayout === 0 && currentVal > 0 && divideRate > 0) {
+        fixedGrossPayout = (currentVal / divideRate) * 12;
+      }
+
+      if (fixedGrossPayout > 0) {
+        grossPayout = fixedGrossPayout;
         const isAge67 = age >= 67;
         taxPaid = calculateIsraeliPensionTax(grossPayout, year, isAge67);
         netPayout = grossPayout - taxPaid;
