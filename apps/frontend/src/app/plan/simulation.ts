@@ -985,7 +985,7 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       if (year < start || year > end) continue;
 
       if (item.frequency === 'Custom') {
-        const period = typeof item.custom_frequency_years === 'number' ? item.custom_frequency_years : parseInt(item.custom_frequency_years as any, 10) || 1;
+        const period = item.recurrence?.period_years || 1;
         if (period > 0 && (year - start) % period !== 0) continue;
       }
 
