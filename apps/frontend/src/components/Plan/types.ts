@@ -96,7 +96,7 @@ export interface PlanItem {
   end_condition?: 'Date' | 'Forever' | 'Milestone' | 'Age';
   end_reference?: string;
 
-  frequency: 'Monthly' | 'Yearly' | 'OneTime';
+  frequency: 'Monthly' | 'Yearly' | 'OneTime' | 'Custom';
   details?: Record<string, any>;
   isLinked?: boolean;
   hasPlan?: boolean;

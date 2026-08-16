@@ -455,6 +455,13 @@ export const calculateProjection = (
                 const endY = resolveYear(item.end_condition, item.end_reference, item.end_date, startYear + 100);
 
                 if (year >= startY && year <= endY) {
+                    if (item.frequency === 'Custom' && item.recurrence?.period_years) {
+                        const yearsSinceItemStart = year - startY;
+                        if (yearsSinceItemStart % item.recurrence.period_years !== 0) {
+                            return;
+                        }
+                    }
+
                     const activeYear = year - startYear;
                     const baseValue = convert(item.value, item.currency);
                     const adjustedValue = baseValue * Math.pow(1 + (item.growth_rate / 100), activeYear);

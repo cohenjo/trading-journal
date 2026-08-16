@@ -201,16 +201,31 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
                         </div>
 
                         {mode === 'planning' && (
-                            <div>
-                                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Frequency</label>
-                                <select className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
-                                    value={formData.frequency} onChange={e => handleUpdate({ frequency: e.target.value as any })}
-                                >
-                                    <option value="Yearly">Yearly</option>
-                                    <option value="Monthly">Monthly</option>
-                                    <option value="OneTime">One Time</option>
-                                </select>
-                            </div>
+                            <>
+                                <div>
+                                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Frequency</label>
+                                    <select className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                        value={formData.frequency} onChange={e => handleUpdate({ frequency: e.target.value as any })}
+                                    >
+                                        <option value="Yearly">Yearly</option>
+                                        <option value="Monthly">Monthly</option>
+                                        <option value="OneTime">One Time</option>
+                                        <option value="Custom">Custom</option>
+                                    </select>
+                                </div>
+                                {formData.frequency === 'Custom' && (
+                                    <div>
+                                        <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1 block">Repeat Every (Years)</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            className="w-full bg-slate-900 border-slate-700 rounded p-2 text-white"
+                                            value={formData.recurrence?.period_years || 1}
+                                            onChange={e => handleUpdate({ recurrence: { ...formData.recurrence, rule: 'Repeat', period_years: parseInt(e.target.value) || 1 } })}
+                                        />
+                                    </div>
+                                )}
+                            </>
                         )}
                     </div>
 
