@@ -4,6 +4,7 @@ import { PlanItem, PlanMilestone } from './types';
 import { PlanTimeSelector } from './PlanTimeSelector';
 import { PlanAssetDetails } from './PlanAssetDetails';
 import { PlanAccountDetails } from './PlanAccountDetails';
+import { PlanLiabilityDetails } from './PlanLiabilityDetails';
 import { CurrencySelector } from '../Common/CurrencySelector';
 
 interface Props {
@@ -39,6 +40,9 @@ const EXPENSE_TYPES = [
     { label: 'Self Care', icon: '🧘' },
     { label: 'Travel', icon: '✈️' },
     { label: 'Education', icon: '🎓' },
+    { label: 'Transportation', icon: '⛽' },
+    { label: 'Car', icon: '🚗' },
+    { label: 'Shopping', icon: '🛍️' },
     { label: 'Custom Expense', icon: '💲' },
 ];
 
@@ -214,6 +218,8 @@ export const PlanModal: React.FC<Props> = ({ isOpen, onClose, onSave, category, 
                         <PlanAssetDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} />
                     ) : category === 'Account' ? (
                         <PlanAccountDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} milestones={milestones} dividendAutoAccounts={dividendAutoAccounts} />
+                    ) : category === 'Liability' ? (
+                        <PlanLiabilityDetails item={formData as PlanItem} onChange={handleUpdate} mode={mode} milestones={milestones} />
                     ) : (
                         // Standard Amount & Growth for Income/Expense
                         <div className="bg-slate-800 p-4 rounded-lg space-y-4 border border-slate-700">
