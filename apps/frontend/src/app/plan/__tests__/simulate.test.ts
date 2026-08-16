@@ -578,14 +578,14 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
 
     const reinvestLines = yr0.savings_details.filter(d => d.type === 'reinvestment');
     expect(reinvestLines).toHaveLength(3);
-    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - IBKR', value: 12_000 }));
-    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - Schwab', value: 8_000 }));
-    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - IRA', value: 5_000 }));
+    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - IBKR', value: 9_000 }));
+    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - Schwab', value: 6_000 }));
+    expect(reinvestLines).toContainEqual(expect.objectContaining({ name: 'Dividend Reinvest - IRA', value: 3_750 }));
 
     // Mass conservation: sum(div income) === sum(reinvestment outflows)
     const divSum = divLines.reduce((s, d) => s + (d.value ?? 0), 0);
     const reinvestSum = reinvestLines.reduce((s, d) => s + (d.value ?? 0), 0);
-    expect(divSum).toBe(reinvestSum); // 25_000 === 25_000
+    expect(reinvestSum).toBe(divSum * 0.75);
 
     expect(yr0.total_dividend_income).toBeGreaterThanOrEqual(25_000);
   });
@@ -631,9 +631,10 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
     const reinvestLines = yr0.savings_details.filter(d => d.type === 'reinvestment');
     expect(reinvestLines).toHaveLength(0);
 
-    // Withdrawals reduced by ~$25K vs no-dividend baseline
+    // Withdrawals reduced by net dividends (~75% of $25K) vs no-dividend baseline
     const divTotal = 12_000 + 8_000 + 5_000;
-    expect(yr0.withdrawals).toBeCloseTo(withoutDiv[0].withdrawals - divTotal, -2);
+    const netDivTotal = divTotal * 0.75;
+    expect(yr0.withdrawals).toBeCloseTo(withoutDiv[0].withdrawals - netDivTotal, -2);
   });
 
   // ── test 3: deficit year — dividends partially consumed ───────────────────
@@ -696,17 +697,20 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
     const reinvest = yr0.savings_details.filter(d => d.type === 'reinvestment');
     expect(reinvest).toHaveLength(3);
 
-    // Proportional: IBKR 12/25×10K=4800, Schwab 8/25×10K=3200, IRA 5/25×10K=2000
+    // Total net dividends = $25,000 * 0.75 = $18,750
+    // Deficit before dividends = $15,000
+    // Net Flow = $18,750 - $15,000 = $3,750 residual (reinvestable)
+    // IBKR net dividend = $12,000 * 0.75 = $9,000. $9,000 / $18,750 = 48%. $3,750 * 0.48 = $1,800
     const ibkrR = reinvest.find(d => d.name === 'Dividend Reinvest - IBKR');
     const schwabR = reinvest.find(d => d.name === 'Dividend Reinvest - Schwab');
     const iraR = reinvest.find(d => d.name === 'Dividend Reinvest - IRA');
 
-    expect(ibkrR?.value).toBeCloseTo(4_800, 0);
-    expect(schwabR?.value).toBeCloseTo(3_200, 0);
-    expect(iraR?.value).toBeCloseTo(2_000, 0);
+    expect(ibkrR?.value).toBeCloseTo(1_800, 0);
+    expect(schwabR?.value).toBeCloseTo(1_200, 0);
+    expect(iraR?.value).toBeCloseTo(750, 0);
 
     const totalReinvest = reinvest.reduce((s, d) => s + (d.value ?? 0), 0);
-    expect(totalReinvest).toBeCloseTo(10_000, 0);
+    expect(totalReinvest).toBeCloseTo(3_750, 0);
   });
 
   // ── test 4: zero account — filtered out ───────────────────────────────────
@@ -821,10 +825,10 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
     const ibkrAcc1 = result[1].accounts.find(a => a.name === 'IBKR');
     const ibkrAcc2 = result[2].accounts.find(a => a.name === 'IBKR');
 
-    // year 0 snapshot is after reinvest of that year's dividend (block runs every year ≥ currentYear)
-    expect(ibkrAcc0?.value).toBeCloseTo(112_000, -2); // initial $100K + $12K yr0 reinvest
-    expect(ibkrAcc1?.value).toBeCloseTo(124_000, -2); // +$12K yr1 reinvest
-    expect(ibkrAcc2?.value).toBeCloseTo(136_000, -2); // +$12K yr2 reinvest
+    // year 0 snapshot is after reinvest of that year's dividend (block is executed before accounts grow)
+    expect(ibkrAcc0?.value).toBeCloseTo(109_000, -2); // initial $100K + $9K yr0 reinvest
+    expect(ibkrAcc1?.value).toBeCloseTo(118_000, -2); // +$9K yr1 reinvest
+    expect(ibkrAcc2?.value).toBeCloseTo(127_000, -2); // +$9K yr2 reinvest
   });
 
   // ── test 8: first year (current year) — dividends emitted in projection[0] ─
@@ -982,14 +986,14 @@ describe("dividendByAccount: per-account real dividends + reinvestment", () => {
       expect.objectContaining({ name: 'Dividend - IRA', value: 5_000 }),
     );
     expect(yr0.savings_details).toContainEqual(
-      expect.objectContaining({ name: 'Dividend Reinvest - IRA', value: 5_000 }),
+      expect.objectContaining({ name: 'Dividend Reinvest - IRA', value: 3_750 })
     );
 
     // Account balance grew by the reinvest amount (mapping worked end-to-end)
     const retireAcc0 = yr0.accounts.find(a => a.name === 'Retirement');
     const retireAcc1 = yr1.accounts.find(a => a.name === 'Retirement');
-    expect(retireAcc0?.value).toBeCloseTo(105_000, -2);
-    expect(retireAcc1?.value).toBeCloseTo(110_000, -2);
+    expect(retireAcc0?.value).toBeCloseTo(103_750, -2); // 100K + 3.75K net dividend
+    expect(retireAcc1?.value).toBeCloseTo(107_500, -2); // + 3.75K next year
   });
 
   // ── test 13: all-zero dividendByAccount falls through to legacy aggregate ──

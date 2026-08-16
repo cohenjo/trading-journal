@@ -22,6 +22,8 @@ export interface OptionsIncomeProjectionPoint {
 export interface BondIncomePoint {
   year: number;
   amount: number;
+  coupon?: number;
+  principal?: number;
 }
 
 /**
@@ -726,6 +728,8 @@ class Accounts {
         let grossAmount = amount;
         let accountTax = new Decimal(0);
 
+        let effRate = 0;
+
         if (account.type.trim() === 'RSU') {
           let salePrice = new Decimal(account.current_price || 0);
           if (salePrice.gt(0) && currentYear) {
@@ -734,25 +738,35 @@ class Accounts {
             salePrice = salePrice.mul(new Decimal(1).plus(account.growth.div(100)).pow(yearsPassed));
           }
 
-          let effRate = 0;
           if (currentYear) {
             effRate = calculateRSUWithdrawalEffectiveTaxRate(
               amount.toNumber(), account.rsu_grants || [], salePrice.toNumber(), currentYear, baseAnnualIncome.toNumber()
             );
           }
+        } else if (account.type.trim() === 'Broker' || account.type.trim() === 'Taxable') {
+          // Option B: 50% capital gains at 25% tax rate
+          effRate = 0.125;
+        }
 
-          if (effRate > 0) {
-            grossAmount = amount.div(1 - effRate);
-            if (grossAmount.gt(allowed)) {
-              grossAmount = allowed;
+        if (effRate > 0) {
+          grossAmount = amount.div(1 - effRate);
+          if (grossAmount.gt(allowed)) {
+            grossAmount = allowed;
+            if (account.type.trim() === 'RSU' && currentYear) {
+              let salePrice = new Decimal(account.current_price || 0);
+              if (salePrice.gt(0)) {
+                const currentSimulationYear = new Date().getFullYear();
+                const yearsPassed = currentYear - currentSimulationYear;
+                salePrice = salePrice.mul(new Decimal(1).plus(account.growth.div(100)).pow(yearsPassed));
+              }
               effRate = calculateRSUWithdrawalEffectiveTaxRate(
                 grossAmount.toNumber(), account.rsu_grants || [], salePrice.toNumber(), currentYear, baseAnnualIncome.toNumber()
               );
-              accountTax = grossAmount.mul(effRate);
-              amount = grossAmount.minus(accountTax);
-            } else {
-              accountTax = grossAmount.minus(amount);
             }
+            accountTax = grossAmount.mul(effRate);
+            amount = grossAmount.minus(accountTax);
+          } else {
+            accountTax = grossAmount.minus(amount);
           }
         }
 
@@ -900,8 +914,8 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
 
   const dividendAnnualTotal = planInput.dividendTotal?.annualTotal ?? 0;
 
-  const bondMap = new Map<number, number>(
-    (planInput.bondProjection ?? []).map(p => [p.year, p.amount]),
+  const bondMap = new Map<number, BondIncomePoint>(
+    (planInput.bondProjection ?? []).map(p => [p.year, p]),
   );
 
   const mappedAccountIds = new Set<string>();
@@ -1083,10 +1097,16 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
         if (d.amount.gt(0)) {
           grossIncome = grossIncome.plus(d.amount);
           taxableIncome = taxableIncome.plus(d.amount);
+
+          const tax = d.amount.mul(0.25);
+          taxPaid = taxPaid.plus(tax);
+
           incomeDetails.push({
             name: `Dividend - ${d.label}`,
             type: 'dividends',
             value: roundMoney(d.amount),
+            gross: roundMoney(d.amount),
+            tax: roundMoney(tax),
           });
         }
       }
@@ -1096,7 +1116,17 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       if (dividendIncome.gt(0)) {
         grossIncome = grossIncome.plus(dividendIncome);
         taxableIncome = taxableIncome.plus(dividendIncome);
-        incomeDetails.push({ name: 'Dividend Income', type: 'dividends', value: roundMoney(dividendIncome) });
+
+        const tax = dividendIncome.mul(0.25);
+        taxPaid = taxPaid.plus(tax);
+
+        incomeDetails.push({
+          name: 'Dividend Income',
+          type: 'dividends',
+          value: roundMoney(dividendIncome),
+          gross: roundMoney(dividendIncome),
+          tax: roundMoney(tax),
+        });
       }
     }
     // Legacy aggregate dividend also contributes to total_dividend_income tracker (mirrors per-account behavior).
@@ -1105,11 +1135,25 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       : new Decimal(0);
 
     // Virtual bond ladder income — per-year coupon + principal amounts (#441)
-    const bondIncome = new Decimal(bondMap.get(year) ?? 0);
+    const bondData = bondMap.get(year);
+    const bondIncome = new Decimal(bondData?.amount ?? 0);
     if (bondIncome.gt(0)) {
       grossIncome = grossIncome.plus(bondIncome);
       taxableIncome = taxableIncome.plus(bondIncome);
-      incomeDetails.push({ name: 'Bond Ladder Income', type: 'bonds', value: roundMoney(bondIncome) });
+
+      let tax = new Decimal(0);
+      if (bondData?.coupon && bondData.coupon > 0) {
+        tax = new Decimal(bondData.coupon).mul(0.25);
+        taxPaid = taxPaid.plus(tax);
+      }
+
+      incomeDetails.push({
+        name: 'Bond Ladder Income',
+        type: 'bonds',
+        value: roundMoney(bondIncome),
+        gross: roundMoney(bondIncome),
+        tax: tax.gt(0) ? roundMoney(tax) : undefined,
+      });
     }
 
     const netFlow = grossIncome.minus(taxPaid).minus(expenses);
@@ -1123,11 +1167,12 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
     let adjustedNetFlow = netFlow;
 
     if (planInput.dividendByAccount !== undefined && totalRealDividendsAnnual.gt(0)) {
-      const netFlowWithoutDividends = netFlow.minus(totalRealDividendsAnnual);
+      const netDividendsAnnual = totalRealDividendsAnnual.mul(0.75);
+      const netFlowWithoutDividends = netFlow.minus(netDividendsAnnual);
       let reinvestable: Decimal;
       if (netFlowWithoutDividends.gte(0)) {
-        // Surplus even without dividends — full dividend amount reinvestable
-        reinvestable = totalRealDividendsAnnual;
+        // Surplus even without dividends — full net dividend amount reinvestable
+        reinvestable = netDividendsAnnual;
       } else if (netFlow.gt(0)) {
         // Dividends partially cover a deficit — residual after coverage is reinvestable
         reinvestable = netFlow;
@@ -1139,7 +1184,8 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       let totalReinvested = new Decimal(0);
       for (const d of perAccountDividends) {
         if (d.amount.lte(0) || reinvestable.lte(0)) continue;
-        const reinvestAmount = reinvestable.mul(d.amount.div(totalRealDividendsAnnual));
+        const netDAmount = d.amount.mul(0.75);
+        const reinvestAmount = reinvestable.mul(netDAmount.div(netDividendsAnnual));
         if (reinvestAmount.gt(0)) {
           reinvestDetails.push({
             name: `Dividend Reinvest - ${d.label}`,

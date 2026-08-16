@@ -710,6 +710,8 @@ class AccountManager:
                     gross_withdraw_amt = withdraw_amt
                     tax_withheld = 0.0
 
+                    eff_rate = 0.0
+
                     if acc_type == "RSU":
                         # If current_price > 0, estimate sale price by growing it
                         base_price = acc.get("current_price", 0.0)
@@ -720,7 +722,6 @@ class AccountManager:
                             sale_price = base_price * ((1 + growth_rate / 100.0) ** years_passed)
 
                         rsu_grants = acc.get("rsu_grants", [])
-                        eff_rate = 0.0
 
                         if current_year is not None:
                             # Assume a small base withdrawal if needed, but calculating on withdraw_amt works as a baseline
@@ -732,21 +733,25 @@ class AccountManager:
                             eff_rate = calculate_rsu_withdrawal_effective_tax_rate(
                                 withdraw_amt, rsu_grants, sale_price, current_year, base_annual_income
                             )
+                    elif acc_type in ["Broker", "Taxable"]:
+                        # Option B: 50% capital gains at 25% tax rate = 12.5% effective tax rate
+                        eff_rate = 0.125
 
-                        if eff_rate > 0:
-                            gross_withdraw_amt = withdraw_amt / (1 - eff_rate)
-                            # Re-check allowed_amount with gross
-                            if gross_withdraw_amt > allowed_amount:
-                                # We are capped by the account value
-                                gross_withdraw_amt = allowed_amount
-                                # Recalculate eff_rate on the capped gross
+                    if eff_rate > 0:
+                        gross_withdraw_amt = withdraw_amt / (1 - eff_rate)
+                        # Re-check allowed_amount with gross
+                        if gross_withdraw_amt > allowed_amount:
+                            # We are capped by the account value
+                            gross_withdraw_amt = allowed_amount
+                            # Recalculate eff_rate on the capped gross
+                            if acc_type == "RSU":
                                 eff_rate = calculate_rsu_withdrawal_effective_tax_rate(
                                     gross_withdraw_amt, rsu_grants, sale_price, current_year, base_annual_income
                                 )
-                                tax_withheld = gross_withdraw_amt * eff_rate
-                                withdraw_amt = gross_withdraw_amt - tax_withheld
-                            else:
-                                tax_withheld = gross_withdraw_amt - withdraw_amt
+                            tax_withheld = gross_withdraw_amt * eff_rate
+                            withdraw_amt = gross_withdraw_amt - tax_withheld
+                        else:
+                            tax_withheld = gross_withdraw_amt - withdraw_amt
 
                     acc["value"] -= gross_withdraw_amt
                     deficit -= withdraw_amt

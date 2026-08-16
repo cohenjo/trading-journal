@@ -43,9 +43,11 @@ export default function CashFlowPage() {
             // Bond ladder: income_series is per-year { date: "YYYY-01-01", value: number }
             if (bondData.ok && bondData.data) {
                 const bondPoints: BondIncomePoint[] = bondData.data.income_series.map(
-                    (pt: { date: string; value: number }) => ({
+                    (pt: { date: string; value: number; coupon?: number; principal?: number }) => ({
                         year: new Date(pt.date).getUTCFullYear(),
                         amount: pt.value,
+                        coupon: pt.coupon,
+                        principal: pt.principal,
                     }),
                 );
                 setBondProjection(bondPoints);

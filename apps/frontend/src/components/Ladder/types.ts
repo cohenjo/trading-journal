@@ -22,6 +22,8 @@ export type RungData = {
 export type IncomePoint = {
   date: string; // ISO date
   value: number;
+  coupon?: number;
+  principal?: number;
 };
 
 export type DistributionRow = {

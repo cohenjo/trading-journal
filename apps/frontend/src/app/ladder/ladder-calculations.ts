@@ -142,16 +142,24 @@ export function buildIncome(
     } satisfies DistributionRow;
   }).sort((a, b) => a.date.localeCompare(b.date));
 
-  const byYear = new Map<number, number>();
+  const byYear = new Map<number, { value: number; coupon: number; principal: number }>();
   for (const cashflow of cashflows) {
     const year = parseIsoDate(cashflow.date).getUTCFullYear();
     const amountInILS = convertCurrency(cashflow.amount, cashflow.currency, 'ILS');
-    byYear.set(year, (byYear.get(year) ?? 0) + amountInILS);
+
+    const existing = byYear.get(year) ?? { value: 0, coupon: 0, principal: 0 };
+    existing.value += amountInILS;
+    if (cashflow.type === 'COUPON') {
+      existing.coupon += amountInILS;
+    } else {
+      existing.principal += amountInILS;
+    }
+    byYear.set(year, existing);
   }
 
   const income_series = [...byYear.entries()]
     .sort(([left], [right]) => left - right)
-    .map(([year, value]) => ({ date: `${year}-01-01`, value }));
+    .map(([year, data]) => ({ date: `${year}-01-01`, value: data.value, coupon: data.coupon, principal: data.principal }));
 
   return { income_series, distributions };
 }
