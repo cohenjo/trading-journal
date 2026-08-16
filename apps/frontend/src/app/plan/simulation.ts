@@ -428,7 +428,7 @@ export function loadAccounts(plan: PlanData, finances: PlanSimulationInput['fina
       id: typeof financeItem.id === 'string' ? financeItem.id : undefined,
       owner: stringValue(financeItem.owner, 'You'),
       name,
-      value: convert(decimalValue(financeItem.value), currency, mainCurrency),
+      value: convert(decimalValue(financeItem.value), itemCurrency, mainCurrency),
       type: stringValue(merged.type, 'Taxable'),
       growth: decimalValue(merged.growth_rate ?? config?.growth_rate, 5),
       yieldRate: decimalValue(merged.dividend_yield, 0),
@@ -819,7 +819,7 @@ function loadRealAssets(plan: PlanData, finances: PlanSimulationInput['finances'
     if (['Real Estate', 'Vehicle', 'Asset', 'Assets'].includes(category)) {
       const config = findItemConfig(planItems, name, 'Asset');
       const currency = stringValue(config?.currency, itemCurrency);
-      assets.push({ name, value: convert(decimalValue(financeItem.value), currency, mainCurrency), growth: decimalValue(config?.growth_rate, 0), depreciation: decimalValue(config?.depreciation_rate, 0), loan_balance: new Decimal(0) });
+      assets.push({ name, value: convert(decimalValue(financeItem.value), itemCurrency, mainCurrency), growth: decimalValue(config?.growth_rate, 0), depreciation: decimalValue(config?.depreciation_rate, 0), loan_balance: new Decimal(0) });
     } else if (['Debt', 'Liability', 'Liabilities'].includes(category)) {
       cashDiff = cashDiff.minus(convert(decimalValue(financeItem.value), itemCurrency, mainCurrency));
     }

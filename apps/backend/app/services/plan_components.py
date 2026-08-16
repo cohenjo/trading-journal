@@ -335,7 +335,7 @@ class AccountManager:
                             "id": f_item.get("id"),
                             "owner": f_item.get("owner", "You"),
                             "name": name,
-                            "value": AccountManager._convert(val, currency, main_currency),
+                            "value": AccountManager._convert(val, item_currency, main_currency),
                             "type": merged_settings.get("type", "Taxable"),
                             "growth": PlanInterfaces._safe_float(
                                 merged_settings.get("growth_rate", config.get("growth_rate", 5.0))
@@ -814,9 +814,8 @@ class RealAssetManager:
 
                 if cat in ["Real Estate", "Vehicle", "Asset", "Assets"]:
                     config = find_item_config(name, "Asset") or {}
-                    c_currency = config.get("currency", item_currency)
                     c_val = PlanInterfaces._safe_float(f_item.get("value", 0))
-                    val_conv = PlanInterfaces.convert_currency(c_val, c_currency, main_currency)
+                    val_conv = PlanInterfaces.convert_currency(c_val, item_currency, main_currency)
                     real_assets.append(
                         {
                             "name": name,
