@@ -2,6 +2,7 @@ import Decimal from 'decimal.js';
 
 import type { PlanData, PlanItem, PlanMilestone } from '@/components/Plan/types';
 import type { FinanceSnapshot } from '../finances/actions';
+import { calculateRSUWithdrawalEffectiveTaxRate } from '../../lib/tax';
 
 export interface OptionsIncomeProjectionPoint {
   year: number;
@@ -692,15 +693,17 @@ class Accounts {
     return { unallocatedCash: cash, details: savings };
   }
 
-  processDeficit(deficit: Decimal, unallocatedCash: Decimal): { unallocatedCash: Decimal; withdrawals: Decimal; details: PlanSimulationDetail[] } {
-    const withdrawals = deficit;
+  processDeficit(deficit: Decimal, unallocatedCash: Decimal, currentYear?: number, baseAnnualIncome: Decimal = new Decimal(0)): { unallocatedCash: Decimal; withdrawals: Decimal; details: PlanSimulationDetail[]; taxWithheld: Decimal } {
+    let withdrawals = new Decimal(0);
     const details: PlanSimulationDetail[] = [];
+    let taxWithheld = new Decimal(0);
     let remaining = deficit;
     let cash = unallocatedCash;
 
     if (cash.gte(remaining)) {
       details.push({ name: 'Withdrawal: Unallocated Cash', type: 'Portfolio Withdrawal', value: roundMoney(remaining) });
-      return { unallocatedCash: cash.minus(remaining), withdrawals, details };
+      withdrawals = withdrawals.plus(remaining);
+      return { unallocatedCash: cash.minus(remaining), withdrawals, details, taxWithheld };
     }
 
     if (cash.gt(0)) {
@@ -718,17 +721,56 @@ class Accounts {
       if (account.max_withdrawal_cap) allowed = Decimal.min(allowed, account.max_withdrawal_cap);
       if (account.max_withdrawal_rate) allowed = Decimal.min(allowed, account.value.mul(account.max_withdrawal_rate.div(100)));
       if (account.type.trim() === 'RSU') allowed = Decimal.min(allowed, Decimal.max(0, rsuLimit.minus(rsuWithdrawn)));
-      const amount = Decimal.min(remaining, allowed);
+      let amount = Decimal.min(remaining, allowed);
       if (amount.gt(0)) {
-        account.value = account.value.minus(amount);
+        let grossAmount = amount;
+        let accountTax = new Decimal(0);
+
+        if (account.type.trim() === 'RSU') {
+          let salePrice = new Decimal(account.current_price || 0);
+          if (salePrice.gt(0) && currentYear) {
+            const currentSimulationYear = new Date().getFullYear();
+            const yearsPassed = currentYear - currentSimulationYear;
+            salePrice = salePrice.mul(new Decimal(1).plus(account.growth.div(100)).pow(yearsPassed));
+          }
+
+          let effRate = 0;
+          if (currentYear) {
+            effRate = calculateRSUWithdrawalEffectiveTaxRate(
+              amount.toNumber(), account.rsu_grants || [], salePrice.toNumber(), currentYear, baseAnnualIncome.toNumber()
+            );
+          }
+
+          if (effRate > 0) {
+            grossAmount = amount.div(1 - effRate);
+            if (grossAmount.gt(allowed)) {
+              grossAmount = allowed;
+              effRate = calculateRSUWithdrawalEffectiveTaxRate(
+                grossAmount.toNumber(), account.rsu_grants || [], salePrice.toNumber(), currentYear, baseAnnualIncome.toNumber()
+              );
+              accountTax = grossAmount.mul(effRate);
+              amount = grossAmount.minus(accountTax);
+            } else {
+              accountTax = grossAmount.minus(amount);
+            }
+          }
+        }
+
+        account.value = account.value.minus(grossAmount);
         remaining = remaining.minus(amount);
-        if (account.type.trim() === 'RSU') rsuWithdrawn = rsuWithdrawn.plus(amount);
-        details.push({ name: `Withdrawal: ${account.name}`, type: 'Portfolio Withdrawal', value: roundMoney(amount) });
+        withdrawals = withdrawals.plus(grossAmount);
+        taxWithheld = taxWithheld.plus(accountTax);
+
+        if (account.type.trim() === 'RSU') rsuWithdrawn = rsuWithdrawn.plus(grossAmount);
+        details.push({ name: `Withdrawal: ${account.name}`, type: 'Portfolio Withdrawal', value: roundMoney(grossAmount) });
       }
     }
 
-    if (remaining.gt(0)) cash = cash.minus(remaining);
-    return { unallocatedCash: cash, withdrawals, details };
+    if (remaining.gt(0)) {
+      cash = cash.minus(remaining);
+      withdrawals = withdrawals.plus(remaining);
+    }
+    return { unallocatedCash: cash, withdrawals, details, taxWithheld };
   }
 
   liquidValue(): Decimal {
@@ -1111,11 +1153,15 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
       unallocatedCash = saved.unallocatedCash;
       savingsDetails = [...reinvestDetails, ...saved.details];
     } else {
-      const withdrawn = accountManager.processDeficit(adjustedNetFlow.abs(), unallocatedCash);
+      const withdrawn = accountManager.processDeficit(adjustedNetFlow.abs(), unallocatedCash, year, taxableIncome);
       unallocatedCash = withdrawn.unallocatedCash;
       withdrawals = withdrawn.withdrawals;
       withdrawalDetails = withdrawn.details;
       savingsDetails = reinvestDetails;
+      if (withdrawn.taxWithheld.gt(0)) {
+        taxPaid = taxPaid.plus(withdrawn.taxWithheld);
+        // Note: gross withdrawal represents income vs cap gains, but the tax is exact.
+      }
     }
 
     const liquidAssets = realAssetManager.liquidValue(planItems);

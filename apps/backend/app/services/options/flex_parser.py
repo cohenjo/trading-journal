@@ -390,7 +390,7 @@ def parse_flex_files(paths: Iterable[Path], account_id: str | None = None) -> Fl
                     stk = parse_stock_open_position(attrs, statement_dates[1])
                     if stk is not None:
                         stock_positions.append(stk)
-                elif attrs.get("assetCategory") == "BOND":
+                elif attrs.get("assetCategory") in ("BOND", "BILL"):
                     bond = parse_bond_open_position(attrs, statement_dates[1])
                     if bond is not None:
                         bond_positions.append(bond)

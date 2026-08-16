@@ -26,6 +26,8 @@ services:
       # processed/ and errors/.  Host path is relative to repo root.
       # Override the container-side path via CREDIT_CARD_INBOX_DIR if needed.
       - ./reports/credit-card:/app/reports/credit-card
+      # Mount the backend code so we don't have to rebuild the image
+      - ./apps/backend:/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-m", "app.worker.healthcheck"]

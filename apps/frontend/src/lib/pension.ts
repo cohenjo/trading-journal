@@ -1,3 +1,5 @@
+import { INFLATION_RATE, calculateMarginalTax } from './tax';
+
 export interface PensionProjectionPoint {
   year: number;
   balance: number;
@@ -10,40 +12,17 @@ export function calculateIsraeliPensionTax(annualGross: number, currentYear: num
   if (annualGross <= 0) return 0;
   const monthlyGross = annualGross / 12;
 
-  const INFLATION_RATE = 1.015;
   const yearsFrom2026 = Math.max(0, currentYear - 2026);
   const inflationFactor = Math.pow(INFLATION_RATE, yearsFrom2026);
 
-  const baseBrackets = [
-    { limit: 7010, rate: 0.10 },
-    { limit: 10060, rate: 0.14 },
-    { limit: 16150, rate: 0.20 },
-    { limit: 22440, rate: 0.31 },
-    { limit: 46690, rate: 0.35 },
-    { limit: 60000, rate: 0.47 },
-    { limit: Infinity, rate: 0.50 }
-  ];
-
-  const baseCreditPoint = 242;
-  const creditPointsAmount = 2.25 * baseCreditPoint * inflationFactor;
   const kibuaZchuyotBase = 5422;
   const kibuaZchuyot = isAge67 ? kibuaZchuyotBase * inflationFactor : 0;
 
   // Kitzba Mukeret (15%) is tax exempt
   const taxableIncome = Math.max(0, monthlyGross * 0.85 - kibuaZchuyot);
-  let tax = 0;
-  let previousLimit = 0;
 
-  for (const bracket of baseBrackets) {
-    const inflatedLimit = bracket.limit * inflationFactor;
-    if (taxableIncome > previousLimit) {
-      const taxableInBracket = Math.min(taxableIncome, inflatedLimit) - previousLimit;
-      tax += taxableInBracket * bracket.rate;
-    }
-    previousLimit = inflatedLimit;
-  }
-
-  const monthlyTax = Math.max(0, tax - creditPointsAmount);
+  // Pension calculation assumes this is the only income, so it gets the credit points
+  const monthlyTax = calculateMarginalTax(taxableIncome, currentYear, true);
   return monthlyTax * 12;
 }
 

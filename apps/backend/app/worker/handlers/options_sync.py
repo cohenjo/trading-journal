@@ -397,18 +397,16 @@ def _sync_bond_positions(
                 delete from public.bond_holdings
                  where household_id = :household_id
                    and account_id   = :account_id_str
-                   and as_of_date   = :as_of_date
                    and source       = 'flex'
                 """
             ),
             {
                 "household_id": household_id,
                 "account_id_str": parsed_account_id,
-                "as_of_date": as_of_date_str,
             },
         )
         for row in rows:
-            row_id = f"flex_{parsed_account_id}_{row.con_id}_{as_of_date_str}"
+            row_id = f"flex_{parsed_account_id}_{row.con_id}"
             session.execute(
                 text(
                     """

@@ -1,4 +1,5 @@
 import { PlanData, PlanItem } from './types';
+import { calculateRSUWithdrawalEffectiveTaxRate } from '../../lib/tax';
 
 export interface ProjectionPoint {
     time: string;
@@ -572,12 +573,38 @@ export const calculateProjection = (
                 for (const acc of sortedAccounts) {
                     if (deficit <= 0) break;
 
-                    if (acc.value >= deficit) {
-                        acc.value -= deficit;
-                        deficit = 0;
-                    } else {
-                        deficit -= acc.value;
-                        acc.value = 0;
+                    let allowed = acc.value;
+                    let amount = Math.min(deficit, allowed);
+
+                    if (amount > 0) {
+                        let grossAmount = amount;
+                        if (acc.account_settings?.type === 'RSU') {
+                            let salePrice = acc.account_settings.current_price || 0;
+                            if (salePrice > 0) {
+                                const currentSimulationYear = new Date().getFullYear();
+                                const yearsPassed = year - currentSimulationYear;
+                                salePrice = salePrice * Math.pow(1 + (acc.growth_rate / 100), yearsPassed);
+                            }
+
+                            let effRate = calculateRSUWithdrawalEffectiveTaxRate(
+                                amount, acc.account_settings.rsu_grants || [], salePrice, year, yearIncome
+                            );
+
+                            if (effRate > 0) {
+                                grossAmount = amount / (1 - effRate);
+                                if (grossAmount > allowed) {
+                                    grossAmount = allowed;
+                                    effRate = calculateRSUWithdrawalEffectiveTaxRate(
+                                        grossAmount, acc.account_settings.rsu_grants || [], salePrice, year, yearIncome
+                                    );
+                                    amount = grossAmount * (1 - effRate);
+                                }
+                            }
+                        }
+
+                        acc.value -= grossAmount;
+                        deficit -= amount;
+                        // Note: PlanEngine currently doesn't track taxPaid strictly, but this correctly depletes the RSU account.
                     }
                 }
 
