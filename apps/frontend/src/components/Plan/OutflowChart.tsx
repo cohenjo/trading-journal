@@ -83,7 +83,7 @@ export const OutflowChart: React.FC<Props> = ({ projection }) => {
                         stroke="#94a3b8"
                         tick={{ fill: '#94a3b8', fontSize: 12 }}
                         tickLine={{ stroke: '#475569' }}
-                        tickFormatter={(val) => \`\${(val / 1000).toFixed(0)}k\`}
+                        tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`}
                     />
                     <Tooltip
                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
