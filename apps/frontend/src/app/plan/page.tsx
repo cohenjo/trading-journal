@@ -40,18 +40,6 @@ export default function PlanPage() {
             setFinances(financeData);
             setOptionsProjection(optionsData.projections);
 
-            let pensionData: Record<string, PensionProjectionPoint[]> = {};
-            if (planData) {
-                // Fetch pension projection based on loaded plan and finances
-                const { getPensionIncomeEstimation } = await import('./actions');
-                pensionData = await getPensionIncomeEstimation({
-                    plan: planData.data,
-                    finances: financeData,
-                    settings: settings as unknown as Record<string, unknown>
-                });
-            }
-            setPensionProjections(pensionData);
-
             // Wire dividend summary: total_forward_annual is already USD, major units.
             // Display as constant annual income across all plan years.
             setDividendTotal({ annualTotal: dividendData.total_forward_annual });
@@ -120,7 +108,15 @@ export default function PlanPage() {
     useEffect(() => {
         if (!plan || !plan.data) return;
 
-        const timer = setTimeout(() => {
+        const timer = setTimeout(async () => {
+            const { getPensionIncomeEstimation } = await import('./actions');
+            const newPensionProjections = await getPensionIncomeEstimation({
+                plan: plan.data,
+                finances,
+                settings: settings as unknown as Record<string, unknown>
+            });
+            setPensionProjections(newPensionProjections);
+
             runPlanSimulation({
                 plan: plan.data,
                 finances,
@@ -129,7 +125,7 @@ export default function PlanPage() {
                 dividendTotal,
                 dividendByAccount,
                 bondProjection,
-                pensionProjections
+                pensionProjections: newPensionProjections
             })
                 .then(data => {
                     const formatted = data.map(p => ({
@@ -150,7 +146,7 @@ export default function PlanPage() {
         }, 500); // 500ms debounce
 
         return () => clearTimeout(timer);
-    }, [plan, finances, settings, optionsProjection, dividendTotal, dividendByAccount, bondProjection, pensionProjections]); // Re-run when any input changes
+    }, [plan, finances, settings, optionsProjection, dividendTotal, dividendByAccount, bondProjection]); // Re-run when any input changes
 
     // Calculate Markers
     const markers = useMemo(() => {
