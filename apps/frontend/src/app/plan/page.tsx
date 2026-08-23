@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { PlanChart } from '@/components/Plan/PlanChart';
 import { IncomeChart } from '@/components/Plan/IncomeChart';
+import { OutflowChart } from '@/components/Plan/OutflowChart';
 import { PlanEditor } from '@/components/Plan/PlanEditor';
 import { PlanDetailsPane } from '@/components/Plan/PlanDetailsPane';
 import { Plan, PlanData } from '@/components/Plan/types';
@@ -327,6 +328,12 @@ export default function PlanPage() {
                         <div className="mt-8 pt-8 border-t border-slate-800">
                             <h3 className="text-lg font-semibold mb-4 text-slate-200">Income & Withdrawals Projection</h3>
                             <IncomeChart projection={projection} />
+                        </div>
+
+                        {/* Outflow Chart Section */}
+                        <div className="mt-8 pt-8 border-t border-slate-800">
+                            <h3 className="text-lg font-semibold mb-4 text-slate-200">Outflows & Expenses Projection</h3>
+                            <OutflowChart projection={projection} />
                         </div>
                     </div>
 
