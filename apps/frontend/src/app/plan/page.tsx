@@ -301,7 +301,7 @@ export default function PlanPage() {
                             Financial Plan
                         </h1>
                         <p className="text-slate-400 mt-2">
-                            Projection based on current net worth of {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(finances?.net_worth || 0)}
+                            Projection based on current net worth of {new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 }).format(finances?.net_worth || 0)}
                         </p>
                     </header>
 

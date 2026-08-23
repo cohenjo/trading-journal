@@ -69,7 +69,7 @@ export const IncomeChart: React.FC<Props> = ({ projection }) => {
                     <Tooltip
                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
                         itemStyle={{ color: '#f8fafc' }}
-                        formatter={(value: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value)}
+                        formatter={(value: number) => new Intl.NumberFormat('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 }).format(value)}
                         labelStyle={{ color: '#94a3b8', marginBottom: '8px' }}
                     />
                     <Legend
