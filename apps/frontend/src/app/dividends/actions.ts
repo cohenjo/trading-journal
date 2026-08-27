@@ -1038,7 +1038,7 @@ export async function getDividendPositions(
       .from('stock_positions')
       .select('ticker, dividend_yield')
       .eq('account_id', config.id)
-      .gte('as_of_date', cutoffDate)
+      .or(`source.in.(manual,csv),source.is.null,and(source.eq.flex,as_of_date.gte.${cutoffDate})`)
       .not('dividend_yield', 'is', null)
   ]);
 

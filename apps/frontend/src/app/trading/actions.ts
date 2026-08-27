@@ -486,7 +486,7 @@ export async function getStockPositions(accountId?: number | null): Promise<Stoc
   let query = supabase
     .from('stock_positions')
     .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, market_value_local, unrealized_pnl, currency, as_of_date, source')
-    .gte('as_of_date', cutoffDate)
+    .or(`source.in.(manual,csv),source.is.null,and(source.eq.flex,as_of_date.gte.${cutoffDate})`)
     .order('ticker', { ascending: true });
 
   if (accountId) query = query.eq('account_id', accountId);
