@@ -1015,6 +1015,10 @@ export async function getDividendPositions(
   // yieldDataResult fetches dividend_yield from stock_positions so that
   // Schwab/IRA positions with no payment history (CSV-imported, no Flex export)
   // are still surfaced via the Yahoo-enriched yield stored on each row.
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  const cutoffDate = fourteenDaysAgo.toISOString().split('T')[0];
+
   const [paymentsResult, accrualsResult, yieldDataResult] = await Promise.all([
     supabase
       .from('dividend_payments')
@@ -1023,19 +1027,19 @@ export async function getDividendPositions(
       .or(`ex_date.gte.${twoYearsStartStr},and(ex_date.is.null,report_date.gte.${twoYearsStartStr})`)
       .neq('type', 'Withholding Tax')
       .order('report_date', { ascending: false })
-      .limit(50000),
+      .limit(5000),
     supabase
       .from('dividend_accruals')
       .select('symbol, gross_rate, ex_date')
       .in('symbol', tickers)
       .order('ex_date', { ascending: false })
-      .limit(50000),
+      .limit(5000),
     supabase
       .from('stock_positions')
       .select('ticker, dividend_yield')
       .eq('account_id', config.id)
+      .gte('as_of_date', cutoffDate)
       .not('dividend_yield', 'is', null)
-      .limit(50000),
   ]);
 
   // Build per-ticker maps from payment rows.

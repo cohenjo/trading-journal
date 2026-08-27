@@ -479,11 +479,15 @@ export async function getStockPositions(accountId?: number | null): Promise<Stoc
 
   if (authError || !user) return [];
 
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  const cutoffDate = fourteenDaysAgo.toISOString().split('T')[0];
+
   let query = supabase
     .from('stock_positions')
     .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, market_value_local, unrealized_pnl, currency, as_of_date, source')
-    .order('ticker', { ascending: true })
-    .limit(50000);
+    .gte('as_of_date', cutoffDate)
+    .order('ticker', { ascending: true });
 
   if (accountId) query = query.eq('account_id', accountId);
 

@@ -42,7 +42,7 @@ interface Props {
  */
 export default function DividendPositionsTable({ rows }: Props) {
   const sorted = [...rows].sort(
-    (a, b) => (b.forward_dividend_annual ?? 0) - (a.forward_dividend_annual ?? 0),
+    (a, b) => a.ticker.localeCompare(b.ticker)
   );
 
   return (
