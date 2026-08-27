@@ -1022,17 +1022,20 @@ export async function getDividendPositions(
       .in('symbol', tickers)
       .or(`ex_date.gte.${twoYearsStartStr},and(ex_date.is.null,report_date.gte.${twoYearsStartStr})`)
       .neq('type', 'Withholding Tax')
-      .order('report_date', { ascending: false }),
+      .order('report_date', { ascending: false })
+      .limit(50000),
     supabase
       .from('dividend_accruals')
       .select('symbol, gross_rate, ex_date')
       .in('symbol', tickers)
-      .order('ex_date', { ascending: false }),
+      .order('ex_date', { ascending: false })
+      .limit(50000),
     supabase
       .from('stock_positions')
       .select('ticker, dividend_yield')
       .eq('account_id', config.id)
-      .not('dividend_yield', 'is', null),
+      .not('dividend_yield', 'is', null)
+      .limit(50000),
   ]);
 
   // Build per-ticker maps from payment rows.
@@ -1197,6 +1200,9 @@ export async function getDividendPositions(
       source: (hasTTM || hasAccrual) ? 'flex' : (hasYield ? 'csv' : null),
     });
   }
+
+  // Sort lexicographically A to Z
+  result.sort((a, b) => a.ticker.localeCompare(b.ticker));
 
   return result;
 }
