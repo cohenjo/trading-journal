@@ -74,7 +74,7 @@ describe("DividendPositionsTable", () => {
     expect(dashes.length).toBeGreaterThanOrEqual(2);
   });
 
-  it("sorts rows by forward_dividend_annual descending", () => {
+  it("sorts rows by ticker A-Z", () => {
     const rows = [
       makePosition({ ticker: "LOW", forward_dividend_annual: 100 }),
       makePosition({ ticker: "HIGH", forward_dividend_annual: 500 }),
@@ -85,17 +85,53 @@ describe("DividendPositionsTable", () => {
     const tickers = screen
       .getAllByRole("row")
       .slice(1) // skip header
-      .map((r) => r.cells[0]?.textContent ?? "");
+      .map((r) => r.cells[0]?.textContent?.trim() ?? "");
 
     expect(tickers[0]).toBe("HIGH");
-    expect(tickers[1]).toBe("MID");
-    expect(tickers[2]).toBe("LOW");
+    expect(tickers[1]).toBe("LOW");
+    expect(tickers[2]).toBe("MID");
   });
 
-  it("renders all 14 column headers", () => {
+  it("renders all 15 column headers including Health", () => {
     render(<DividendPositionsTable rows={[makePosition()]} />);
     const headers = screen.getAllByRole("columnheader");
-    expect(headers).toHaveLength(14);
+    expect(headers).toHaveLength(15);
+    expect(screen.getByRole("columnheader", { name: "Health" })).toBeInTheDocument();
+  });
+
+  it("renders rating badges and colors correctly", () => {
+    const rows = [
+      makePosition({ ticker: "GOOD_CO", dividend_rating: "good" }),
+      makePosition({ ticker: "OK_CO", dividend_rating: "ok" }),
+      makePosition({ ticker: "BAD_CO", dividend_rating: "bad" }),
+    ];
+    render(<DividendPositionsTable rows={rows} />);
+
+    expect(screen.getByText("Good")).toBeInTheDocument();
+    expect(screen.getByText("Watch")).toBeInTheDocument();
+    expect(screen.getByText("At Risk")).toBeInTheDocument();
+  });
+
+  it("filters rows using the health filter chips", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    const rows = [
+      makePosition({ ticker: "GOOD_CO", dividend_rating: "good" }),
+      makePosition({ ticker: "OK_CO", dividend_rating: "ok" }),
+      makePosition({ ticker: "BAD_CO", dividend_rating: "bad" }),
+    ];
+    render(<DividendPositionsTable rows={rows} />);
+
+    // Click Good filter
+    fireEvent.click(screen.getByTestId("filter-rating-good"));
+    expect(screen.getByTestId("dividend-row-GOOD_CO")).toBeInTheDocument();
+    expect(screen.queryByTestId("dividend-row-OK_CO")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("dividend-row-BAD_CO")).not.toBeInTheDocument();
+
+    // Click All filter
+    fireEvent.click(screen.getByTestId("filter-rating-all"));
+    expect(screen.getByTestId("dividend-row-GOOD_CO")).toBeInTheDocument();
+    expect(screen.getByTestId("dividend-row-OK_CO")).toBeInTheDocument();
+    expect(screen.getByTestId("dividend-row-BAD_CO")).toBeInTheDocument();
   });
 
   it("monetary values include $ prefix for USD positions via formatCurrency", () => {

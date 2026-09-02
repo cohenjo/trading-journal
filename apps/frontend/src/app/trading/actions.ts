@@ -356,6 +356,12 @@ export interface StockPosition {
   currency: string;
   as_of_date: string;
   source: 'flex' | 'manual';
+  dgr_3y?: number | null;
+  dgr_5y?: number | null;
+  revenue_growth?: number | null;
+  payout_ratio?: number | null;
+  dividend_rating?: 'good' | 'ok' | 'bad' | null;
+  dividend_rating_details?: Record<string, any> | null;
 }
 
 export interface CreateStockPositionPayload {
@@ -409,6 +415,12 @@ function coerceStockPosition(row: Record<string, unknown>): StockPosition {
     currency: String(row.currency ?? 'USD'),
     as_of_date: String(row.as_of_date ?? ''),
     source: row.source === 'manual' ? 'manual' : 'flex',
+    dgr_3y: row.dgr_3y != null ? coerceNumber(row.dgr_3y as number | string) : null,
+    dgr_5y: row.dgr_5y != null ? coerceNumber(row.dgr_5y as number | string) : null,
+    revenue_growth: row.revenue_growth != null ? coerceNumber(row.revenue_growth as number | string) : null,
+    payout_ratio: row.payout_ratio != null ? coerceNumber(row.payout_ratio as number | string) : null,
+    dividend_rating: (row.dividend_rating as 'good' | 'ok' | 'bad') ?? null,
+    dividend_rating_details: (row.dividend_rating_details as Record<string, any>) ?? null,
   };
 }
 
@@ -485,7 +497,7 @@ export async function getStockPositions(accountId?: number | null): Promise<Stoc
 
   let query = supabase
     .from('stock_positions')
-    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, market_value_local, unrealized_pnl, currency, as_of_date, source')
+    .select('id, account_id, ticker, description, sub_category, quantity, cost_basis, mark_price, market_value, market_value_local, unrealized_pnl, currency, as_of_date, source, dgr_3y, dgr_5y, revenue_growth, payout_ratio, dividend_rating, dividend_rating_details')
     .or(`source.in.(manual,csv),source.is.null,and(source.eq.flex,as_of_date.gte.${cutoffDate})`)
     .order('ticker', { ascending: true });
 

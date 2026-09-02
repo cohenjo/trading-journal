@@ -326,10 +326,16 @@ describe('getDividendPositions', () => {
     mockAuth();
 
     // JEPI: 100 shares, price=$57.50. TTM payments = $120 total → $1.20/share → 2.0870% yield
+    const now = new Date();
+    const dAgo = (days: number) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - days);
+      return d.toISOString().split('T')[0];
+    };
     const payments = [
-      { symbol: 'JEPI', amount: '40.00', ex_date: '2025-11-15', report_date: '2025-11-20', type: 'Dividends' },
-      { symbol: 'JEPI', amount: '40.00', ex_date: '2025-08-14', report_date: '2025-08-18', type: 'Dividends' },
-      { symbol: 'JEPI', amount: '40.00', ex_date: '2025-05-15', report_date: '2025-05-19', type: 'Dividends' },
+      { symbol: 'JEPI', amount: '40.00', ex_date: dAgo(60), report_date: dAgo(55), type: 'Dividends' },
+      { symbol: 'JEPI', amount: '40.00', ex_date: dAgo(150), report_date: dAgo(145), type: 'Dividends' },
+      { symbol: 'JEPI', amount: '40.00', ex_date: dAgo(240), report_date: dAgo(235), type: 'Dividends' },
     ];
 
     setupMocks(
@@ -413,11 +419,17 @@ describe('getDividendPositions', () => {
 
     // No accruals → forward_div_per_share = ttm_div_per_share (already annualised as 12-month sum)
     // All 4 payments must be within the TTM window (ex_date >= last-year)
+    const now = new Date();
+    const dAgo = (days: number) => {
+      const d = new Date(now);
+      d.setDate(d.getDate() - days);
+      return d.toISOString().split('T')[0];
+    };
     const payments = [
-      { symbol: 'JEPI', amount: '30.00', ex_date: '2025-11-15', report_date: '2025-11-20', type: 'Dividends' },
-      { symbol: 'JEPI', amount: '30.00', ex_date: '2025-08-14', report_date: '2025-08-18', type: 'Dividends' },
-      { symbol: 'JEPI', amount: '30.00', ex_date: '2026-02-14', report_date: '2026-02-18', type: 'Dividends' },
-      { symbol: 'JEPI', amount: '30.00', ex_date: '2025-05-15', report_date: '2025-05-19', type: 'Dividends' },
+      { symbol: 'JEPI', amount: '30.00', ex_date: dAgo(60), report_date: dAgo(55), type: 'Dividends' },
+      { symbol: 'JEPI', amount: '30.00', ex_date: dAgo(150), report_date: dAgo(145), type: 'Dividends' },
+      { symbol: 'JEPI', amount: '30.00', ex_date: dAgo(240), report_date: dAgo(235), type: 'Dividends' },
+      { symbol: 'JEPI', amount: '30.00', ex_date: dAgo(330), report_date: dAgo(325), type: 'Dividends' },
     ];
 
     setupMocks(

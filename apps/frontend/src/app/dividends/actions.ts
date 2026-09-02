@@ -1202,6 +1202,12 @@ export async function getDividendPositions(
       last_payment_date: lastPayDateByTicker.get(ticker) ?? null,
       payment_frequency: freq,
       source: (hasTTM || hasAccrual) ? 'flex' : (hasYield ? 'csv' : null),
+      dgr_3y: pos.dgr_3y ?? null,
+      dgr_5y: pos.dgr_5y ?? null,
+      revenue_growth: pos.revenue_growth ?? null,
+      payout_ratio: pos.payout_ratio ?? null,
+      dividend_rating: pos.dividend_rating ?? null,
+      dividend_rating_details: pos.dividend_rating_details ?? null,
     });
   }
 

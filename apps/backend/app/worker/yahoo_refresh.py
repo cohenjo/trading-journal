@@ -21,9 +21,11 @@ TASE normalization note:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -149,11 +151,17 @@ def resolve_yahoo_ticker(
 
 
 def _fetch_yahoo_data(yahoo_ticker: str) -> dict[str, Any] | None:
-    """Fetch latest price and trailing dividend yield from Yahoo Finance.
+    """Fetch latest price, dividend yield, and dividend health metrics from Yahoo Finance.
 
     Returns a dict with keys:
         mark_price: Decimal  — latest close price
         dividend_yield: Decimal | None  — trailing 12m yield as decimal (0.05 for 5%)
+        dgr_3y: Decimal | None — 3-year compound annual dividend growth rate
+        dgr_5y: Decimal | None — 5-year compound annual dividend growth rate
+        revenue_growth: Decimal | None — YoY revenue growth as decimal
+        payout_ratio: Decimal | None — dividend payout ratio as decimal
+        dividend_rating: str | None — 'good' | 'ok' | 'bad'
+        dividend_rating_details: dict[str, Any] — rationale, metrics, and flags
 
     Returns None on any error (caller logs and skips).
     """
@@ -220,7 +228,106 @@ def _fetch_yahoo_data(yahoo_ticker: str) -> dict[str, Any] | None:
                     except (InvalidOperation, ValueError):
                         pass
 
-            return {"mark_price": mark_price, "dividend_yield": dividend_yield}
+            # --- Dividend Growth Rate (DGR 3Y & 5Y) ---
+            dgr_3y: Decimal | None = None
+            dgr_5y: Decimal | None = None
+            divs = tkr.dividends
+            if divs is not None and not divs.empty:
+                try:
+                    annual_divs = divs.groupby(divs.index.year).sum()
+                    current_year = datetime.now().year
+                    full_years = annual_divs[annual_divs.index < current_year]
+                    if len(full_years) >= 4 and full_years.iloc[-4] > 0 and full_years.iloc[-1] > 0:
+                        cagr3 = float((full_years.iloc[-1] / full_years.iloc[-4]) ** (1 / 3) - 1)
+                        dgr_3y = Decimal(str(round(cagr3, 4)))
+                    if len(full_years) >= 6 and full_years.iloc[-6] > 0 and full_years.iloc[-1] > 0:
+                        cagr5 = float((full_years.iloc[-1] / full_years.iloc[-6]) ** (1 / 5) - 1)
+                        dgr_5y = Decimal(str(round(cagr5, 4)))
+                except Exception as exc_dgr:
+                    logger.debug("DGR calculation error for %s: %s", yahoo_ticker, exc_dgr)
+
+            # --- Fundamentals: Revenue Growth & Payout Ratio ---
+            raw_rev = info.get("revenueGrowth")
+            revenue_growth: Decimal | None = None
+            if raw_rev is not None:
+                try:
+                    revenue_growth = Decimal(str(round(float(raw_rev), 4)))
+                except (InvalidOperation, ValueError):
+                    pass
+
+            raw_payout = info.get("payoutRatio")
+            payout_ratio: Decimal | None = None
+            if raw_payout is not None:
+                try:
+                    payout_ratio = Decimal(str(round(float(raw_payout), 4)))
+                except (InvalidOperation, ValueError):
+                    pass
+
+            # --- Health Evaluation & Traffic Light Rating ---
+            quote_type = info.get("quoteType", "EQUITY")
+            is_fund = quote_type in ("ETF", "MUTUALFUND")
+
+            dgr_pass = False
+            if dgr_3y is not None and dgr_5y is not None:
+                dgr_pass = (dgr_3y >= dgr_5y) and (dgr_3y >= 0)
+            elif dgr_3y is not None:
+                dgr_pass = dgr_3y >= 0
+
+            rev_pass = revenue_growth is not None and revenue_growth > 0
+
+            reasons: list[str] = []
+            if dgr_3y is not None and dgr_5y is not None:
+                cmp_sym = "≥" if dgr_3y >= dgr_5y else "<"
+                reasons.append(f"3Y DGR ({float(dgr_3y) * 100:.1f}%) {cmp_sym} 5Y DGR ({float(dgr_5y) * 100:.1f}%)")
+            elif dgr_3y is not None:
+                reasons.append(f"3Y DGR ({float(dgr_3y) * 100:.1f}%)")
+
+            if revenue_growth is not None:
+                rev_sign = "+" if revenue_growth > 0 else ""
+                reasons.append(f"Rev Growth ({rev_sign}{float(revenue_growth) * 100:.1f}% YoY)")
+            elif is_fund:
+                reasons.append("Fund / ETF")
+
+            if payout_ratio is not None:
+                reasons.append(f"Payout ({float(payout_ratio) * 100:.1f}%)")
+
+            if is_fund:
+                if dgr_3y is not None and dgr_3y >= 0:
+                    rating = "good"
+                elif dgr_3y is not None and dgr_3y < 0:
+                    rating = "bad"
+                else:
+                    rating = "ok"
+            else:
+                matches = (1 if dgr_pass else 0) + (1 if rev_pass else 0)
+                if matches == 2:
+                    rating = "good"
+                elif matches == 1:
+                    rating = "ok"
+                else:
+                    rating = "bad"
+
+            details = {
+                "quote_type": quote_type,
+                "dgr_3y": float(dgr_3y) if dgr_3y is not None else None,
+                "dgr_5y": float(dgr_5y) if dgr_5y is not None else None,
+                "dgr_pass": dgr_pass,
+                "revenue_growth": float(revenue_growth) if revenue_growth is not None else None,
+                "rev_pass": rev_pass,
+                "payout_ratio": float(payout_ratio) if payout_ratio is not None else None,
+                "reasons": reasons,
+            }
+
+            return {
+                "mark_price": mark_price,
+                "dividend_yield": dividend_yield,
+                "dgr_3y": dgr_3y,
+                "dgr_5y": dgr_5y,
+                "revenue_growth": revenue_growth,
+                "payout_ratio": payout_ratio,
+                "dividend_rating": rating,
+                "dividend_rating_details": details,
+            }
 
         except Exception as exc:  # noqa: BLE001
             is_rate_limit = "429" in str(exc) or "Too Many Requests" in str(exc)
@@ -282,9 +389,15 @@ def _upsert_position_price(
     mark_price: Decimal,
     dividend_yield: Decimal | None,
     market_value: Decimal,
+    dgr_3y: Decimal | None,
+    dgr_5y: Decimal | None,
+    revenue_growth: Decimal | None,
+    payout_ratio: Decimal | None,
+    dividend_rating: str | None,
+    dividend_rating_details: dict[str, Any] | None,
     is_tase: bool,
 ) -> None:
-    """Write refreshed market data back to the position row."""
+    """Write refreshed market data and dividend health metrics back to the position row."""
     params: dict[str, Any] = {
         "id": str(position_id),
         "yahoo_ticker": yahoo_ticker,
@@ -292,20 +405,32 @@ def _upsert_position_price(
         "dividend_yield": str(dividend_yield) if dividend_yield is not None else None,
         "market_value": str(market_value),
         "market_value_local": str(market_value),
+        "dgr_3y": str(dgr_3y) if dgr_3y is not None else None,
+        "dgr_5y": str(dgr_5y) if dgr_5y is not None else None,
+        "revenue_growth": str(revenue_growth) if revenue_growth is not None else None,
+        "payout_ratio": str(payout_ratio) if payout_ratio is not None else None,
+        "dividend_rating": dividend_rating,
+        "dividend_rating_details": json.dumps(dividend_rating_details) if dividend_rating_details is not None else None,
     }
     if is_tase:
         session.execute(
             text(
                 """
                 UPDATE stock_positions
-                SET yahoo_ticker      = :yahoo_ticker,
-                    mark_price        = :mark_price,
-                    dividend_yield    = :dividend_yield,
-                    market_value      = :market_value,
-                    market_value_local= :market_value_local,
-                    currency          = 'ILA',
-                    prices_refreshed_at = NOW(),
-                    updated_at        = NOW()
+                SET yahoo_ticker            = :yahoo_ticker,
+                    mark_price              = :mark_price,
+                    dividend_yield          = :dividend_yield,
+                    market_value            = :market_value,
+                    market_value_local      = :market_value_local,
+                    dgr_3y                  = :dgr_3y,
+                    dgr_5y                  = :dgr_5y,
+                    revenue_growth          = :revenue_growth,
+                    payout_ratio            = :payout_ratio,
+                    dividend_rating         = :dividend_rating,
+                    dividend_rating_details = CAST(:dividend_rating_details AS jsonb),
+                    currency                = 'ILA',
+                    prices_refreshed_at     = NOW(),
+                    updated_at              = NOW()
                 WHERE id = CAST(:id AS UUID)
                 """
             ),
@@ -316,13 +441,19 @@ def _upsert_position_price(
             text(
                 """
                 UPDATE stock_positions
-                SET yahoo_ticker      = :yahoo_ticker,
-                    mark_price        = :mark_price,
-                    dividend_yield    = :dividend_yield,
-                    market_value      = :market_value,
-                    market_value_local= :market_value_local,
-                    prices_refreshed_at = NOW(),
-                    updated_at        = NOW()
+                SET yahoo_ticker            = :yahoo_ticker,
+                    mark_price              = :mark_price,
+                    dividend_yield          = :dividend_yield,
+                    market_value            = :market_value,
+                    market_value_local      = :market_value_local,
+                    dgr_3y                  = :dgr_3y,
+                    dgr_5y                  = :dgr_5y,
+                    revenue_growth          = :revenue_growth,
+                    payout_ratio            = :payout_ratio,
+                    dividend_rating         = :dividend_rating,
+                    dividend_rating_details = CAST(:dividend_rating_details AS jsonb),
+                    prices_refreshed_at     = NOW(),
+                    updated_at              = NOW()
                 WHERE id = CAST(:id AS UUID)
                 """
             ),
@@ -354,6 +485,7 @@ def refresh_stock_positions() -> dict[str, Any]:
     refreshed = 0
     skipped = 0
     failed = 0
+    ticker_cache: dict[str, dict[str, Any] | None] = {}
 
     with Session(direct_engine) as session:
         for pos in positions:
@@ -362,7 +494,6 @@ def refresh_stock_positions() -> dict[str, Any]:
             currency: str = pos["currency"] or "USD"
             listing_exchange: str | None = pos["listing_exchange"]
             quantity: Decimal = Decimal(str(pos["quantity"] or 0))
-            old_price = pos["mark_price"]
 
             yahoo_ticker = resolve_yahoo_ticker(ticker, currency, listing_exchange, tase_map)
             if yahoo_ticker is None:
@@ -375,7 +506,13 @@ def refresh_stock_positions() -> dict[str, Any]:
             # mark_price is kept in GBp (native, matching broker imports).
             is_lse = yahoo_ticker.endswith(".L")
 
-            data = _fetch_yahoo_data(yahoo_ticker)
+            if yahoo_ticker in ticker_cache:
+                data = ticker_cache[yahoo_ticker]
+            else:
+                data = _fetch_yahoo_data(yahoo_ticker)
+                ticker_cache[yahoo_ticker] = data
+                time.sleep(_INTER_TICKER_DELAY_S)
+
             if data is None:
                 failed += 1
                 logger.error(
@@ -384,11 +521,17 @@ def refresh_stock_positions() -> dict[str, Any]:
                     yahoo_ticker,
                     pos_id,
                 )
-                time.sleep(_INTER_TICKER_DELAY_S)
                 continue
 
             mark_price: Decimal = data["mark_price"]
             dividend_yield: Decimal | None = data["dividend_yield"]
+            dgr_3y: Decimal | None = data.get("dgr_3y")
+            dgr_5y: Decimal | None = data.get("dgr_5y")
+            revenue_growth: Decimal | None = data.get("revenue_growth")
+            payout_ratio: Decimal | None = data.get("payout_ratio")
+            dividend_rating: str | None = data.get("dividend_rating")
+            dividend_rating_details: dict[str, Any] | None = data.get("dividend_rating_details")
+
             # TASE mark_price is in ILA (agorot = 1/100 ILS).
             # LSE mark_price is in GBp (pence = 1/100 GBP).
             # Divide by 100 so market_value is stored in the major currency unit.
@@ -405,18 +548,23 @@ def refresh_stock_positions() -> dict[str, Any]:
                     mark_price=mark_price,
                     dividend_yield=dividend_yield,
                     market_value=market_value,
+                    dgr_3y=dgr_3y,
+                    dgr_5y=dgr_5y,
+                    revenue_growth=revenue_growth,
+                    payout_ratio=payout_ratio,
+                    dividend_rating=dividend_rating,
+                    dividend_rating_details=dividend_rating_details,
                     is_tase=is_tase,
                 )
                 session.commit()
                 refreshed += 1
                 logger.info(
-                    "Yahoo refresh OK: ticker=%s yahoo=%s old_price=%s new_price=%s yield=%s market_value=%s",
+                    "Yahoo refresh OK: ticker=%s yahoo=%s price=%s yield=%s rating=%s",
                     ticker,
                     yahoo_ticker,
-                    old_price,
                     mark_price,
                     dividend_yield,
-                    market_value,
+                    dividend_rating,
                 )
             except Exception:  # noqa: BLE001
                 session.rollback()
@@ -427,8 +575,6 @@ def refresh_stock_positions() -> dict[str, Any]:
                     yahoo_ticker,
                     pos_id,
                 )
-
-            time.sleep(_INTER_TICKER_DELAY_S)
 
     summary = {"total": total, "refreshed": refreshed, "skipped": skipped, "failed": failed}
     logger.info("Yahoo price refresh complete: %s", summary)

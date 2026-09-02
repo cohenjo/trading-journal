@@ -44,6 +44,27 @@ export interface DividendPosition {
   last_payment_date: string | null; // ISO date of most recent report_date
   payment_frequency: PaymentFrequency;
   source: DividendDataSource;
+
+  // Health & Rating metrics (Yahoo Finance background worker)
+  dgr_3y?: number | null;
+  dgr_5y?: number | null;
+  revenue_growth?: number | null;
+  payout_ratio?: number | null;
+  dividend_rating?: DividendRating;
+  dividend_rating_details?: DividendRatingDetails | null;
+}
+
+export type DividendRating = 'good' | 'ok' | 'bad' | null;
+
+export interface DividendRatingDetails {
+  quote_type?: string | null;
+  dgr_3y?: number | null;
+  dgr_5y?: number | null;
+  dgr_pass?: boolean;
+  revenue_growth?: number | null;
+  rev_pass?: boolean;
+  payout_ratio?: number | null;
+  reasons?: string[];
 }
 
 /** Aggregate dividend summary across all accounts (for summary chart). */
