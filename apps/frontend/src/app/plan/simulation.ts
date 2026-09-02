@@ -1141,14 +1141,15 @@ export function calculatePlanSimulation(planInput: PlanSimulationInput): PlanSim
 
     // Virtual bond ladder income — per-year coupon + principal amounts (#441)
     const bondData = bondMap.get(year);
-    const bondIncome = new Decimal(bondData?.amount ?? 0);
+    const bondIncome = convert(new Decimal(bondData?.amount ?? 0), 'USD', mainCurrency);
     if (bondIncome.gt(0)) {
       grossIncome = grossIncome.plus(bondIncome);
       taxableIncome = taxableIncome.plus(bondIncome);
 
       let tax = new Decimal(0);
       if (bondData?.coupon && bondData.coupon > 0) {
-        tax = new Decimal(bondData.coupon).mul(0.25);
+        const bondCoupon = convert(new Decimal(bondData.coupon), 'USD', mainCurrency);
+        tax = bondCoupon.mul(0.25);
         taxPaid = taxPaid.plus(tax);
       }
 

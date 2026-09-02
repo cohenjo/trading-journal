@@ -9,6 +9,7 @@ import signal
 import time
 
 from app.worker import analyze_schedules
+from app.worker import exchange_rates as _exchange_rates  # noqa: F401 - registers exchange rates refresh job
 from app.worker import ndx_daily_sync  # noqa: F401 - imports schedule registration side effect
 from app.worker import price_cache as _price_cache  # noqa: F401 - registers scheduled jobs
 from app.worker import yahoo_refresh as _yahoo_refresh  # noqa: F401 - registers yahoo price refresh job

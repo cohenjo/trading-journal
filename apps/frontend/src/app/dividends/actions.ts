@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { convertCurrency } from '@/lib/currency';
+import { getExchangeRatesAction } from '@/app/currency/actions';
 import { getStockPositions } from '@/app/trading/actions';
 import type {
   DividendPosition,
@@ -1225,10 +1226,11 @@ export async function getDividendPositions(
  * All 3 accounts are fetched in parallel for efficiency.
  */
 export async function getDividendSummary(): Promise<DividendSummaryResult> {
-  const [ibkr, schwab, ira] = await Promise.all([
+  const [ibkr, schwab, ira, rates] = await Promise.all([
     getDividendPositions('ibkr'),
     getDividendPositions('schwab'),
     getDividendPositions('ira'),
+    getExchangeRatesAction(),
   ]);
 
   const sum = (positions: DividendPosition[]) =>
@@ -1236,7 +1238,7 @@ export async function getDividendSummary(): Promise<DividendSummaryResult> {
       const amt = p.forward_dividend_annual ?? 0;
       // Convert each position's amount to USD for a consistent aggregate total.
       // ILA positions are already stored in canonical ILS; convertCurrency handles ILS→USD.
-      return total + convertCurrency(amt, p.currency ?? 'USD', 'USD');
+      return total + convertCurrency(amt, p.currency ?? 'USD', 'USD', rates);
     }, 0);
 
   const ibkrTotal = roundCurrency(sum(ibkr));

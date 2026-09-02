@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import type { Bond, RungData } from '@/components/Ladder/types';
 import { buildIncome, buildOverview, defaultIncomeRange, rungDateRange, rungIdForYear } from './ladder-calculations';
 import { convertCurrency } from '@/lib/currency';
+import { getExchangeRatesAction } from '@/app/currency/actions';
 
 type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
 type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -40,7 +41,7 @@ export async function getLadderOverview(): Promise<ActionResult<{ rungs: RungDat
   const auth = await requireUserAndHousehold(supabase);
   if (!auth.ok) return auth;
 
-  const [rungsResult, manualBondsResult, holdingBonds] = await Promise.all([
+  const [rungsResult, manualBondsResult, holdingBonds, rates] = await Promise.all([
     supabase
       .from('ladder_rungs')
       .select('id,year,start_date,end_date,target_amount,current_amount')
@@ -52,6 +53,7 @@ export async function getLadderOverview(): Promise<ActionResult<{ rungs: RungDat
       .eq('household_id', auth.householdId)
       .order('maturity_date', { ascending: true }),
     fetchHoldingBonds(supabase, auth.householdId),
+    getExchangeRatesAction(),
   ]);
 
   if (rungsResult.error) {
@@ -70,7 +72,7 @@ export async function getLadderOverview(): Promise<ActionResult<{ rungs: RungDat
     ...((manualBondsResult.data ?? []) as BondRow[]).filter((b) => !holdingIds.has(b.id)),
   ];
 
-  const currentAmountByRung = computeCurrentAmountByRung(mergedBonds);
+  const currentAmountByRung = computeCurrentAmountByRung(mergedBonds, rates);
   return {
     ok: true,
     data: buildOverview((rungsResult.data ?? []) as RungData[], mergedBonds, currentAmountByRung),
@@ -86,13 +88,14 @@ export async function getLadderIncome(
   if (!auth.ok) return auth;
   const range = params.fromDate && params.toDate ? { fromDate: params.fromDate, toDate: params.toDate } : defaultIncomeRange();
 
-  const [manualBondsResult, holdingBonds] = await Promise.all([
+  const [manualBondsResult, holdingBonds, rates] = await Promise.all([
     supabase
       .from('ladder_bonds')
       .select('id,ticker,issuer,currency,face_value,coupon_rate,coupon_frequency,maturity_date,rung_id')
       .eq('household_id', auth.householdId)
       .order('maturity_date', { ascending: true }),
     fetchHoldingBonds(supabase, auth.householdId),
+    getExchangeRatesAction(),
   ]);
 
   if (manualBondsResult.error) {
@@ -107,7 +110,7 @@ export async function getLadderIncome(
   ];
 
   try {
-    return { ok: true, data: buildIncome(mergedBonds, range) };
+    return { ok: true, data: buildIncome(mergedBonds, range, 'USD', rates) };
   } catch (error_) {
     console.error('[getLadderIncome] calculation error:', error_);
     return { ok: false, error: 'Failed to calculate ladder income' };
@@ -251,12 +254,12 @@ async function fetchHoldingBonds(supabase: SupabaseLike, householdId: string): P
   });
 }
 
-/** Computes face-value sum per rung from a merged bond list, converted to ILS. */
-function computeCurrentAmountByRung(bonds: Bond[]): Map<string, number> {
+/** Computes face-value sum per rung from a merged bond list, converted to USD. */
+function computeCurrentAmountByRung(bonds: Bond[], customRates?: Record<string, number>): Map<string, number> {
   const totals = new Map<string, number>();
   for (const bond of bonds) {
-    const amountInILS = convertCurrency(Number(bond.face_value), bond.currency, 'ILS');
-    totals.set(bond.rung_id, (totals.get(bond.rung_id) ?? 0) + amountInILS);
+    const amountInUSD = convertCurrency(Number(bond.face_value), bond.currency, 'USD', customRates);
+    totals.set(bond.rung_id, (totals.get(bond.rung_id) ?? 0) + amountInUSD);
   }
   return totals;
 }
@@ -319,13 +322,14 @@ export async function getLadderOverviewByAccount(
     return { ok: true, data: { rungs: [], bonds: [] } };
   }
 
-  const [rungsResult, holdingBonds] = await Promise.all([
+  const [rungsResult, holdingBonds, rates] = await Promise.all([
     supabase
       .from('ladder_rungs')
       .select('id,year,start_date,end_date,target_amount,current_amount')
       .eq('household_id', auth.householdId)
       .order('year', { ascending: true }),
     fetchHoldingBondsByAccountId(supabase, auth.householdId, ibkrAccountId),
+    getExchangeRatesAction(),
   ]);
 
   if (rungsResult.error) {
@@ -333,7 +337,7 @@ export async function getLadderOverviewByAccount(
     return { ok: false, error: 'Failed to load ladder rungs' };
   }
 
-  const currentAmountByRung = computeCurrentAmountByRung(holdingBonds);
+  const currentAmountByRung = computeCurrentAmountByRung(holdingBonds, rates);
   return {
     ok: true,
     data: buildOverview((rungsResult.data ?? []) as RungData[], holdingBonds, currentAmountByRung),

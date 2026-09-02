@@ -26,8 +26,8 @@ describe('ladder cashflow calculations', () => {
   it('aggregates generated cashflows by calendar year for income series', () => {
     const result = buildIncome([testBond], { fromDate: '2024-01-01', toDate: '2026-12-31' });
     expect(result.income_series).toEqual([
-      { date: '2025-01-01', value: 180 },
-      { date: '2026-01-01', value: 3_600 },
+      { date: '2025-01-01', value: 50, coupon: 50, principal: 0 },
+      { date: '2026-01-01', value: 1_000, coupon: 0, principal: 1_000 },
     ]);
     expect(result.distributions).toHaveLength(2);
   });

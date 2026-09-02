@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { CURRENCY_RATES, convertCurrency, formatCurrency, type CurrencyCode } from './currency';
+import {
+  CURRENCY_RATES,
+  convertCurrency,
+  formatCurrency,
+  setDynamicCurrencyRates,
+  getActiveCurrencyRates,
+  resetCurrencyRates,
+  type CurrencyCode,
+} from './currency';
 
 describe('CURRENCY_RATES', () => {
   it('should define all supported currencies', () => {
@@ -341,5 +349,25 @@ describe('B8: GBp (pence) ÷100 guard @regression', () => {
     const ilsValue = convertCurrency(5_300, 'GBP', 'ILS');
     expect(ilsValue).toBeGreaterThan(10_000); // Must be in tens-of-thousands, not hundreds
     expect(ilsValue).toBeLessThan(100_000);
+  });
+});
+
+describe('dynamic currency rates', () => {
+  it('supports passing customRates directly to convertCurrency', () => {
+    const dynamicRates = { ILS: 1, USD: 3.1, EUR: 3.4, GBP: 4.0 };
+    // 100 USD * 3.1 = 310 ILS
+    expect(convertCurrency(100, 'USD', 'ILS', dynamicRates)).toBe(310);
+    // 310 ILS / 3.1 = 100 USD
+    expect(convertCurrency(310, 'ILS', 'USD', dynamicRates)).toBe(100);
+  });
+
+  it('updates active rates via setDynamicCurrencyRates and resets cleanly', () => {
+    setDynamicCurrencyRates({ USD: 3.15, EUR: 3.45 });
+    expect(getActiveCurrencyRates().USD).toBe(3.15);
+    expect(convertCurrency(100, 'USD', 'ILS')).toBe(315);
+
+    resetCurrencyRates();
+    expect(getActiveCurrencyRates().USD).toBe(3.6);
+    expect(convertCurrency(100, 'USD', 'ILS')).toBe(360);
   });
 });

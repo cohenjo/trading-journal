@@ -3,6 +3,7 @@ import { type Metadata } from "next";
 import { type ReactNode } from "react";
 import { Toaster } from "sonner";
 import { SettingsProvider } from "./settings/SettingsContext";
+import { CurrencyProvider } from "./currency/CurrencyContext";
 import MainLayout from "@/components/Layout/MainLayout";
 import PageLoadMetrics from "@/components/Telemetry/PageLoadMetrics";
 
@@ -21,9 +22,11 @@ export default function RootLayout({
       <body className="bg-slate-950 text-slate-100">
         <PageLoadMetrics />
         <SettingsProvider>
-          <MainLayout>
-            {children}
-          </MainLayout>
+          <CurrencyProvider>
+            <MainLayout>
+              {children}
+            </MainLayout>
+          </CurrencyProvider>
         </SettingsProvider>
         <Toaster theme="dark" position="bottom-right" richColors />
       </body>

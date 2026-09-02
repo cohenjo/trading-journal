@@ -3,6 +3,7 @@
 import Decimal from 'decimal.js';
 import { createClient } from '@/lib/supabase/server';
 import { convertCurrency } from '@/lib/currency';
+import { getExchangeRatesAction } from '@/app/currency/actions';
 import type { FinanceItem } from '@/components/CurrentFinances/FinanceTabs';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -166,6 +167,8 @@ async function enrichWithDividends(items: FinanceItem[]): Promise<void> {
   }
 
   // Enrich each item that has a linked dividend account
+  const rates = await getExchangeRatesAction();
+
   for (const item of items) {
     const itemId = typeof item.id === 'string' ? Number(item.id) : (item.id as number);
     if (!itemId) continue;
@@ -185,7 +188,7 @@ async function enrichWithDividends(items: FinanceItem[]): Promise<void> {
 
       const rawAmount = Number(p.shares) * Number(td.dividend_rate);
       const { amount, currency } = normaliseAmount(rawAmount, td.currency);
-      totalIncome += convertCurrency(amount, currency, itemCurrency);
+      totalIncome += convertCurrency(amount, currency, itemCurrency, rates);
     }
 
     if (totalIncome > 0) {

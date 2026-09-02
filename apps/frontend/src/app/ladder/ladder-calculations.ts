@@ -123,6 +123,8 @@ export function generateCashflowsForBond(
 export function buildIncome(
   bonds: LadderBondInput[],
   range: { fromDate: string; toDate: string },
+  targetCurrency: string = 'USD',
+  customRates?: Record<string, number>,
 ): { income_series: IncomePoint[]; distributions: DistributionRow[] } {
   const bondById = new Map(bonds.map((bond) => [bond.id, bond]));
   const cashflows = bonds.flatMap((bond) => generateCashflowsForBond(bond, range));
@@ -145,14 +147,14 @@ export function buildIncome(
   const byYear = new Map<number, { value: number; coupon: number; principal: number }>();
   for (const cashflow of cashflows) {
     const year = parseIsoDate(cashflow.date).getUTCFullYear();
-    const amountInILS = convertCurrency(cashflow.amount, cashflow.currency, 'ILS');
+    const amountInUSD = convertCurrency(cashflow.amount, cashflow.currency, targetCurrency, customRates);
 
     const existing = byYear.get(year) ?? { value: 0, coupon: 0, principal: 0 };
-    existing.value += amountInILS;
+    existing.value += amountInUSD;
     if (cashflow.type === 'COUPON') {
-      existing.coupon += amountInILS;
+      existing.coupon += amountInUSD;
     } else {
-      existing.principal += amountInILS;
+      existing.principal += amountInUSD;
     }
     byYear.set(year, existing);
   }

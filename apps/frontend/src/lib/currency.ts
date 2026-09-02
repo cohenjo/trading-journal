@@ -1,17 +1,40 @@
 
-export const CURRENCY_RATES = {
+export const DEFAULT_CURRENCY_RATES = {
     'ILS': 1,
-    'USD': 3.6,   // ~3.6 ILS per USD
-    'GBP': 4.6,   // ~4.6 ILS per GBP
-    'EUR': 3.9    // ~3.9 ILS per EUR
+    'USD': 3.6,   // fallback ILS per USD
+    'GBP': 4.6,   // fallback ILS per GBP
+    'EUR': 3.9    // fallback ILS per EUR
 } as const;
 
-export type CurrencyCode = keyof typeof CURRENCY_RATES;
+export const CURRENCY_RATES = DEFAULT_CURRENCY_RATES;
+export const FALLBACK_CURRENCY_RATES = DEFAULT_CURRENCY_RATES;
 
-export const convertCurrency = (amount: number, from: string = 'ILS', to: string = 'ILS'): number => {
+export type CurrencyCode = string;
+
+let activeRates: Record<string, number> = { ...DEFAULT_CURRENCY_RATES };
+
+export const setDynamicCurrencyRates = (rates: Record<string, number>): void => {
+    activeRates = { ...DEFAULT_CURRENCY_RATES, ...rates };
+};
+
+export const getActiveCurrencyRates = (): Record<string, number> => {
+    return { ...activeRates };
+};
+
+export const resetCurrencyRates = (): void => {
+    activeRates = { ...DEFAULT_CURRENCY_RATES };
+};
+
+export const convertCurrency = (
+    amount: number,
+    from: string = 'ILS',
+    to: string = 'ILS',
+    customRates?: Record<string, number>
+): number => {
     if (!amount) return 0;
-    const fromRate = CURRENCY_RATES[from as CurrencyCode] || 1;
-    const toRate = CURRENCY_RATES[to as CurrencyCode] || 1;
+    const rates = customRates || activeRates;
+    const fromRate = rates[from] || rates[from?.toUpperCase?.()] || DEFAULT_CURRENCY_RATES[from as keyof typeof DEFAULT_CURRENCY_RATES] || 1;
+    const toRate = rates[to] || rates[to?.toUpperCase?.()] || DEFAULT_CURRENCY_RATES[to as keyof typeof DEFAULT_CURRENCY_RATES] || 1;
 
     // Convert to ILS (Base) then to Target
     const inILS = amount * fromRate;
