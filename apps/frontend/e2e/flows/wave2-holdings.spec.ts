@@ -44,7 +44,11 @@ test.describe('wave-2 CRUD: /holdings @flow', () => {
       await expect(addBtn).toBeVisible({ timeout: 5_000 });
       await addBtn.click();
 
-      // Fill required fields: Issuer and Maturity date
+      // Fill required fields: CUSIP, Issuer and Maturity date
+      const cusipInput = page.getByPlaceholder('CUSIP');
+      await expect(cusipInput).toBeVisible({ timeout: 5_000 });
+      await cusipInput.fill('E2E-CUSIP-01');
+
       const issuerInput = page.getByPlaceholder('Issuer');
       await expect(issuerInput).toBeVisible({ timeout: 5_000 });
       await issuerInput.fill(ISSUER_NAME);
@@ -88,6 +92,10 @@ test.describe('wave-2 CRUD: /holdings @flow', () => {
       const addBtn = page.getByRole('button', { name: '+ Add holding' });
       await expect(addBtn).toBeVisible({ timeout: 5_000 });
       await addBtn.click();
+
+      const cusipInput = page.getByPlaceholder('CUSIP');
+      await expect(cusipInput).toBeVisible({ timeout: 5_000 });
+      await cusipInput.fill('E2E-CUSIP-DEL');
 
       const issuerInput = page.getByPlaceholder('Issuer');
       await expect(issuerInput).toBeVisible({ timeout: 5_000 });

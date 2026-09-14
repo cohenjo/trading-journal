@@ -143,8 +143,17 @@ export default function SettingsPage() {
                     <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden divide-y divide-slate-800">
 
                         {/* Planning Mode */}
-                        <div className="p-4 flex items-center justify-between hover:bg-slate-800/50 cursor-pointer group"
+                        <div
+                            role="button"
+                            tabIndex={0}
+                            className="p-4 flex items-center justify-between hover:bg-slate-800/50 cursor-pointer group"
                             onClick={() => updateSettings({ planningMode: settings.planningMode === 'Individual' ? 'Couple' : 'Individual' })}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    updateSettings({ planningMode: settings.planningMode === 'Individual' ? 'Couple' : 'Individual' });
+                                }
+                            }}
                         >
                             <div className="flex items-center gap-4">
                                 <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xl text-slate-400 group-hover:bg-slate-700 group-hover:text-white transition-colors">

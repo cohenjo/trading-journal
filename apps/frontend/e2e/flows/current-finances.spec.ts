@@ -154,7 +154,7 @@ testWithUser.describe('regression #168: fund save with household @flow', () => {
 
       // --- Step 3: select type (first card in the type-selection grid) ---
       // The PlanModal first shows a type-selection screen. Pick "House" or the first card.
-      const typeCard = page.locator('button').filter({ hasText: /^(House|Custom Asset)/i }).first();
+      const typeCard = page.getByRole('button', { name: /House|Custom Asset/i }).first();
       await expect(typeCard).toBeVisible({ timeout: 5_000 });
       await typeCard.click();
 
