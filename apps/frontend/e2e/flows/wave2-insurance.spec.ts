@@ -102,6 +102,10 @@ test.describe('wave-2 CRUD: /insurance @flow', () => {
       const providerInput = page.getByPlaceholder(/Clal, Migdal, Harel/i);
       await expect(providerInput).toBeVisible({ timeout: 5_000 });
       await providerInput.fill(PROVIDER_CREATE);
+      const sumInsuredInput = page.getByPlaceholder(/Covers remaining mortgage/i);
+      if (await sumInsuredInput.isVisible()) {
+        await sumInsuredInput.fill('500000');
+      }
       await page.getByRole('button', { name: /^Save$/ }).click();
       await expect(page.getByText(PROVIDER_CREATE)).toBeVisible({ timeout: 10_000 });
 
@@ -141,6 +145,10 @@ test.describe('wave-2 CRUD: /insurance @flow', () => {
       const providerInput = page.getByPlaceholder(/Clal, Migdal, Harel/i);
       await expect(providerInput).toBeVisible({ timeout: 5_000 });
       await providerInput.fill('E2E Delete Insurance Target');
+      const sumInsuredInput = page.getByPlaceholder(/Covers remaining mortgage/i);
+      if (await sumInsuredInput.isVisible()) {
+        await sumInsuredInput.fill('500000');
+      }
       await page.getByRole('button', { name: /^Save$/ }).click();
       await expect(page.getByText('E2E Delete Insurance Target')).toBeVisible({ timeout: 10_000 });
 
