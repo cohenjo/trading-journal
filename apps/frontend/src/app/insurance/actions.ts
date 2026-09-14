@@ -189,12 +189,15 @@ export async function createInsurancePolicy(
   if (!validation.ok) return validation;
 
   const supabase = await createClient();
+  const now = new Date().toISOString();
   const { data, error } = await supabase
     .from('insurance_policies')
     .insert({
       id: crypto.randomUUID(),
       ...validation.data,
       household_id: household.data,
+      created_at: now,
+      updated_at: now,
     })
     .select('id, owner, type, provider, policy_number, sum_insured, monthly_premium, beneficiaries, expiry_date, website, notes, created_at, updated_at')
     .single();
