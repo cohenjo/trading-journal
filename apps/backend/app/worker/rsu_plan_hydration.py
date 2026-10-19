@@ -6,7 +6,7 @@ when this job executes.
 
 What it does
 ------------
-1. Scans all rows in ``public.plans`` and ``public.finance_snapshots`` for
+1. Scans plans and today's finance snapshots (never recorded history) for
    account items where ``account_settings.type == 'RSU'`` **and**
    ``account_settings.stock_symbol`` is non-empty.
 2. Looks up the ticker in ``public.price_cache`` (USD denomination).
@@ -20,6 +20,9 @@ What it does
      income flows into the income pool rather than being re-invested.
 4. Finance snapshot items store dividend settings in ``details`` (the field read
    by ``plan_components.AccountManager.load_accounts``), so we write there too.
+5. Revalues plan shares with Decimal rounding only when quote and account
+   currencies match. Snapshot monetary values and their aggregate totals stay
+   unchanged; only today's snapshot market settings may be refreshed.
 
 RSU-specific business rules (from copilot-rsu-rules.md)
 ---------------------------------------------------------
@@ -40,7 +43,7 @@ from __future__ import annotations
 import copy
 import logging
 import os
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy import text
@@ -78,7 +81,8 @@ def _is_rsu_item(item: dict[str, Any]) -> bool:
 def _get_stock_symbol(item: dict[str, Any]) -> str | None:
     """Extract and normalise the configured stock ticker from a plan/snapshot item."""
     acc_settings = item.get("account_settings") or {}
-    raw = acc_settings.get("stock_symbol") or ""
+    details = item.get("details") or {}
+    raw = acc_settings.get("stock_symbol") or details.get("stock_symbol") or ""
     normalised = normalize_symbol(raw) if raw.strip() else None
     return normalised
 
@@ -86,6 +90,8 @@ def _get_stock_symbol(item: dict[str, Any]) -> str | None:
 def _apply_rsu_hydration(
     item: dict[str, Any],
     cached: CachedPriceData,
+    *,
+    snapshot: bool = False,
 ) -> dict[str, Any]:
     """Return a copy of *item* with RSU price and dividend settings patched in.
 
@@ -95,6 +101,8 @@ def _apply_rsu_hydration(
     settings from ``f_item['details']`` when building the merged account dict.
     """
     item = copy.deepcopy(item)
+    if (item.get("currency") or "USD").strip().upper() != cached.currency:
+        return item
 
     dividend_yield_decimal = cached.dividend_yield if cached.dividend_yield is not None else Decimal("0")
 
@@ -112,6 +120,19 @@ def _apply_rsu_hydration(
     details["dividend_tax_rate"] = str(_RSU_DIVIDEND_TAX_RATE)
     details["dividend_policy"] = _RSU_DIVIDEND_POLICY
 
+    # Recalculate item value if rsu_grants with vested shares are present
+    grants = acc_settings.get("rsu_grants", details.get("rsu_grants"))
+    if isinstance(grants, list) and not snapshot:
+        try:
+            vested = [Decimal(str(g.get("vested") or 0)) for g in grants]
+            if any(not value.is_finite() or value < 0 for value in vested):
+                raise ValueError("Invalid vested shares")
+            total_vested = sum(vested, Decimal("0"))
+            item["value"] = float((total_vested * cached.price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+            details["total_vested"] = f"{total_vested.normalize():f} Shares"
+        except (InvalidOperation, ValueError, TypeError, AttributeError):
+            logger.warning("Skipping invalid RSU grant valuation")
+
     return item
 
 
@@ -125,7 +146,7 @@ def _hydrate_plans(session: Session, price_lookup: dict[str, CachedPriceData]) -
 
     Returns the number of plan items updated.
     """
-    rows = session.execute(text("SELECT id, data FROM public.plans WHERE data IS NOT NULL")).mappings().all()
+    rows = session.execute(text("SELECT id, data FROM public.plans WHERE data IS NOT NULL FOR UPDATE")).mappings().all()
 
     updated_count = 0
 
@@ -153,7 +174,7 @@ def _hydrate_plans(session: Session, price_lookup: dict[str, CachedPriceData]) -
                 continue
 
             cached = price_lookup.get(symbol)
-            if cached is None:
+            if cached is None or (item.get("currency") or "USD").upper() != cached.currency:
                 logger.warning(
                     "[rsu_hydration] Plan %s RSU item '%s' ticker=%s — not in price_cache yet",
                     plan_id,
@@ -179,7 +200,7 @@ def _hydrate_plans(session: Session, price_lookup: dict[str, CachedPriceData]) -
         if changed:
             data["items"] = new_items
             session.execute(
-                text("UPDATE public.plans SET data = :data::jsonb, updated_at = NOW() WHERE id = :id"),
+                text("UPDATE public.plans SET data = CAST(:data AS jsonb), updated_at = NOW() WHERE id = :id"),
                 {"data": _to_json_str(data), "id": plan_id},
             )
 
@@ -187,7 +208,7 @@ def _hydrate_plans(session: Session, price_lookup: dict[str, CachedPriceData]) -
 
 
 def _hydrate_snapshots(session: Session, price_lookup: dict[str, CachedPriceData]) -> int:
-    """Patch RSU price/yield into all rows of public.finance_snapshots.
+    """Patch only today's snapshots; recorded historical valuations are immutable.
 
     Returns the number of snapshot items updated.
     """
@@ -198,6 +219,8 @@ def _hydrate_snapshots(session: Session, price_lookup: dict[str, CachedPriceData
             SELECT household_id, date, data
               FROM public.finance_snapshots
              WHERE data IS NOT NULL
+               AND date = CURRENT_DATE
+             FOR UPDATE
             """
             )
         )
@@ -227,7 +250,7 @@ def _hydrate_snapshots(session: Session, price_lookup: dict[str, CachedPriceData
                 continue
 
             cached = price_lookup.get(symbol)
-            if cached is None:
+            if cached is None or (item.get("currency") or "USD").upper() != cached.currency:
                 logger.warning(
                     "[rsu_hydration] Snapshot %s/%s RSU '%s' ticker=%s — not in price_cache",
                     hh_id,
@@ -238,7 +261,7 @@ def _hydrate_snapshots(session: Session, price_lookup: dict[str, CachedPriceData
                 new_items.append(item)
                 continue
 
-            patched = _apply_rsu_hydration(item, cached)
+            patched = _apply_rsu_hydration(item, cached, snapshot=True)
             new_items.append(patched)
             changed = True
             updated_count += 1
@@ -249,9 +272,10 @@ def _hydrate_snapshots(session: Session, price_lookup: dict[str, CachedPriceData
                 text(
                     """
                     UPDATE public.finance_snapshots
-                       SET data = :data::jsonb
+                       SET data = CAST(:data AS jsonb)
                      WHERE household_id = :hh_id
                        AND date = :date
+                       AND date = CURRENT_DATE
                     """
                 ),
                 {"data": _to_json_str(data), "hh_id": str(hh_id), "date": str(snap_date)},

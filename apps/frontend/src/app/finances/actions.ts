@@ -43,15 +43,17 @@ export interface PriceCacheResult {
   as_of: string;
   refreshed_at: string;
   isStale: boolean;
+  dividend_yield?: number | null;
 }
 
 interface PriceCacheRow {
   price: string | number;
   as_of: string;
   refreshed_at: string;
+  dividend_yield?: string | number | null;
 }
 
-const PRICE_CACHE_STALE_MS = 4 * 60 * 60 * 1000;
+const PRICE_CACHE_STALE_MS = 36 * 60 * 60 * 1000;
 
 // Raw rows from dividend tables — typed narrowly to avoid over-fetching
 interface DividendAccountRow {
@@ -222,7 +224,7 @@ export async function getPrice(symbol: string, currency = 'USD'): Promise<PriceC
 
   const { data, error } = await supabase
     .from('price_cache')
-    .select('price, as_of, refreshed_at')
+    .select('price, as_of, refreshed_at, dividend_yield')
     .eq('symbol', normalizedSymbol)
     .eq('currency', normalizedCurrency)
     .maybeSingle();
@@ -238,12 +240,14 @@ export async function getPrice(symbol: string, currency = 'USD'): Promise<PriceC
 
   const refreshedAtMs = new Date(row.refreshed_at).getTime();
   const isStale = !Number.isFinite(refreshedAtMs) || Date.now() - refreshedAtMs > PRICE_CACHE_STALE_MS;
+  const divYield = row.dividend_yield != null ? Number(row.dividend_yield) : null;
 
   return {
     price: price.toString(),
     as_of: row.as_of,
     refreshed_at: row.refreshed_at,
     isStale,
+    dividend_yield: Number.isFinite(divYield) ? divYield : null,
   };
 }
 

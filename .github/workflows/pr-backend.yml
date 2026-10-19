@@ -105,8 +105,31 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Run pytest
-        run: uv run pytest --tb=short -q
+      - name: Run price-cache and RSU regression tests
+        run: uv run pytest tests/test_price_cache_worker.py tests/test_rsu_plan_hydration.py --tb=short -q
         env:
+          PYTHON_DOTENV_DISABLED: '1'
+          DATABASE_URL: postgresql://localhost/test_db
+          TESTING: 'true'
+
+      - name: Run pytest
+        id: pytest
+        run: uv run pytest --tb=short -q
+        env: &backend-test-env
+          PYTHON_DOTENV_DISABLED: '1'
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
           TESTING: 'true'
+
+      - name: Check out base revision for failure comparison
+        if: failure() && steps.pytest.outcome == 'failure'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .validation-baseline
+          persist-credentials: false
+
+      - name: Reproduce failures against base source with the same dependencies
+        if: failure() && steps.pytest.outcome == 'failure'
+        working-directory: .validation-baseline/apps/backend
+        run: '"$GITHUB_WORKSPACE/apps/backend/.venv/bin/python" -m pytest --tb=short -q'
+        env: *backend-test-env

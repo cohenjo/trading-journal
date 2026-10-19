@@ -199,9 +199,13 @@ class PriceCacheRefresher:
             text(
                 """
                 with referenced_symbols as (
-                  select symbol, currency
+                  select symbol, 'USD' as currency
                     from public.trading_positions
                    where nullif(trim(symbol), '') is not null
+                  union
+                  select ticker as symbol, currency
+                    from public.stock_positions
+                   where nullif(trim(ticker), '') is not null
                   union
                   select ticker as symbol, 'USD' as currency
                     from public.dividend_positions
@@ -212,21 +216,21 @@ class PriceCacheRefresher:
                    where nullif(trim(ticker), '') is not null
                      and deleted_at is null
                   union
-                  select item->'account_settings'->>'stock_symbol' as symbol,
+                  select coalesce(item->'account_settings'->>'stock_symbol', item->'details'->>'stock_symbol') as symbol,
                          coalesce(item->>'currency', 'USD') as currency
                     from public.finance_snapshots fs
                     cross join lateral jsonb_array_elements(
                       case when jsonb_typeof(fs.data->'items') = 'array' then fs.data->'items' else '[]'::jsonb end
                     ) item
-                   where nullif(trim(item->'account_settings'->>'stock_symbol'), '') is not null
+                   where nullif(trim(coalesce(item->'account_settings'->>'stock_symbol', item->'details'->>'stock_symbol')), '') is not null
                   union
-                  select item->'account_settings'->>'stock_symbol' as symbol,
+                  select coalesce(item->'account_settings'->>'stock_symbol', item->'details'->>'stock_symbol') as symbol,
                          coalesce(item->>'currency', 'USD') as currency
                     from public.plans p
                     cross join lateral jsonb_array_elements(
                       case when jsonb_typeof(p.data->'items') = 'array' then p.data->'items' else '[]'::jsonb end
                     ) item
-                   where nullif(trim(item->'account_settings'->>'stock_symbol'), '') is not null
+                   where nullif(trim(coalesce(item->'account_settings'->>'stock_symbol', item->'details'->>'stock_symbol')), '') is not null
                 )
                 select distinct upper(trim(symbol)) as symbol,
                        coalesce(nullif(upper(trim(currency)), ''), 'USD') as currency

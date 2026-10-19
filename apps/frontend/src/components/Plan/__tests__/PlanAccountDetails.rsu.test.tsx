@@ -235,5 +235,28 @@ describe('PlanAccountDetails — RSU configuration', () => {
       // The RSU Strategy section still renders in snapshot mode (grants viewer)
       expect(screen.getByText(/RSU Strategy/i)).toBeInTheDocument();
     });
+
+    it('AC8: Does not substitute a USD price for an ILS account', async () => {
+      mockGetPrice.mockImplementation((sym: string, curr: string) => {
+        if (curr === 'ILS') return Promise.resolve(null);
+        return Promise.resolve({
+          price: '496.00',
+          refreshed_at: new Date().toISOString(),
+          isStale: false,
+          dividend_yield: 0.72,
+        });
+      });
+
+      const ilsItem = makeRsuItem({ currency: 'ILS' });
+      renderDetails(ilsItem, vi.fn(), 'snapshot');
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(mockGetPrice).toHaveBeenCalledWith('MSFT', 'ILS');
+      expect(mockGetPrice).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/No cached price/i)).toBeInTheDocument();
+    });
   });
 });

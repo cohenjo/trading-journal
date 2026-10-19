@@ -76,17 +76,15 @@ export const PlanAccountDetails: React.FC<Props> = ({ item, onChange, mode = 'pl
             setPriceCacheStatus('Loading cached price…');
             const data = await getPrice(symbol, item.currency || 'USD');
             if (!data) {
-                setPriceCacheStatus('No cached price yet. It refreshes hourly when the worker is running.');
+                setPriceCacheStatus('No cached price yet. It refreshes daily when the worker is running.');
                 return;
             }
 
             const price = new Decimal(data.price);
             const settingsUpdates: Parameters<typeof updateSettings>[0] = { current_price: price.toNumber() };
 
-            // TODO: integrate dividend_yield from Hockney's extended endpoint
-            const extendedData = data as typeof data & { dividend_yield?: number };
-            if (!dividendYieldOverride && typeof extendedData.dividend_yield === 'number') {
-                settingsUpdates.dividend_yield = extendedData.dividend_yield;
+            if (!dividendYieldOverride && typeof data.dividend_yield === 'number') {
+                settingsUpdates.dividend_yield = data.dividend_yield;
             }
 
             updateSettings(settingsUpdates);

@@ -110,6 +110,65 @@ def test_get_stock_symbol_returns_none_when_empty() -> None:
     assert _get_stock_symbol(item) is None
 
 
+def test_get_stock_symbol_returns_from_details() -> None:
+    item = {"details": {"stock_symbol": "msft"}}
+    assert _get_stock_symbol(item) == "MSFT"
+
+
+def test_apply_rsu_hydration_recalculates_value_from_grants() -> None:
+    item = {
+        "value": 100,
+        "details": {
+            "stock_symbol": "MSFT",
+            "rsu_grants": [
+                {"year": 2021, "vested": 500, "shares": 500},
+                {"year": 2022, "vested": 620, "shares": 700},
+            ],
+        },
+    }
+    cached = _make_cached("MSFT", "496.00", "0.72")
+    patched = _apply_rsu_hydration(item, cached)
+    assert patched["value"] == 1120 * 496.00
+    assert patched["details"]["total_vested"] == "1120 Shares"
+
+
+@pytest.mark.parametrize("grants, expected", [([], 0), ([{"vested": "1.25"}], 620)])
+def test_plan_grants_override_stale_details(grants: list, expected: float) -> None:
+    """An explicitly empty plan grant list must not revive stale snapshot shares."""
+    item = {
+        "value": 100,
+        "account_settings": {"rsu_grants": grants},
+        "details": {"rsu_grants": [{"vested": 999}]},
+    }
+    patched = _apply_rsu_hydration(item, _make_cached("MSFT", "496.00", "0.72"))
+    assert patched["value"] == expected
+
+
+@pytest.mark.parametrize("vested", ["NaN", "-1", "invalid"])
+def test_invalid_grants_preserve_valuation(vested: str) -> None:
+    """Invalid share counts must not corrupt persisted monetary values."""
+    item = {"value": 100, "account_settings": {"rsu_grants": [{"vested": vested}]}}
+    assert _apply_rsu_hydration(item, _make_cached("MSFT", "496", "0"))["value"] == 100
+
+
+def test_hydration_never_relabels_usd_as_ils() -> None:
+    """A native USD quote cannot value an ILS account without conversion."""
+    item = {"currency": "ILS", "value": 100, "account_settings": {"rsu_grants": [{"vested": 10}]}}
+    assert _apply_rsu_hydration(item, _make_cached("MSFT", "496", "0")) == item
+
+
+def test_snapshot_valuation_is_immutable() -> None:
+    """Refreshing metadata must not invalidate recorded snapshot aggregate totals."""
+    item = {
+        "value": 100,
+        "account_settings": {"rsu_grants": [{"vested": 999}]},
+        "details": {"rsu_grants": []},
+    }
+    patched = _apply_rsu_hydration(item, _make_cached("MSFT", "496", "0"), snapshot=True)
+    assert patched["value"] == 100
+    assert patched["details"]["current_price"] == "496"
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: _apply_rsu_hydration
 # ---------------------------------------------------------------------------
@@ -227,6 +286,7 @@ class FakeSession(AbstractContextManager["FakeSession"]):
         self.snapshot_rows = snapshot_rows
         self.cache_rows = cache_rows
         self.updates: list[dict] = []
+        self.queries: list[str] = []
         self.commits = 0
 
     def __enter__(self) -> "FakeSession":
@@ -237,11 +297,12 @@ class FakeSession(AbstractContextManager["FakeSession"]):
 
     def execute(self, stmt: object, params: dict | None = None) -> _MockExecResult:
         sql = str(stmt).lower()
+        self.queries.append(sql)
         params = params or {}
 
-        if "public.plans" in sql and "select" in sql and "update" not in sql:
+        if "public.plans" in sql and sql.lstrip().startswith("select"):
             return _MockExecResult(self.plan_rows)
-        if "public.finance_snapshots" in sql and "select" in sql and "update" not in sql:
+        if "public.finance_snapshots" in sql and sql.lstrip().startswith("select"):
             return _MockExecResult(self.snapshot_rows)
         if "public.price_cache" in sql and "select" in sql:
             sym = params.get("symbol", "")
@@ -255,6 +316,18 @@ class FakeSession(AbstractContextManager["FakeSession"]):
 
     def commit(self) -> None:
         self.commits += 1
+
+
+def test_snapshot_query_excludes_recorded_history() -> None:
+    """Both discovery for mutation and writes must restrict dates to today."""
+    from app.worker.rsu_plan_hydration import _hydrate_snapshots
+
+    session = FakeSession([], [_build_snapshot_row("household", "2026-10-19", [_make_rsu_plan_item("MSFT")])], [])
+    assert _hydrate_snapshots(session, {"MSFT": _make_cached("MSFT", "496", "0")}) == 1
+    assert "date = current_date" in session.queries[0]
+    assert "for update" in session.queries[0]
+    assert "date = current_date" in session.updates[0]["sql"]
+    assert "cast(:data as jsonb)" in session.updates[0]["sql"]
 
 
 def test_hydrate_plans_patches_msft_item(monkeypatch: pytest.MonkeyPatch) -> None:
