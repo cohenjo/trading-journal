@@ -30,9 +30,9 @@ test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page
   const today = new Date().toISOString().slice(0, 10);
   const item = {
     id: 'redfoot-rsu-snapshot', name: 'Redfoot RSU snapshot', category: 'Investments',
-    type: 'RSU', owner: 'You', currency: 'USD', value: price * 1.25,
+    type: 'RSU', owner: 'You', currency: 'USD', value: 1.25,
     details: {
-      stock_symbol: quote.symbol, current_price: price, dividend_yield: yieldRate,
+      stock_symbol: quote.symbol, current_price: 1, dividend_yield: yieldRate + 1,
       dividend_tax_rate: 25, dividend_policy: 'Payout',
       rsu_grants: [{ id: 'redfoot-grant', year: 2026, shares: 2, vested: 1.25, price: 100 }],
     },
