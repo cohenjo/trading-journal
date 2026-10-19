@@ -158,3 +158,4 @@ yarn-error.log*
 apps/backend/worker_heartbeat
 .env*.local
 apps/frontend/e2e/lurvg-evidence/
+.squad/.cache/
