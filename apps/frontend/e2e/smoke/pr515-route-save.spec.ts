@@ -9,7 +9,8 @@ import { getAdminClient } from '../fixtures/admin';
 test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page, householdId } }, testInfo) => {
   test.setTimeout(120_000);
   const admin = getAdminClient();
-  const source = execFileSync('git', ['rev-parse', 'HEAD^'], { encoding: 'utf8' }).trim();
+  const source = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const appTree = execFileSync('git', ['rev-parse', 'HEAD:apps/frontend/src'], { encoding: 'utf8' }).trim();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   const serverFailures: number[] = [];
@@ -121,7 +122,7 @@ test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page
   expect(errors).toEqual([]);
   expect(serverFailures).toEqual([]);
   const dom = await page.getByTestId('rsu-ticker-input').evaluate(element => element.outerHTML);
-  const evidence = { source, routes: ['/current-finances', '/plan'], snapshotTabs: 5,
+  const evidence = { source, appTree, routes: ['/current-finances', '/plan'], snapshotTabs: 5,
     testids: ['rsu-ticker-input', 'rsu-dividend-yield-auto', 'rsu-dividend-tax-rate'],
     saves: 'HTTP 200, database verified, reload verified', errorBannerCount: 0,
     successBanner: 'Neither route implements a success banner; persisted state verified instead',
