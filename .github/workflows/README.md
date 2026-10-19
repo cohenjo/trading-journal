@@ -17,10 +17,18 @@ This directory contains PR validation, backup, and Squad routing workflows. **Ve
 | `squad-label-enforce.yml` | Issue labeled | Enforces mutually exclusive `go:`, `release:`, `type:`, and `priority:` labels |
 | `squad-triage.yml` | Issue labeled `squad` | Routes new Squad inbox issues to the best agent/member |
 | `sync-squad-labels.yml` | Squad team file changes + manual | Syncs GitHub labels from the Squad roster |
+| `squad-ci.yml` | PR/push to `main` | Node built-in tests for routing, support registration, coordinator canaries, and workflow conditions |
 
 ## Removed Squad Template Workflows
 
 The generic Squad template workflows for package CI/release/docs/preview promotion were removed because this repository is the trading-journal app, not the Squad CLI/package repository. Application validation lives in the PR workflows above, and production/preview deploys are owned by Vercel's git integration.
+
+`main` is the integration branch; do not introduce upstream `dev`/`insider`
+promotion or package-publishing jobs. The adapted Squad configuration check runs
+`node --test .github/tests/squad-upgrade.test.cjs` without application credentials.
+Rai and Fact Checker are registered as support agents, outside the routable
+specialist table. Job-level conditions must not use `hashFiles`: that expression
+is unavailable before a runner is assigned and prevents a workflow from starting.
 
 ---
 

@@ -23,6 +23,15 @@
 | Scribe | Session Logger | `.squad/agents/scribe/charter.md` | 📋 Silent |
 | Ralph | Work Monitor | `.squad/agents/ralph/charter.md` | 🔄 Monitor |
 
+## Support Agents
+
+On-demand reviewers; excluded from specialist routing and automatic issue assignment.
+
+| Name | Role | Charter | Status |
+|------|------|---------|--------|
+| Rai | RAI Reviewer | `.squad/agents/rai/charter.md` | On-demand support |
+| Fact Checker | Verification | `.squad/agents/fact-checker/charter.md` | On-demand support |
+
 ## Coding Agent
 
 <!-- copilot-auto-assign: false -->

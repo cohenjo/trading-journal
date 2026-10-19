@@ -77,8 +77,6 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    # Only run if test files exist in the frontend app
-    if: ${{ hashFiles('apps/frontend/src/**/*.test.*', 'apps/frontend/src/**/*.spec.*') != '' }}
     steps:
       - uses: actions/checkout@v7
 
