@@ -39,6 +39,7 @@ test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page
   };
   const { error: seedError } = await admin.from('finance_snapshots').upsert({
     household_id: householdId, date: today,
+    net_worth: item.value, total_assets: item.value, total_liabilities: 0,
     data: { items: [item], net_worth: item.value, total_assets: item.value,
       total_liabilities: 0, total_savings: 0, total_investments: item.value },
   }, { onConflict: 'household_id,date' });
