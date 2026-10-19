@@ -182,9 +182,12 @@ describe('getLatestFinanceSnapshot — snapshot retrieval', () => {
 // ── History / write actions ───────────────────────────────────────────────────
 
 describe('getPrice', () => {
-  it('returns a cached price with stale status', async () => {
+  it.each([
+    ['2026-05-03T18:30:00Z', false],
+    ['2026-05-05T02:00:00Z', true],
+  ])('returns a cached price at %s with stale status %s', async (now, isStale) => {
     authOk();
-    vi.setSystemTime(new Date('2026-05-03T18:30:00Z'));
+    vi.setSystemTime(new Date(now));
     const priceChain = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
@@ -193,6 +196,7 @@ describe('getPrice', () => {
           price: '123.450000',
           as_of: '2026-05-03T12:00:00Z',
           refreshed_at: '2026-05-03T13:00:00Z',
+          dividend_yield: '0.87',
         },
         error: null,
       }),
@@ -211,10 +215,12 @@ describe('getPrice', () => {
       price: '123.45',
       as_of: '2026-05-03T12:00:00Z',
       refreshed_at: '2026-05-03T13:00:00Z',
-      isStale: true,
+      isStale,
+      dividend_yield: 0.87,
     });
     expect(priceChain.eq).toHaveBeenNthCalledWith(1, 'symbol', 'AAPL');
     expect(priceChain.eq).toHaveBeenNthCalledWith(2, 'currency', 'USD');
+    expect(priceChain.select).toHaveBeenCalledWith('price, as_of, refreshed_at, dividend_yield');
   });
 
   it('returns null when no cache row exists', async () => {

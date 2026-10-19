@@ -7,11 +7,13 @@ import os
 import pathlib
 import signal
 import time
+from datetime import UTC, datetime
 
 from app.worker import analyze_schedules
 from app.worker import exchange_rates as _exchange_rates  # noqa: F401 - registers exchange rates refresh job
 from app.worker import ndx_daily_sync  # noqa: F401 - imports schedule registration side effect
 from app.worker import price_cache as _price_cache  # noqa: F401 - registers scheduled jobs
+from app.worker import rsu_plan_hydration as _rsu_plan_hydration  # noqa: F401 - registers rsu hydration job
 from app.worker import yahoo_refresh as _yahoo_refresh  # noqa: F401 - registers yahoo price refresh job
 from app.worker.job_queue import poll_compute_jobs
 from app.worker.registry import JOB_SCHEDULES
@@ -65,6 +67,8 @@ def start_worker() -> None:
             if schedule.seconds is None:
                 raise ValueError(f"Schedule {schedule.job_id} is missing seconds")
             register_interval(schedule.job_id, schedule.seconds, schedule.handler)
+            if schedule.job_id == "prices_refresh":
+                scheduler.get_job(schedule.job_id).modify(next_run_time=datetime.now(UTC))
         else:
             raise ValueError(f"Unsupported schedule kind: {schedule.kind}")
 

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock, patch
+import pytest
 
 from app.services.price_cache import PriceCacheRefresher, PriceQuote, _yfinance_yield_to_percent
 from app.worker.registry import JOB_SCHEDULES
@@ -59,11 +60,42 @@ class FakeSession(AbstractContextManager["FakeSession"]):
 
 
 def test_prices_refresh_schedule_registered() -> None:
-    """The backend worker registers the hourly price refresh interval."""
+    """The backend worker registers the daily price refresh interval."""
 
     schedule = next(s for s in JOB_SCHEDULES if s.job_id == "prices_refresh")
     assert schedule.kind == "interval"
-    assert schedule.seconds == 60 * 60
+    assert schedule.seconds == 24 * 60 * 60
+
+
+def test_refresh_interval_rejects_invalid_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Malformed and nonpositive intervals cannot prevent worker startup."""
+    from app.worker.price_cache import _refresh_interval_seconds
+
+    monkeypatch.setenv("PRICES_REFRESH_INTERVAL_SECONDS", "invalid")
+    assert _refresh_interval_seconds() == 86400
+    monkeypatch.setenv("PRICES_REFRESH_INTERVAL_SECONDS", "0")
+    assert _refresh_interval_seconds() == 1
+
+
+def test_worker_refreshes_prices_on_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first interval run must not wait a full day after worker restart."""
+    from app.worker import runtime
+
+    scheduler = MagicMock()
+    monkeypatch.setattr(runtime, "get_scheduler", lambda: scheduler)
+    monkeypatch.setattr(runtime, "register_cron", MagicMock())
+    monkeypatch.setattr(runtime, "register_interval", MagicMock())
+    monkeypatch.setattr(runtime.analyze_schedules, "run_startup_analyze_refreshes", MagicMock())
+    monkeypatch.setattr(runtime.signal, "signal", MagicMock())
+    monkeypatch.setattr(runtime, "_touch_heartbeat", MagicMock())
+    monkeypatch.setattr(runtime.time, "sleep", MagicMock(side_effect=KeyboardInterrupt))
+    before = datetime.now(UTC)
+    with pytest.raises(KeyboardInterrupt):
+        runtime.start_worker()
+    scheduler.get_job.assert_called_once_with("prices_refresh")
+    run_at = scheduler.get_job.return_value.modify.call_args.kwargs["next_run_time"]
+    assert before <= run_at <= datetime.now(UTC)
+    scheduler.shutdown.assert_called_once_with(wait=False)
 
 
 def test_price_refresher_fetches_and_upserts_symbols() -> None:

@@ -196,6 +196,10 @@ export const FinanceTabs: React.FC<FinanceTabsProps> = ({ items, onUpdateItems, 
         if (accType === 'RSU') {
           if (f.details.stock_symbol) pItem.account_settings.stock_symbol = f.details.stock_symbol;
           if (f.details.rsu_grants) pItem.account_settings.rsu_grants = f.details.rsu_grants;
+          if (f.details.current_price !== undefined) pItem.account_settings.current_price = Number(f.details.current_price);
+          if (f.details.dividend_yield !== undefined) pItem.account_settings.dividend_yield = Number(f.details.dividend_yield);
+          if (f.details.dividend_tax_rate !== undefined) pItem.account_settings.dividend_tax_rate = Number(f.details.dividend_tax_rate);
+          if (f.details.dividend_policy !== undefined) pItem.account_settings.dividend_policy = f.details.dividend_policy;
         }
       }
     }
@@ -204,10 +208,10 @@ export const FinanceTabs: React.FC<FinanceTabsProps> = ({ items, onUpdateItems, 
     if (pCat === 'Asset' && f.details) {
       // Map flattened details back to structures if needed, usually details dict is enough for simple mode
       // But PlanAssetDetails uses specific fields.
-      // For now, PlanModal reads `item` props. 
+      // For now, PlanModal reads `item` props.
       // If we have specific fields in f.details like `interest_rate`, we might want to map them?
-      // PlanAssetDetails uses `item.financing` etc. 
-      // Let's keep it simple: we pass `details` and let the Modal handle standard fields if it finds them, 
+      // PlanAssetDetails uses `item.financing` etc.
+      // Let's keep it simple: we pass `details` and let the Modal handle standard fields if it finds them,
       // OR we map them explicitly if we want rich editing.
       // For now, let's rely on basic `details` being passed through.
     }
@@ -249,6 +253,10 @@ export const FinanceTabs: React.FC<FinanceTabsProps> = ({ items, onUpdateItems, 
       if (p.account_settings.type === 'RSU') {
         details.stock_symbol = p.account_settings.stock_symbol;
         details.rsu_grants = p.account_settings.rsu_grants;
+        if (p.account_settings.current_price !== undefined) details.current_price = p.account_settings.current_price;
+        if (p.account_settings.dividend_yield !== undefined) details.dividend_yield = p.account_settings.dividend_yield;
+        if (p.account_settings.dividend_tax_rate !== undefined) details.dividend_tax_rate = p.account_settings.dividend_tax_rate;
+        if (p.account_settings.dividend_policy !== undefined) details.dividend_policy = p.account_settings.dividend_policy;
         // Compute Summary for Display
         const totalVested = (p.account_settings.rsu_grants || []).reduce((sum, g) => sum + (g.vested || 0), 0);
         details.total_vested = totalVested + ' Shares'; // String to avoid currency formatting
