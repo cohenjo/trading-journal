@@ -40,7 +40,7 @@
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^1.16.0",
     "next": "^16.4.0",
-    "react": "^19.2.6",
+    "react": "^19.3.1",
     "react-calendar": "^6.0.1",
     "react-dom": "^19.2.6",
     "recharts": "^3.10.1",
