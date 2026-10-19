@@ -20,8 +20,9 @@ What it does
      income flows into the income pool rather than being re-invested.
 4. Finance snapshot items store dividend settings in ``details`` (the field read
    by ``plan_components.AccountManager.load_accounts``), so we write there too.
-5. Revalues vested shares with Decimal rounding only when quote and account
-   currencies match. Plan settings own plan grants; details own snapshot grants.
+5. Revalues plan shares with Decimal rounding only when quote and account
+   currencies match. Snapshot monetary values and their aggregate totals stay
+   unchanged; only today's snapshot market settings may be refreshed.
 
 RSU-specific business rules (from copilot-rsu-rules.md)
 ---------------------------------------------------------
@@ -120,8 +121,8 @@ def _apply_rsu_hydration(
     details["dividend_policy"] = _RSU_DIVIDEND_POLICY
 
     # Recalculate item value if rsu_grants with vested shares are present
-    grants = details.get("rsu_grants") if snapshot else acc_settings.get("rsu_grants", details.get("rsu_grants"))
-    if isinstance(grants, list):
+    grants = acc_settings.get("rsu_grants", details.get("rsu_grants"))
+    if isinstance(grants, list) and not snapshot:
         try:
             vested = [Decimal(str(g.get("vested") or 0)) for g in grants]
             if any(not value.is_finite() or value < 0 for value in vested):

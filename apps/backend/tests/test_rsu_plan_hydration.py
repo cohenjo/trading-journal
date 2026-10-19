@@ -157,14 +157,16 @@ def test_hydration_never_relabels_usd_as_ils() -> None:
     assert _apply_rsu_hydration(item, _make_cached("MSFT", "496", "0")) == item
 
 
-def test_snapshot_grants_override_stale_plan_settings() -> None:
-    """Current snapshot details, not a stale copied plan, own snapshot grants."""
+def test_snapshot_valuation_is_immutable() -> None:
+    """Refreshing metadata must not invalidate recorded snapshot aggregate totals."""
     item = {
         "value": 100,
         "account_settings": {"rsu_grants": [{"vested": 999}]},
         "details": {"rsu_grants": []},
     }
-    assert _apply_rsu_hydration(item, _make_cached("MSFT", "496", "0"), snapshot=True)["value"] == 0
+    patched = _apply_rsu_hydration(item, _make_cached("MSFT", "496", "0"), snapshot=True)
+    assert patched["value"] == 100
+    assert patched["details"]["current_price"] == "496"
 
 
 # ---------------------------------------------------------------------------
