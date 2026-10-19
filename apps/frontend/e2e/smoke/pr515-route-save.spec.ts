@@ -50,6 +50,8 @@ test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page
   expect(new URL(page.url()).pathname).toBe('/current-finances');
   const tabs = page.getByRole('button').filter({ has: page.locator('span', { hasText: /^(Savings|Investments|Assets|Liabilities|Priorities)$/ }) });
   await expect(tabs).toHaveCount(5);
+  await expect(page.getByRole('button', { name: 'Add Asset', exact: true })).toBeVisible();
+  const tabsDom = await tabs.evaluateAll(elements => elements.map(element => element.outerHTML));
   await page.getByRole('button', { name: /^Investments/ }).click();
   await page.getByTitle('Edit', { exact: true }).click();
   await expect(page.getByPlaceholder('e.g. GOOGL')).toHaveValue(quote.symbol);
@@ -60,7 +62,8 @@ test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page
     new URL(response.url()).pathname === '/current-finances' && response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Save Changes', exact: true }).click();
   expect((await snapshotSave).status()).toBe(200);
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  // Next's empty route-announcer also has role=alert; only main contains save errors.
+  await expect(page.locator('main').getByRole('alert')).toHaveCount(0);
   await expect.poll(async () => {
     const { data, error } = await admin.from('finance_snapshots').select('data')
       .eq('household_id', householdId).eq('date', today).single();
@@ -77,6 +80,10 @@ test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page
   await expect(page.getByPlaceholder('Vested', { exact: true })).toHaveValue('1.5');
   await expect(page.getByPlaceholder('0.00', { exact: true })).toHaveValue(String(price));
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  console.log('REDFOOT_SNAPSHOT_SAVE', JSON.stringify({
+    source, appTree, route: '/current-finances', tabs: 5, tabsDom,
+    save: 'HTTP 200, database verified, reload verified', errorBannerCount: 0,
+  }));
 
   const { data: plan, error: planError } = await admin.from('plans').insert({
     household_id: householdId, name: 'Redfoot validation',
@@ -119,11 +126,11 @@ test('PR515 actual RSU routes save and reload @smoke', async ({ testUser: { page
   await expect(page.getByRole('heading', { name: /^Redfoot RSU plan/ })).toBeVisible();
   await page.locator('div.group').filter({ has: page.getByRole('heading', { name: /^Redfoot RSU plan/ }) }).locator('button').first().click();
   await expect(page.getByTestId('rsu-dividend-tax-rate')).toHaveValue('26');
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.locator('main').getByRole('alert')).toHaveCount(0);
   expect(errors).toEqual([]);
   expect(serverFailures).toEqual([]);
   const dom = await page.getByTestId('rsu-ticker-input').evaluate(element => element.outerHTML);
-  const evidence = { source, appTree, routes: ['/current-finances', '/plan'], snapshotTabs: 5,
+  const evidence = { source, appTree, routes: ['/current-finances', '/plan'], snapshotTabs: 5, tabsDom,
     testids: ['rsu-ticker-input', 'rsu-dividend-yield-auto', 'rsu-dividend-tax-rate'],
     saves: 'HTTP 200, database verified, reload verified', errorBannerCount: 0,
     successBanner: 'Neither route implements a success banner; persisted state verified instead',
