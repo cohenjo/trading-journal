@@ -1,14 +1,125 @@
 {
+  "schema": "squad-agent-provenance/v1",
+  "schema_version": 1,
+  "revision": 1,
+  "generated_at": "2026-10-19T08:03:29.163Z",
   "agents": {
-    "keaton": { "persistent_name": "Keaton", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "fenster": { "persistent_name": "Fenster", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "hockney": { "persistent_name": "Hockney", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "mcmanus": { "persistent_name": "McManus", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "kobayashi": { "persistent_name": "Kobayashi", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "kujan": { "persistent_name": "Kujan", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "rabin": { "persistent_name": "Rabin", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "redfoot": { "persistent_name": "Redfoot", "universe": "The Usual Suspects", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "scribe": { "persistent_name": "Scribe", "universe": "system", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" },
-    "ralph": { "persistent_name": "Ralph", "universe": "system", "created_at": "2026-02-23T22:46:19Z", "legacy_named": false, "status": "active" }
-  }
+    "keaton": {
+      "display_name": "Keaton",
+      "persistent_name": "Keaton",
+      "role": "Lead",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "fenster": {
+      "display_name": "Fenster",
+      "persistent_name": "Fenster",
+      "role": "Frontend Dev",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "hockney": {
+      "display_name": "Hockney",
+      "persistent_name": "Hockney",
+      "role": "Backend Dev",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "mcmanus": {
+      "display_name": "McManus",
+      "persistent_name": "McManus",
+      "role": "Data/Finance Dev",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "kobayashi": {
+      "display_name": "Kobayashi",
+      "persistent_name": "Kobayashi",
+      "role": "AI Agent Engineer",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "kujan": {
+      "display_name": "Kujan",
+      "persistent_name": "Kujan",
+      "role": "DevOps/Platform",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "rabin": {
+      "display_name": "Rabin",
+      "persistent_name": "Rabin",
+      "role": "Security Engineer",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "redfoot": {
+      "display_name": "Redfoot",
+      "persistent_name": "Redfoot",
+      "role": "Tester",
+      "universe": "The Usual Suspects",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "scribe": {
+      "display_name": "Scribe",
+      "persistent_name": "Scribe",
+      "role": "Session Logger",
+      "universe": "system",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    },
+    "rai": {
+      "display_name": "Rai",
+      "persistent_name": "Rai",
+      "role": "RAI Reviewer",
+      "universe": "system",
+      "status": "active",
+      "legacy_named": false
+    },
+    "fact-checker": {
+      "display_name": "Fact Checker",
+      "persistent_name": "Fact Checker",
+      "role": "Verification",
+      "universe": "system",
+      "status": "active",
+      "legacy_named": false
+    },
+    "ralph": {
+      "display_name": "Ralph",
+      "persistent_name": "Ralph",
+      "role": "Work Monitor",
+      "universe": "system",
+      "status": "active",
+      "created_at": "2026-02-23T22:46:19Z",
+      "updated_at": "2026-02-23T22:46:19Z",
+      "legacy_named": false
+    }
+  },
+  "transaction_id": "8d4f4c0c-5cc5-4075-9afb-94874814dbba"
 }
