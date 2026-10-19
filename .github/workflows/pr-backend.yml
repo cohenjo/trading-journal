@@ -75,8 +75,6 @@ jobs:
   test:
     name: Tests (pytest)
     runs-on: ubuntu-latest
-    # Guard: only run if test files exist
-    if: ${{ hashFiles('apps/backend/**/test_*.py', 'apps/backend/**/*_test.py') != '' }}
     services:
       postgres:
         image: postgres:15
