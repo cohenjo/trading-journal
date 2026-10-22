@@ -15,6 +15,15 @@ for (const [name, value] of Object.entries(variables)) {
     throw new Error(`Missing or invalid local stack value: ${name}`);
   }
 }
+// Register masks before the credentials reach any subsequent job step.
+if (process.env.GITHUB_ACTIONS === 'true') {
+  for (const [name, value] of Object.entries(status)) {
+    if (/KEY|TOKEN|SECRET|PASSWORD|DB_URL/.test(name) && typeof value === 'string' && value) {
+      const escaped = value.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+      console.error(`::add-mask::${escaped}`);
+    }
+  }
+}
 for (const [name, value] of Object.entries(variables)) {
   console.log(`${name}=${value}`);
 }

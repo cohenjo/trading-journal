@@ -90,7 +90,7 @@ jobs:
         run: npm run build
 
       - name: Run smoke + auth tests
-        run: npx playwright test --grep "@smoke|@auth" --project=chromium
+        run: npx playwright test --grep "@smoke|@auth" --project=chromium --trace=off --reporter=line
         env:
           CI: true
 
@@ -98,22 +98,6 @@ jobs:
         if: always()
         working-directory: .
         run: supabase stop --no-backup
-
-      - name: Upload Playwright report (on failure)
-        uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: playwright-report-pr-${{ github.event.pull_request.number }}
-          path: apps/frontend/playwright-report/
-          retention-days: 14
-
-      - name: Upload test traces + screenshots (always)
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: test-results-pr-${{ github.event.pull_request.number }}
-          path: apps/frontend/test-results/
-          retention-days: 7
 
   # ──────────────────────────────────────────────────────────────────────────
   # e2e-full: Nightly full suite — smoke + auth + flows
@@ -152,7 +136,7 @@ jobs:
         run: npm run build
 
       - name: Run full suite
-        run: npx playwright test --grep "@smoke|@auth|@flow" --project=chromium
+        run: npx playwright test --grep "@smoke|@auth|@flow" --project=chromium --trace=off --reporter=line
         env:
           CI: true
 
@@ -160,22 +144,6 @@ jobs:
         if: always()
         working-directory: .
         run: supabase stop --no-backup
-
-      - name: Upload Playwright report (on failure)
-        uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: playwright-report-nightly-${{ github.run_id }}
-          path: apps/frontend/playwright-report/
-          retention-days: 14
-
-      - name: Upload test traces + screenshots (always)
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: test-results-nightly-${{ github.run_id }}
-          path: apps/frontend/test-results/
-          retention-days: 7
 
       - name: Create GitHub issue on nightly failure (deduped)
         uses: actions/github-script@v9
@@ -289,6 +257,9 @@ jobs:
             const value = process.env[name];
             if (!value || /[\r\n]/.test(value)) throw new Error(`Invalid ${name}`);
           }
+          for (const name of ['NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY']) {
+            console.error(`::add-mask::${process.env[name].replaceAll('%', '%25')}`);
+          }
           if (!['https:', 'http:'].includes(new URL(process.env.BASE_URL).protocol)) {
             throw new Error('Target must be an HTTP(S) URL');
           }
@@ -329,7 +300,7 @@ jobs:
       - name: Run ${{ inputs.suite || 'all' }} tests
         # Security: steps output is passed via env var (not interpolated into shell body)
         # to prevent shell-injection if the pattern value were ever tainted.
-        run: npx playwright test --grep "$GREP_PATTERN" --project=chromium
+        run: npx playwright test --grep "$GREP_PATTERN" --project=chromium --trace=off --reporter=line
         env:
           CI: true
           GREP_PATTERN: ${{ steps.grep.outputs.pattern }}
@@ -338,19 +309,3 @@ jobs:
         if: always() && inputs.base_url == ''
         working-directory: .
         run: supabase stop --no-backup
-
-      - name: Upload Playwright report (on failure)
-        uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: playwright-report-dispatch-${{ github.run_id }}
-          path: apps/frontend/playwright-report/
-          retention-days: 14
-
-      - name: Upload test traces + screenshots (always)
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: test-results-dispatch-${{ github.run_id }}
-          path: apps/frontend/test-results/
-          retention-days: 7

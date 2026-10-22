@@ -68,6 +68,10 @@ Every fixture teardown caller now resets household data before deleting auth and
 throws on lookup, RPC, or deletion failure. The lifecycle test checks query errors
 as well as absent membership, household, and auth rows, so failures cannot masquerade
 as successful cleanup.
+The CLI credential summary is suppressed and credentials are masked before export
+to later steps. CI uses only the line reporter with traces disabled; no browser
+reports, screenshots, authentication state, or raw logs are uploaded as artifacts.
+This also applies to manual hosted runs, since browser traces can embed tokens.
 
 Validate workflow contracts with `node --test .github/tests/*.test.cjs` and cookie
 serialization with `cd apps/frontend && npm test -- src/test/session-cookies.test.ts`.

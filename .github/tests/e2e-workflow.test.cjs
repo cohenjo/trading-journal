@@ -88,3 +88,41 @@ test('missing container authentication fails the bootstrap contract', () => {
   assert.throws(() => validate(action.replace('export PGPASSWORD="$POSTGRES_PASSWORD"', '')));
   assert.throws(() => validate(action.replace('sh -eu -c', 'sh -c')));
 });
+
+test('all browser paths disable credential-bearing traces and artifact uploads', () => {
+  const validate = source => {
+    assert.doesNotMatch(source, /upload-artifact|playwright-report\/|test-results\//);
+    const commands = source.split('\n').filter(line => line.includes('run: npx playwright test'));
+    assert.equal(commands.length, 3);
+    for (const command of commands) {
+      assert.match(command, /--trace=off/);
+      assert.match(command, /--reporter=line/);
+    }
+  };
+  validate(workflow);
+  assert.throws(() => validate(workflow.replace('--trace=off', '--trace=on')));
+  assert.throws(() => validate(`${workflow}\nuses: actions/upload-artifact@v7`));
+  const action = fs.readFileSync(path.join(root, '.github/actions/e2e-stack/action.yml'), 'utf8');
+  assert.match(action, /supabase start [^\n]+> \/dev\/null 2>&1/);
+});
+
+test('local credentials are masked before later steps can use them', () => {
+  const result = spawnSync(process.execPath, ['.github/scripts/e2e-env.cjs'], {
+    cwd: root,
+    env: { ...process.env, GITHUB_ACTIONS: 'true' },
+    input: JSON.stringify({
+      API_URL: 'http://127.0.0.1:54321',
+      ANON_KEY: 'synthetic-anon',
+      SERVICE_ROLE_KEY: 'synthetic-service',
+      SECRET_KEY: 'synthetic-secret',
+    }),
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  assert.deepEqual(result.stderr.trim().split('\n'), [
+    '::add-mask::synthetic-anon',
+    '::add-mask::synthetic-service',
+    '::add-mask::synthetic-secret',
+  ]);
+  assert.match(result.stdout, /SUPABASE_SERVICE_ROLE_KEY=synthetic-service/);
+});
