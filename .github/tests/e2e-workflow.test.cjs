@@ -67,8 +67,24 @@ test('fixture bootstrap restricts only the existing reset RPC, without weakening
   const action = fs.readFileSync(path.join(root, '.github/actions/e2e-stack/action.yml'), 'utf8');
   assert.match(action, /docker exec -i supabase_db_trading-journal/);
   assert.match(action, /--set ON_ERROR_STOP=1/);
+  assert.match(action, /export PGPASSWORD="\$POSTGRES_PASSWORD"/);
+  assert.match(action, /psql --no-password --username supabase_admin/);
   assert.match(sql, /owner to supabase_admin/);
+  assert.match(sql, /set search_path = ''/);
+  assert.match(sql, /p\.prosecdef and r\.rolsuper/);
   assert.match(sql, /from public, anon, authenticated/);
   assert.match(sql, /grant execute on function public\.e2e_reset_test_user\(text\) to service_role/);
   assert.doesNotMatch(sql, /disable\s+(trigger|row level security)|grant\s+set|set\s+session_replication_role/i);
+});
+
+test('missing container authentication fails the bootstrap contract', () => {
+  const action = fs.readFileSync(path.join(root, '.github/actions/e2e-stack/action.yml'), 'utf8');
+  const validate = source => {
+    assert.match(source, /export PGPASSWORD="\$POSTGRES_PASSWORD"/);
+    assert.match(source, /sh -eu -c/);
+    assert.match(source, /--no-password/);
+  };
+  validate(action);
+  assert.throws(() => validate(action.replace('export PGPASSWORD="$POSTGRES_PASSWORD"', '')));
+  assert.throws(() => validate(action.replace('sh -eu -c', 'sh -c')));
 });

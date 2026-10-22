@@ -109,29 +109,36 @@ test.describe('teardown cascade verification @auth', () => {
 
     // Verify data exists before teardown
     const admin = getAdminClient();
-    const { data: memberBefore } = await admin
+    const { data: memberBefore, error: memberBeforeError } = await admin
       .from('household_members')
       .select('household_id')
       .eq('user_id', user.userId)
       .maybeSingle();
+    expect(memberBeforeError).toBeNull();
     expect(memberBefore?.household_id).toBe(user.householdId);
 
     // Delete the auth user — should cascade
     await teardownTestUser(user.userId);
 
     // Household and member rows must be gone
-    const { data: memberAfter } = await admin
+    const { data: memberAfter, error: memberAfterError } = await admin
       .from('household_members')
       .select('household_id')
       .eq('user_id', user.userId)
       .maybeSingle();
+    expect(memberAfterError).toBeNull();
     expect(memberAfter).toBeNull();
 
-    const { data: householdAfter } = await admin
+    const { data: householdAfter, error: householdAfterError } = await admin
       .from('households')
       .select('id')
       .eq('id', user.householdId)
       .maybeSingle();
+    expect(householdAfterError).toBeNull();
     expect(householdAfter).toBeNull();
+
+    const { data: authAfter, error: authAfterError } = await admin.auth.admin.getUserById(user.userId);
+    expect(authAfter.user).toBeNull();
+    expect(authAfterError?.status).toBe(404);
   });
 });

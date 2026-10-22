@@ -16,8 +16,12 @@ runs:
     - name: Configure service-only fixture cleanup
       shell: bash
       run: |
-        docker exec -i supabase_db_trading-journal \
-          psql --username supabase_admin --dbname postgres --set ON_ERROR_STOP=1 \
+        # PG17 authenticates Unix sockets too. Use only this disposable
+        # container's generated password, never a hosted database credential.
+        docker exec -i supabase_db_trading-journal sh -eu -c '
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          exec psql --no-password --username supabase_admin --dbname postgres --set ON_ERROR_STOP=1
+        ' \
           < .github/scripts/e2e-bootstrap.sql
     - name: Export local test credentials
       shell: bash

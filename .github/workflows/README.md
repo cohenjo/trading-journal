@@ -60,9 +60,19 @@ bootstrap restores that **single fixture function's** privileged owner and
 explicitly restricts execution to `service_role`. It does not grant replication
 privileges to app roles or alter table triggers/RLS. Browser tests verify anonymous
 and authenticated callers are denied and cannot destroy the fixture household.
+PG17 requires password authentication even for the container's Unix socket;
+the bootstrap supplies only that disposable container's `POSTGRES_PASSWORD` to
+`psql` without printing or exporting it to the job. Bootstrap SQL verifies a
+privileged definer and service-only execution, with an empty search path.
+Every fixture teardown caller now resets household data before deleting auth and
+throws on lookup, RPC, or deletion failure. The lifecycle test checks query errors
+as well as absent membership, household, and auth rows, so failures cannot masquerade
+as successful cleanup.
 
 Validate workflow contracts with `node --test .github/tests/*.test.cjs` and cookie
 serialization with `cd apps/frontend && npm test -- src/test/session-cookies.test.ts`.
+Teardown error-path regressions run with `npm test -- src/test/e2e-teardown.test.ts`
+from `apps/frontend`.
 Real browser CI remains required; those tests are not substitutes for it.
 
 The independent PR frontend Build job also supplies non-secret, loopback public
