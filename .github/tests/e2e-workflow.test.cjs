@@ -91,7 +91,7 @@ test('missing container authentication fails the bootstrap contract', () => {
 
 test('all browser paths disable credential-bearing traces and artifact uploads', () => {
   const validate = source => {
-    assert.doesNotMatch(source, /upload-artifact|playwright-report\/|test-results\//);
+    assert.doesNotMatch(source, /upload-artifact|playwright-report\/|test-results\/|report artifact/);
     const commands = source.split('\n').filter(line => line.includes('run: npx playwright test'));
     assert.equal(commands.length, 3);
     for (const command of commands) {

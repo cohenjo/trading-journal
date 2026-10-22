@@ -194,7 +194,7 @@ jobs:
                   `**Run:** ${runUrl}`,
                   '',
                   '### Next steps',
-                  '1. Check the Playwright report artifact in the run above.',
+                  '1. Check the masked browser-test step output in the run above (raw artifacts are disabled).',
                   '2. Identify flaky tests vs genuine regressions.',
                   '3. Tag this issue with the affected tier (`@smoke`, `@auth`, `@flow`).',
                   '',
