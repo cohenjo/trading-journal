@@ -53,3 +53,22 @@ test('stack environment export names exact credentials and rejects hosted or inc
     assert.equal(result.stdout, '');
   }
 });
+
+test('validation-only frontend build has public synthetic config, never service credentials', () => {
+  const source = fs.readFileSync(path.join(root, '.github/workflows/pr-frontend.yml'), 'utf8');
+  const build = source.split('  build:\n')[1].split('  test:\n')[0];
+  assert.match(build, /NEXT_PUBLIC_SUPABASE_URL: http:\/\/127\.0\.0\.1:54321/);
+  assert.match(build, /NEXT_PUBLIC_SUPABASE_ANON_KEY: synthetic-ci-build-only/);
+  assert.doesNotMatch(build, /secrets\.|SERVICE_ROLE|continue-on-error/);
+});
+
+test('fixture bootstrap restricts only the existing reset RPC, without weakening table guards', () => {
+  const sql = fs.readFileSync(path.join(root, '.github/scripts/e2e-bootstrap.sql'), 'utf8');
+  const action = fs.readFileSync(path.join(root, '.github/actions/e2e-stack/action.yml'), 'utf8');
+  assert.match(action, /docker exec -i supabase_db_trading-journal/);
+  assert.match(action, /--set ON_ERROR_STOP=1/);
+  assert.match(sql, /owner to supabase_admin/);
+  assert.match(sql, /from public, anon, authenticated/);
+  assert.match(sql, /grant execute on function public\.e2e_reset_test_user\(text\) to service_role/);
+  assert.doesNotMatch(sql, /disable\s+(trigger|row level security)|grant\s+set|set\s+session_replication_role/i);
+});

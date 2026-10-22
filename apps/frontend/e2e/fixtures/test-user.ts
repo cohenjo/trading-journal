@@ -31,6 +31,7 @@ export interface TestUserFixture {
   userId: string;
   email: string;
   householdId: string;
+  accessToken: string;
 }
 
 /**
@@ -131,12 +132,12 @@ export const test = base.extend<{ testUser: TestUserFixture }>({
     const { id: userId } = await createE2eUser(email, PASSWORD);
 
     // Inject session cookie so Next.js SSR middleware sees the session
-    await injectAuthCookie(page, supabaseUrl, anonKey, email, PASSWORD);
+    const accessToken = await injectAuthCookie(page, supabaseUrl, anonKey, email, PASSWORD);
 
     // Wait for the auto-provision trigger to create the household
     const householdId = await waitForHousehold(userId);
 
-    await provideFixture({ page, userId, email, householdId });
+    await provideFixture({ page, userId, email, householdId, accessToken });
 
     // Teardown — explicitly cleans household data then deletes auth user.
     // NOTE: there is no ON DELETE CASCADE from auth.users → household_members,

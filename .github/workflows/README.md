@@ -49,11 +49,26 @@ reject sign-in redirects; navigation errors cannot become a false-green status 0
 The three anonymous route checks assert the actual sign-in URL (including `next`)
 and sign-in heading, rather than treating any non-500 page as an auth gate.
 Three duplicate HTML-length/title-only tests were folded into these stronger
-checks (42 smoke/auth tests instead of 45); no security coverage was skipped.
+checks; no security coverage was skipped. A new access-denial check for the
+fixture cleanup RPC brings the inventory to 43 smoke/auth tests instead of 45.
+
+Run 39823516955 reached real browsers: 39 passed (including restored two-user
+isolation), two existing tests skipped, and one cleanup assertion failed.
+Fresh local migrations owned the legacy `e2e_reset_test_user` fixture RPC with
+an unprivileged role, so its intended teardown operation failed. The local-only
+bootstrap restores that **single fixture function's** privileged owner and
+explicitly restricts execution to `service_role`. It does not grant replication
+privileges to app roles or alter table triggers/RLS. Browser tests verify anonymous
+and authenticated callers are denied and cannot destroy the fixture household.
 
 Validate workflow contracts with `node --test .github/tests/*.test.cjs` and cookie
 serialization with `cd apps/frontend && npm test -- src/test/session-cookies.test.ts`.
 Real browser CI remains required; those tests are not substitutes for it.
+
+The independent PR frontend Build job also supplies non-secret, loopback public
+Supabase placeholders: the SSR browser client is constructed during prerendering
+and requires a URL/key even without runtime requests. Its artifact is validation
+only and is never deployed; Vercel performs its own build with deployment config.
 
 ## Removed Squad Template Workflows
 

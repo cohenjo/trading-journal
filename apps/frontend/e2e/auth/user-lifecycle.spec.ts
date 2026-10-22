@@ -76,6 +76,29 @@ test.describe('test-user provisioning @auth', () => {
 });
 
 test.describe('teardown cascade verification @auth', () => {
+  test('fixture cleanup RPC is denied to anonymous and authenticated clients @auth', async ({
+    request,
+    testUser,
+  }) => {
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const endpoint = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/e2e_reset_test_user`;
+    for (const token of [anonKey, testUser.accessToken]) {
+      const response = await request.post(endpoint, {
+        headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+        data: { p_email: testUser.email },
+      });
+      expect([401, 403]).toContain(response.status());
+      expect(await response.json()).toMatchObject({ code: '42501' });
+    }
+    const { data, error } = await getAdminClient()
+      .from('household_members')
+      .select('household_id')
+      .eq('user_id', testUser.userId)
+      .single();
+    expect(error).toBeNull();
+    expect(data?.household_id).toBe(testUser.householdId);
+  });
+
   /**
    * This test verifies that deleting a user cascades correctly.
    * It provisions its own throwaway user (outside the fixture) so it can
