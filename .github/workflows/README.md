@@ -25,7 +25,9 @@ This directory contains PR validation, backup, and Squad routing workflows. **Ve
 Automatic E2E jobs use Ubuntu **24.04**, Node 22, the locked frontend dependencies,
 and Supabase CLI **2.95.4**. `ubuntu-latest` moved to Ubuntu 26.04, unsupported by
 Playwright 1.59; nightly runs 39568069437 and 39746822934 failed during browser
-installation, before any tests ran.
+installation, before any tests ran. Images use their upstream Docker Hub references:
+run 39822390266 demonstrated GHCR anonymous-pull throttling, and run 39822647369
+hit public ECR's data quota, both before migrations or browser tests.
 
 Dependabot cannot read ordinary Actions secrets. Previously its PRs failed the
 required-secrets guard (for example run 39228467938). The local composite action
@@ -44,6 +46,10 @@ checking seeded salaries; PlanEditor starts on **Accounts**. Session injection
 uses the Supabase SSR storage key, chunking, and actual browser target hostname,
 including HTTP loopback URLs. Authenticated walkthroughs require HTTP 200 and
 reject sign-in redirects; navigation errors cannot become a false-green status 0.
+The three anonymous route checks assert the actual sign-in URL (including `next`)
+and sign-in heading, rather than treating any non-500 page as an auth gate.
+Three duplicate HTML-length/title-only tests were folded into these stronger
+checks (42 smoke/auth tests instead of 45); no security coverage was skipped.
 
 Validate workflow contracts with `node --test .github/tests/*.test.cjs` and cookie
 serialization with `cd apps/frontend && npm test -- src/test/session-cookies.test.ts`.
