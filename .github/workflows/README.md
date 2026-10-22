@@ -18,6 +18,36 @@ This directory contains PR validation, backup, and Squad routing workflows. **Ve
 | `squad-triage.yml` | Issue labeled `squad` | Routes new Squad inbox issues to the best agent/member |
 | `sync-squad-labels.yml` | Squad team file changes + manual | Syncs GitHub labels from the Squad roster |
 | `squad-ci.yml` | PR/push to `main` | Node built-in tests for routing, support registration, coordinator canaries, and workflow conditions |
+| `playwright-e2e.yml` | PR, nightly, manual | Chromium smoke/auth and nightly flows against this checkout and disposable Supabase |
+
+## E2E reliability
+
+Automatic E2E jobs use Ubuntu **24.04**, Node 22, the locked frontend dependencies,
+and Supabase CLI **2.95.4**. `ubuntu-latest` moved to Ubuntu 26.04, unsupported by
+Playwright 1.59; nightly runs 39568069437 and 39746822934 failed during browser
+installation, before any tests ran.
+
+Dependabot cannot read ordinary Actions secrets. Previously its PRs failed the
+required-secrets guard (for example run 39228467938). The local composite action
+starts disposable Auth/PostgREST/Postgres, applies the actual repository migrations,
+and exports only loopback test credentials. Next.js is built from the checked-out
+PR, not an unrelated deployed URL. No production override or hosted service-role
+key is used. Cleanup removes the disposable stack even after test failure.
+
+Manual runs with a blank `base_url` use the same local setup. An explicitly supplied
+hosted staging URL requires the three `E2E_SUPABASE_*` secrets and remains subject
+to the fixture production-safety guard; opaque production project refs are blocked.
+Do not use `pull_request_target` or add hosted credentials to untrusted PR runs.
+
+The A5 household-isolation browser test (#485) opens the **Income** tab before
+checking seeded salaries; PlanEditor starts on **Accounts**. Session injection
+uses the Supabase SSR storage key, chunking, and actual browser target hostname,
+including HTTP loopback URLs. Authenticated walkthroughs require HTTP 200 and
+reject sign-in redirects; navigation errors cannot become a false-green status 0.
+
+Validate workflow contracts with `node --test .github/tests/*.test.cjs` and cookie
+serialization with `cd apps/frontend && npm test -- src/test/session-cookies.test.ts`.
+Real browser CI remains required; those tests are not substitutes for it.
 
 ## Removed Squad Template Workflows
 

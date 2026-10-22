@@ -23,6 +23,8 @@
  */
 import { test as base, expect, Page } from '@playwright/test';
 import { createE2eUser, deleteE2eUser, makeE2eEmail } from './admin';
+import { sessionCookies } from './session-cookies';
+import type { Cookie } from '@playwright/test';
 
 export interface AuthCookieFixtures {
   authenticatedUser: { page: Page; email: string; userId: string; accessToken: string };
@@ -32,22 +34,11 @@ export interface AuthCookieFixtures {
 interface WorkerSession {
   email: string;
   userId: string;
-  cookieName: string;
-  cookieValue: string;
-  cookieExpires: number;
+  cookies: Cookie[];
   accessToken: string;
 }
 
 const PASSWORD = 'E2eTestPass!1';
-
-function base64UrlEncode(input: string): string {
-  // Same algorithm @supabase/ssr uses (utils.ts: stringToBase64URL)
-  return Buffer.from(input, 'utf-8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
 
 async function passwordGrant(
   url: string,
@@ -77,17 +68,12 @@ async function passwordGrant(
   return resp.json();
 }
 
-function projectRefFromUrl(url: string): string {
-  // https://abcdefgh.supabase.co -> abcdefgh
-  return url.replace('https://', '').split('.')[0];
-}
-
 export const test = base.extend<AuthCookieFixtures, { _workerSession: WorkerSession }>({
   // ── Worker-scoped: create ONE user per Playwright worker ──────────────────
   // This dramatically reduces Supabase auth API calls (1 per worker instead of
   // 1 per test), which prevents hitting rate limits when running many tests.
   _workerSession: [
-    async ({}, use) => {
+    async ({}, provideFixture) => {
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       if (!supabaseUrl || !anonKey) {
@@ -102,16 +88,16 @@ export const test = base.extend<AuthCookieFixtures, { _workerSession: WorkerSess
         session.expires_at = Math.floor(Date.now() / 1000) + (session.expires_in ?? 3600);
       }
 
-      const ref = projectRefFromUrl(supabaseUrl);
-      const cookieName = `sb-${ref}-auth-token`;
-      const cookieValue = 'base64-' + base64UrlEncode(JSON.stringify(session));
+      const cookies = sessionCookies(
+        supabaseUrl,
+        process.env.BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+        session,
+      );
 
-      await use({
+      await provideFixture({
         email,
         userId,
-        cookieName,
-        cookieValue,
-        cookieExpires: session.expires_at,
+        cookies,
         accessToken: session.access_token,
       });
 
@@ -123,21 +109,10 @@ export const test = base.extend<AuthCookieFixtures, { _workerSession: WorkerSess
   ],
 
   // ── Test-scoped: inject the shared cookie into a fresh page ───────────────
-  authenticatedUser: async ({ page, _workerSession }, use) => {
-    await page.context().addCookies([
-      {
-        name: _workerSession.cookieName,
-        value: _workerSession.cookieValue,
-        domain: 'localhost',
-        path: '/',
-        httpOnly: false,
-        secure: false,
-        sameSite: 'Lax',
-        expires: _workerSession.cookieExpires,
-      },
-    ]);
+  authenticatedUser: async ({ page, _workerSession }, provideFixture) => {
+    await page.context().addCookies(_workerSession.cookies);
 
-    await use({
+    await provideFixture({
       page,
       email: _workerSession.email,
       userId: _workerSession.userId,

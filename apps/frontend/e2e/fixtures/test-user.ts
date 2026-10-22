@@ -22,6 +22,7 @@
 import { test as base, type Page } from '@playwright/test';
 import { createE2eUser, makeE2eEmail, getAdminClient } from './admin';
 import { teardownTestUser } from '../helpers/provision-test-user';
+import { sessionCookies } from './session-cookies';
 
 const PASSWORD = 'E2eTestPass!1';
 
@@ -71,30 +72,11 @@ async function injectAuthCookie(
     session.expires_at = Math.floor(Date.now() / 1000) + (session.expires_in ?? 3600);
   }
 
-  // Build the cookie @supabase/ssr expects:
-  //   sb-{ref}-auth-token = "base64-" + base64url(JSON.stringify(session))
-  const ref = supabaseUrl.replace('https://', '').split('.')[0];
-  const cookieName = `sb-${ref}-auth-token`;
-  const cookieValue =
-    'base64-' +
-    Buffer.from(JSON.stringify(session), 'utf-8')
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
-
-  await page.context().addCookies([
-    {
-      name: cookieName,
-      value: cookieValue,
-      domain: 'localhost',
-      path: '/',
-      httpOnly: false,
-      secure: false,
-      sameSite: 'Lax',
-      expires: session.expires_at,
-    },
-  ]);
+  await page.context().addCookies(sessionCookies(
+    supabaseUrl,
+    process.env.BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    session,
+  ));
 
   return session.access_token;
 }
@@ -135,7 +117,7 @@ async function waitForHousehold(userId: string, timeoutMs = 5_000): Promise<stri
 }
 
 export const test = base.extend<{ testUser: TestUserFixture }>({
-  testUser: async ({ page }, use) => {
+  testUser: async ({ page }, provideFixture) => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -154,7 +136,7 @@ export const test = base.extend<{ testUser: TestUserFixture }>({
     // Wait for the auto-provision trigger to create the household
     const householdId = await waitForHousehold(userId);
 
-    await use({ page, userId, email, householdId });
+    await provideFixture({ page, userId, email, householdId });
 
     // Teardown — explicitly cleans household data then deletes auth user.
     // NOTE: there is no ON DELETE CASCADE from auth.users → household_members,

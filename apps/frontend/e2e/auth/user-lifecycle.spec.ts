@@ -63,25 +63,15 @@ test.describe('test-user provisioning @auth', () => {
   test('auth session is injected — protected route resolves without redirect @auth', async ({
     testUser: { page },
   }) => {
-    // Skip if no local server is running (BASE_URL points to localhost)
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-    if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
-      try {
-        const response = await page.goto('/', { timeout: 5_000 });
-        expect(response?.status()).toBeLessThan(400);
-      } catch {
-        test.skip(true, 'No local dev server running — start with `npm run dev`');
-        return;
-      }
-    } else {
-      const response = await page.goto('/');
-      expect(response?.status()).toBeLessThan(400);
-    }
+    const response = await page.goto('/');
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveURL(/\/summary$/);
 
     // Confirm we did NOT land on the login page
     const url = page.url();
     expect(url).not.toContain('/login');
     expect(url).not.toContain('/auth');
+    expect(url).not.toContain('/signin');
   });
 });
 

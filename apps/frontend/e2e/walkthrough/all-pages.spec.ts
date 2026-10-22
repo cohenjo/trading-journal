@@ -83,12 +83,12 @@ for (const path of PAGES) {
       }
     });
 
-    const resp = await page.goto(path, { waitUntil: 'networkidle', timeout: 15000 }).catch(() => null);
+    const resp = await page.goto(path, { waitUntil: 'networkidle', timeout: 15000 });
     const status = resp?.status() ?? 0;
     const main = await page.locator('main').count();
 
-    // Every page should resolve to a 2xx (or a login redirect for protected pages)
-    expect(status, `Page ${path} returned unexpected status`).toBeLessThan(500);
+    expect(status, `Page ${path} returned unexpected status`).toBe(200);
+    await expect(page, `Authenticated ${path} must not resolve to sign-in`).not.toHaveURL(/\/signin/);
 
     // No unexpected 4xx/5xx on /api/* routes
     expect(
