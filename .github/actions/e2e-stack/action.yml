@@ -8,6 +8,9 @@ runs:
         version: 2.95.4
     - name: Start Supabase and apply migrations
       shell: bash
+      env:
+        # Avoid GHCR anonymous-pull throttling on shared GitHub-hosted runners.
+        SUPABASE_INTERNAL_IMAGE_REGISTRY: public.ecr.aws
       run: |
         supabase start -x studio,postgres-meta,realtime,storage-api,imgproxy,mailpit,edge-runtime,logflare,vector,supavisor
     - name: Export local test credentials
