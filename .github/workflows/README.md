@@ -18,6 +18,71 @@ This directory contains PR validation, backup, and Squad routing workflows. **Ve
 | `squad-triage.yml` | Issue labeled `squad` | Routes new Squad inbox issues to the best agent/member |
 | `sync-squad-labels.yml` | Squad team file changes + manual | Syncs GitHub labels from the Squad roster |
 | `squad-ci.yml` | PR/push to `main` | Node built-in tests for routing, support registration, coordinator canaries, and workflow conditions |
+| `playwright-e2e.yml` | PR, nightly, manual | Chromium smoke/auth and nightly flows against this checkout and disposable Supabase |
+
+## E2E reliability
+
+Automatic E2E jobs use Ubuntu **24.04**, Node 22, the locked frontend dependencies,
+and Supabase CLI **2.95.4**. `ubuntu-latest` moved to Ubuntu 26.04, unsupported by
+Playwright 1.59; nightly runs 39568069437 and 39746822934 failed during browser
+installation, before any tests ran. Images use their upstream Docker Hub references:
+run 39822390266 demonstrated GHCR anonymous-pull throttling, and run 39822647369
+hit public ECR's data quota, both before migrations or browser tests.
+
+Dependabot cannot read ordinary Actions secrets. Previously its PRs failed the
+required-secrets guard (for example run 39228467938). The local composite action
+starts disposable Auth/PostgREST/Postgres, applies the actual repository migrations,
+and exports only loopback test credentials. Next.js is built from the checked-out
+PR, not an unrelated deployed URL. No production override or hosted service-role
+key is used. Cleanup removes the disposable stack even after test failure.
+
+Manual runs with a blank `base_url` use the same local setup. An explicitly supplied
+hosted staging URL requires the three `E2E_SUPABASE_*` secrets and remains subject
+to the fixture production-safety guard; opaque production project refs are blocked.
+Do not use `pull_request_target` or add hosted credentials to untrusted PR runs.
+
+The A5 household-isolation browser test (#485) opens the **Income** tab before
+checking seeded salaries; PlanEditor starts on **Accounts**. Session injection
+uses the Supabase SSR storage key, chunking, and actual browser target hostname,
+including HTTP loopback URLs. Authenticated walkthroughs require HTTP 200 and
+reject sign-in redirects; navigation errors cannot become a false-green status 0.
+The three anonymous route checks assert the actual sign-in URL (including `next`)
+and sign-in heading, rather than treating any non-500 page as an auth gate.
+Three duplicate HTML-length/title-only tests were folded into these stronger
+checks; no security coverage was skipped. A new access-denial check for the
+fixture cleanup RPC brings the inventory to 43 smoke/auth tests instead of 45.
+
+Run 39823516955 reached real browsers: 39 passed (including restored two-user
+isolation), two existing tests skipped, and one cleanup assertion failed.
+Fresh local migrations owned the legacy `e2e_reset_test_user` fixture RPC with
+an unprivileged role, so its intended teardown operation failed. The local-only
+bootstrap restores that **single fixture function's** privileged owner and
+explicitly restricts execution to `service_role`. It does not grant replication
+privileges to app roles or alter table triggers/RLS. Browser tests verify anonymous
+and authenticated callers are denied and cannot destroy the fixture household.
+PG17 requires password authentication even for the container's Unix socket;
+the bootstrap supplies only that disposable container's `POSTGRES_PASSWORD` to
+`psql` without printing or exporting it to the job. Bootstrap SQL verifies a
+privileged definer and service-only execution, with an empty search path.
+Every fixture teardown caller now resets household data before deleting auth and
+throws on lookup, RPC, or deletion failure. The lifecycle test checks query errors
+as well as absent membership, household, and auth rows, so failures cannot masquerade
+as successful cleanup.
+The CLI credential summary is suppressed and credentials are masked before export
+to later steps. CI uses only the line reporter with traces disabled; no browser
+reports, screenshots, authentication state, or raw logs are uploaded as artifacts.
+This also applies to manual hosted runs, since browser traces can embed tokens.
+
+Validate workflow contracts with `node --test .github/tests/*.test.cjs` and cookie
+serialization with `cd apps/frontend && npm test -- src/test/session-cookies.test.ts`.
+Teardown error-path regressions run with `npm test -- src/test/e2e-teardown.test.ts`
+from `apps/frontend`.
+Real browser CI remains required; those tests are not substitutes for it.
+
+The independent PR frontend Build job also supplies non-secret, loopback public
+Supabase placeholders: the SSR browser client is constructed during prerendering
+and requires a URL/key even without runtime requests. Its artifact is validation
+only and is never deployed; Vercel performs its own build with deployment config.
 
 ## Removed Squad Template Workflows
 

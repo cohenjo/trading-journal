@@ -205,7 +205,7 @@ export async function provisionTestUser(opts?: { sharedMode?: boolean }): Promis
  *   3. households        (CASCADE deletes household_members via FK)
  *   4. auth.users        (admin.deleteUser)
  *
- * Safe to call in afterAll — never throws (logs warnings instead).
+ * Cleanup failures throw so fixture teardown fails the test instead of leaking data.
  *
  * @param userId - The user UUID returned by `provisionTestUser()`.
  * @param opts.skipShared - If true and E2E_TEST_USER_EMAIL is set, skips teardown
@@ -223,11 +223,15 @@ export async function teardownTestUser(
   const admin = getAdminClient();
 
   // ── Step 1: find household ──────────────────────────────────────────────────
-  const { data: memberRow } = await admin
+  const { data: memberRow, error: memberError } = await admin
     .from('household_members')
     .select('household_id')
     .eq('user_id', userId)
     .maybeSingle();
+
+  if (memberError) {
+    throw new Error(`[provision-test-user] household lookup failed: ${memberError.message}`);
+  }
 
   const householdId = memberRow?.household_id as string | undefined;
 
@@ -238,15 +242,17 @@ export async function teardownTestUser(
   if (householdId) {
     const userRecord = await admin.auth.admin.getUserById(userId);
     const email = userRecord.data.user?.email;
-    if (email) {
-      const { error: rpcErr } = await admin.rpc(
-        // The admin client is untyped (SupabaseClient<any>) so rpc accepts any string
-        'e2e_reset_test_user' as Parameters<typeof admin.rpc>[0],
-        { p_email: email },
+    if (userRecord.error || !email) {
+      throw new Error(
+        `[provision-test-user] cleanup user lookup failed: ${userRecord.error?.message ?? 'missing email'}`,
       );
-      if (rpcErr) {
-        console.warn(`[provision-test-user] e2e_reset_test_user RPC warning: ${rpcErr.message}`);
-      }
+    }
+    const { error: rpcErr } = await admin.rpc(
+      'e2e_reset_test_user' as Parameters<typeof admin.rpc>[0],
+      { p_email: email },
+    );
+    if (rpcErr) {
+      throw new Error(`[provision-test-user] e2e_reset_test_user RPC failed: ${rpcErr.message}`);
     }
   }
 
@@ -257,8 +263,8 @@ export async function teardownTestUser(
     if (error.message.toLowerCase().includes('not found')) {
       return;
     }
-    console.warn(
-      `[provision-test-user] teardown warning for user ${userId}: ${error.message}`,
+    throw new Error(
+      `[provision-test-user] auth user deletion failed for ${userId}: ${error.message}`,
     );
   } else {
     console.log(`[provision-test-user] Deleted user ${userId} and cascaded household data.`);

@@ -70,9 +70,11 @@ jobs:
       - name: Next.js production build
         run: npm run build
         env:
-          # Build must succeed without runtime env vars (fail-closed policy).
-          # Vercel injects real env vars at deploy time via git integration.
+          # SSR clients require nonempty public config even while prerendering.
+          # This artifact is validation-only; Vercel builds with its own config.
           NODE_ENV: production
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: synthetic-ci-build-only
 
   test:
     name: Unit Tests

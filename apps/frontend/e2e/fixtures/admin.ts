@@ -105,11 +105,8 @@ export async function createE2eUser(
   return { id: data.user.id, email, password };
 }
 
-/** Deletes a user by id. Safe to call in afterAll — swallows not-found errors. */
+/** Removes fixture household data before deleting auth; cleanup failures fail the test. */
 export async function deleteE2eUser(userId: string): Promise<void> {
-  const admin = getAdminClient();
-  const { error } = await admin.auth.admin.deleteUser(userId);
-  if (error && !error.message.includes('not found')) {
-    console.warn(`[e2e/admin] Failed to delete user ${userId}: ${error.message}`);
-  }
+  const { teardownTestUser } = await import('../helpers/provision-test-user');
+  await teardownTestUser(userId);
 }

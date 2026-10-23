@@ -63,29 +63,42 @@ test.describe('test-user provisioning @auth', () => {
   test('auth session is injected — protected route resolves without redirect @auth', async ({
     testUser: { page },
   }) => {
-    // Skip if no local server is running (BASE_URL points to localhost)
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-    if (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
-      try {
-        const response = await page.goto('/', { timeout: 5_000 });
-        expect(response?.status()).toBeLessThan(400);
-      } catch {
-        test.skip(true, 'No local dev server running — start with `npm run dev`');
-        return;
-      }
-    } else {
-      const response = await page.goto('/');
-      expect(response?.status()).toBeLessThan(400);
-    }
+    const response = await page.goto('/');
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveURL(/\/summary$/);
 
     // Confirm we did NOT land on the login page
     const url = page.url();
     expect(url).not.toContain('/login');
     expect(url).not.toContain('/auth');
+    expect(url).not.toContain('/signin');
   });
 });
 
 test.describe('teardown cascade verification @auth', () => {
+  test('fixture cleanup RPC is denied to anonymous and authenticated clients @auth', async ({
+    request,
+    testUser,
+  }) => {
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+    const endpoint = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/e2e_reset_test_user`;
+    for (const token of [anonKey, testUser.accessToken]) {
+      const response = await request.post(endpoint, {
+        headers: { apikey: anonKey, Authorization: `Bearer ${token}` },
+        data: { p_email: testUser.email },
+      });
+      expect([401, 403]).toContain(response.status());
+      expect(await response.json()).toMatchObject({ code: '42501' });
+    }
+    const { data, error } = await getAdminClient()
+      .from('household_members')
+      .select('household_id')
+      .eq('user_id', testUser.userId)
+      .single();
+    expect(error).toBeNull();
+    expect(data?.household_id).toBe(testUser.householdId);
+  });
+
   /**
    * This test verifies that deleting a user cascades correctly.
    * It provisions its own throwaway user (outside the fixture) so it can
@@ -96,29 +109,36 @@ test.describe('teardown cascade verification @auth', () => {
 
     // Verify data exists before teardown
     const admin = getAdminClient();
-    const { data: memberBefore } = await admin
+    const { data: memberBefore, error: memberBeforeError } = await admin
       .from('household_members')
       .select('household_id')
       .eq('user_id', user.userId)
       .maybeSingle();
+    expect(memberBeforeError).toBeNull();
     expect(memberBefore?.household_id).toBe(user.householdId);
 
     // Delete the auth user — should cascade
     await teardownTestUser(user.userId);
 
     // Household and member rows must be gone
-    const { data: memberAfter } = await admin
+    const { data: memberAfter, error: memberAfterError } = await admin
       .from('household_members')
       .select('household_id')
       .eq('user_id', user.userId)
       .maybeSingle();
+    expect(memberAfterError).toBeNull();
     expect(memberAfter).toBeNull();
 
-    const { data: householdAfter } = await admin
+    const { data: householdAfter, error: householdAfterError } = await admin
       .from('households')
       .select('id')
       .eq('id', user.householdId)
       .maybeSingle();
+    expect(householdAfterError).toBeNull();
     expect(householdAfter).toBeNull();
+
+    const { data: authAfter, error: authAfterError } = await admin.auth.admin.getUserById(user.userId);
+    expect(authAfter.user).toBeNull();
+    expect(authAfterError?.status).toBe(404);
   });
 });

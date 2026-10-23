@@ -1,0 +1,31 @@
+name: Isolated E2E database
+description: Start disposable Supabase with repository migrations, without hosted credentials
+runs:
+  using: composite
+  steps:
+    - uses: supabase/setup-cli@v1
+      with:
+        version: 2.95.4
+    - name: Start Supabase and apply migrations
+      shell: bash
+      env:
+        # GHCR and public ECR both returned anonymous-pull quota errors.
+        SUPABASE_INTERNAL_IMAGE_REGISTRY: docker.io
+      run: |
+        # The CLI summary contains credentials. Keep it out of Actions logs;
+        # the original exit status still fails startup closed.
+        supabase start -x studio,postgres-meta,realtime,storage-api,imgproxy,mailpit,edge-runtime,logflare,vector,supavisor > /dev/null 2>&1
+    - name: Configure service-only fixture cleanup
+      shell: bash
+      run: |
+        # PG17 authenticates Unix sockets too. Use only this disposable
+        # container's generated password, never a hosted database credential.
+        docker exec -i supabase_db_trading-journal sh -eu -c '
+          export PGPASSWORD="$POSTGRES_PASSWORD"
+          exec psql --no-password --username supabase_admin --dbname postgres --set ON_ERROR_STOP=1
+        ' \
+          < .github/scripts/e2e-bootstrap.sql
+    - name: Export local test credentials
+      shell: bash
+      run: |
+        supabase status -o json | node .github/scripts/e2e-env.cjs >> "$GITHUB_ENV"
