@@ -178,7 +178,7 @@ jobs:
       issues: write
     steps:
       - name: Deduplicate and create critical failure issue
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         with:
           script: |
             const TITLE_PREFIX = '🚨 Nightly backup FAILED';

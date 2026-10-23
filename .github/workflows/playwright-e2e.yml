@@ -146,7 +146,7 @@ jobs:
         run: supabase stop --no-backup
 
       - name: Create GitHub issue on nightly failure (deduped)
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         if: failure()
         with:
           script: |
