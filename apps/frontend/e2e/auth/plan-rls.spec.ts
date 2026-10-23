@@ -19,6 +19,7 @@ import { test as base, expect } from '@playwright/test';
 import { createE2eUser, makeE2eEmail, getAdminClient } from '../fixtures/admin';
 import { teardownTestUser } from '../helpers/provision-test-user';
 import { seedPlan, cleanupPlanData } from '../fixtures/plan-fixtures';
+import { sessionCookies } from '../fixtures/session-cookies';
 
 const PASSWORD = 'E2eTestPass!1';
 
@@ -55,22 +56,11 @@ async function injectAuthCookie(
     session.expires_at = Math.floor(Date.now() / 1000) + (session.expires_in ?? 3600);
   }
 
-  const ref = supabaseUrl.replace('https://', '').split('.')[0];
-  const cookieName = `sb-${ref}-auth-token`;
-  const cookieValue = 'base64-' + Buffer.from(JSON.stringify(session), 'utf-8').toString('base64url');
-
-  await context.addCookies([
-    {
-      name: cookieName,
-      value: cookieValue,
-      domain: 'localhost',
-      path: '/',
-      httpOnly: false,
-      secure: false,
-      sameSite: 'Lax',
-      expires: session.expires_at,
-    },
-  ]);
+  await context.addCookies(sessionCookies(
+    supabaseUrl,
+    process.env.BASE_URL || process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
+    session,
+  ));
 
   return session.access_token;
 }
@@ -113,12 +103,8 @@ base.describe('A5: /plan RLS isolation between households @plan-persistence @rls
     ]);
   });
 
-  // TODO(#485): plan-rls A5 isolation test fails — `Salary A` text not visible after seed.
-  // Likely root cause: /plan page renders income streams under a different label,
-  // inside a collapsed section, or the seed/cleanup flow needs adjustment. Quarantined
-  // to unblock PR #484 (universal Node 22 fix). Verified IN ISOLATION — all other
-  // plan-rls scenarios + all 21 smoke pages now pass.
-  base.fixme(
+  // #485: PlanEditor defaults to Accounts; seeded salaries live in the Income tab.
+  base(
     'A5: User B cannot see User A\'s plan items and vice versa @plan-persistence @rls',
     async ({ browser }) => {
       // Provision two independent users
@@ -155,7 +141,8 @@ base.describe('A5: /plan RLS isolation between households @plan-persistence @rls
       const pageA = await ctxA.newPage();
       await injectAuthCookie(ctxA, emailA);
       await pageA.goto('/plan');
-      await pageA.waitForLoadState('domcontentloaded');
+      await expect(pageA).toHaveURL(/\/plan$/);
+      await pageA.getByRole('button', { name: /^Income/ }).click();
       // User A sees their own salary
       await expect(pageA.getByText('Salary A')).toBeVisible({ timeout: 10_000 });
       // User A does NOT see User B's salary
@@ -167,7 +154,8 @@ base.describe('A5: /plan RLS isolation between households @plan-persistence @rls
       const pageB = await ctxB.newPage();
       await injectAuthCookie(ctxB, emailB);
       await pageB.goto('/plan');
-      await pageB.waitForLoadState('domcontentloaded');
+      await expect(pageB).toHaveURL(/\/plan$/);
+      await pageB.getByRole('button', { name: /^Income/ }).click();
       // User B sees their own salary
       await expect(pageB.getByText('Salary B')).toBeVisible({ timeout: 10_000 });
       // User B does NOT see User A's salary

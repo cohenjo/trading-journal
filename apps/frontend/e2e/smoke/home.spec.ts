@@ -1,7 +1,7 @@
 /**
  * Smoke: home page renders without errors.
  *
- * `/` redirects to `/summary` per Next.js root page.tsx.
+ * Anonymous `/` requests must reach `/signin?next=/`.
  * Tests verify:
  *   - No 5xx responses on any network request
  *   - No console errors
@@ -11,7 +11,7 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('smoke / home', () => {
-  test('GET / resolves (redirect to /summary) without 5xx or console errors @smoke', async ({ page }) => {
+  test('GET / requires sign-in without 5xx or console errors @smoke', async ({ page }) => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
 
@@ -27,11 +27,11 @@ test.describe('smoke / home', () => {
 
     const response = await page.goto('/');
 
-    // The root redirects to /summary — final response should be 2xx
-    expect(response?.status(), 'Expected 2xx after redirect').toBeLessThan(400);
-
-    // Should have landed on /summary (or at minimum not on an error page)
-    expect(page.url()).not.toContain('error');
+    expect(response?.status()).toBe(200);
+    await expect(page).toHaveURL(/\/signin\?next=/);
+    expect(new URL(page.url()).searchParams.get('next')).toBe('/');
+    await expect(page.getByRole('heading', { name: 'Trading Journal' })).toBeVisible();
+    expect(await page.title()).not.toBe('');
 
     // No 5xx from any resource
     expect(failedRequests, `5xx responses: ${failedRequests.join(', ')}`).toHaveLength(0);
@@ -46,9 +46,4 @@ test.describe('smoke / home', () => {
     await expect(page.locator('body')).not.toBeEmpty();
   });
 
-  test('page title is present @smoke', async ({ page }) => {
-    await page.goto('/');
-    const title = await page.title();
-    expect(title.length, 'Page should have a non-empty title').toBeGreaterThan(0);
-  });
 });
